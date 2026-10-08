@@ -152,7 +152,8 @@ function renderDetail() {
   box.classList.remove('hidden');
   box.innerHTML = `<h4>${esc(a.name)}</h4><div class="t">${esc(a.title || a.role)}</div>
     <p>Статус: <b>${STATUS[a.status] || esc(a.status)}</b></p><p>Модель: <b>${esc(a.model)}</b></p><p>Команда: <b>${esc(a.team)}</b></p>
-    <p>Задача: <b>${esc(a.task || '—')}</b></p><div class="bar"><i style="width:${Number(a.progress) || 0}%"></i></div>`;
+    <p>Задача: <b>${esc(a.task || '—')}</b></p><div class="bar"><i style="width:${Number(a.progress) || 0}%"></i></div>
+    <button class="btn-primary wide" id="openCfg" data-open="${esc(a.id)}">Промпт и навыки</button>`;
 }
 
 async function tick() {
@@ -190,3 +191,44 @@ setInterval(() => { $('clock').textContent = new Date().toLocaleString('ru'); },
 $('loginDuck').innerHTML = duckSVG({ color: '#E8A317', look: 'captain' }, { size: 72 });
 
 if (store.get().url && store.get().token) start(); else $('login').classList.remove('hidden');
+
+
+/* ---------- редактор промпта и навыков ---------- */
+let cfgId = null, cfgSkills = new Set();
+async function api(path, opts = {}) {
+  const { url, token } = store.get();
+  const r = await fetch(url + path, { ...opts, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, cache: 'no-store' });
+  if (!r.ok) throw new Error('API ' + r.status);
+  return r.json();
+}
+async function openConfig(id) {
+  const a = state.agents.find((x) => x.id === id); if (!a) return;
+  cfgId = id;
+  const c = await api('/api/agent-config?id=' + encodeURIComponent(id));
+  $('mAvatar').innerHTML = duckSVG(a, { size: 46 });
+  $('mTitle').textContent = a.name; $('mSub').textContent = a.title || a.role;
+  $('mPrompt').value = c.prompt ? c.prompt.body : '';
+  $('mVer').textContent = c.prompt ? 'Версия ' + c.prompt.version : '';
+  $('mMsg').textContent = '';
+  $('mHist').innerHTML = c.history.map((h) => `<li><b>v${h.version}</b> · ${new Date(h.ts).toLocaleString('ru')}<small>${esc(h.preview)}…</small></li>`).join('');
+  cfgSkills = new Set(c.skills.map((s) => s.id));
+  $('mSkills').innerHTML = c.allSkills.map((s) => `<label class="skill"><input type="checkbox" value="${esc(s.id)}" ${cfgSkills.has(s.id) ? 'checked' : ''}>
+    <span><b>${esc(s.name)}</b><small>${esc(s.description)}</small></span></label>`).join('');
+  $('modal').classList.remove('hidden');
+  $('mPrompt').focus();
+}
+function closeConfig() { $('modal').classList.add('hidden'); cfgId = null; }
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-open]'); if (b) openConfig(b.dataset.open).catch((er) => alert(er.message)); });
+$('mClose').onclick = closeConfig;
+$('modal').addEventListener('click', (e) => { if (e.target === $('modal')) closeConfig(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cfgId) closeConfig(); });
+$('mSave').onclick = async () => {
+  try { const r = await api('/api/prompt', { method: 'POST', body: JSON.stringify({ id: cfgId, body: $('mPrompt').value }) });
+    $('mMsg').textContent = 'Сохранено, версия ' + r.version; $('mVer').textContent = 'Версия ' + r.version; openConfig(cfgId); }
+  catch (e) { $('mMsg').textContent = 'Ошибка: ' + e.message; }
+};
+$('mSaveSkills').onclick = async () => {
+  const list = [...document.querySelectorAll('#mSkills input:checked')].map((i) => i.value);
+  try { await api('/api/agent-skills', { method: 'POST', body: JSON.stringify({ id: cfgId, skills: list }) }); $('mMsg').textContent = 'Навыки сохранены'; }
+  catch (e) { $('mMsg').textContent = 'Ошибка: ' + e.message; }
+};

@@ -68,6 +68,28 @@
   </aside>
 </div>
 
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+  <div class="modal-card">
+    <div class="m-head"><div id="mAvatar" class="av big"></div><div><h2 id="mTitle"></h2><div id="mSub" class="m-sub"></div></div>
+      <button id="mClose" class="btn-ghost" aria-label="Закрыть">✕</button></div>
+    <div class="m-body">
+      <section>
+        <label for="mPrompt" class="lbl">Системный промпт</label>
+        <textarea id="mPrompt" rows="11" spellcheck="false"></textarea>
+        <div class="m-row"><span id="mVer" class="m-sub"></span><span class="spacer"></span>
+          <button id="mSave" class="btn-primary">Сохранить</button></div>
+        <div id="mMsg" class="m-msg" role="status"></div>
+        <details><summary>История версий</summary><ul id="mHist" class="hist"></ul></details>
+      </section>
+      <section>
+        <div class="lbl">Навыки</div>
+        <div id="mSkills" class="skills"></div>
+        <div class="m-row"><span class="spacer"></span><button id="mSaveSkills" class="btn-primary">Сохранить навыки</button></div>
+      </section>
+    </div>
+  </div>
+</div>
+
 <script src="duck.js"></script>
 <script src="app.js"></script>
 </body>

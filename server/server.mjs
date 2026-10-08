@@ -39,6 +39,18 @@ CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, agent_id TEXT,
   level TEXT NOT NULL DEFAULT 'info', message TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS prompts (
+  agent_id TEXT PRIMARY KEY, body TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, updated_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS prompt_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL, ts INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS skills (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, body TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS agent_skills (
+  agent_id TEXT NOT NULL, skill_id TEXT NOT NULL, PRIMARY KEY (agent_id, skill_id)
+);
 CREATE TABLE IF NOT EXISTS scenes (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL,
   kind TEXT NOT NULL,            -- assign (Капитан выдаёт задачу) | chat (диалог двух агентов)
@@ -85,6 +97,41 @@ function seedIfEmpty() {
   for (const j of J) run('INSERT INTO jobs (source,title,company,url,salary,format,summary,fit,stage,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)', ...j, t, t);
 }
 seedIfEmpty();
+
+function seedPrompts() {
+  if (q('SELECT COUNT(*) c FROM prompts')[0].c) return;
+  const t = now();
+  const P = {
+    captain: `Ты Капитан Кряк, Chief of Staff в AI-офисе Ника (Николай Ахвледиани). Ты оркестратор: принимаешь цели от Ника, дробишь их на задачи и раздаёшь сотрудникам по очереди, собираешь результаты и докладываешь Нику кратко и по делу.
+Правила: отвечай по-русски; не принимай решений за Ника там, где нужно его согласие (отправка откликов, публикации, траты); сообщай Нику только о ключевых точках; ничего не выдумывай.`,
+    scout: `Ты Артём Следов, Job Scout. Ищешь вакансии по критериям Ника: AI Product Manager, AI Solutions Manager, Product Manager в AI/цифровых компаниях; только junior/associate/intern, опыт не более 3 лет. Зарубежом только удалёнка от $50 000/год; в РФ офис или гибрид (Москва) от 100 000 ₽, лучше 120 000 ₽.
+Ищи по списку площадок, отбрасывай неподходящие по уровню и зарплате, проверяй, что вакансия ещё открыта. Передавай Марии список подходящих со ссылками. Ничего не выдумывай.`,
+    analyst: `Ты Мария Лесникова, Vacancy Analyst. Для каждой вакансии от Артёма готовишь карточку: краткая сводка о компании, суть роли, формат работы, зарплата, насколько вакансия подходит Нику (с причинами), риски и вопросы. Только факты из источников, без домыслов. Карточку отправляешь Нику на согласование.`,
+    writer: `Ты Елена Перова, Cover Letter Writer. После одобрения вакансии Ником пишешь индивидуальное сопроводительное письмо под конкретную компанию: коротко, без шаблонных фраз, с опорой на реальные кейсы Ника (WorkFlow AI, 50+ AI-концепций в MGCOM, проекты) и ссылкой на его сайт nickakh.ru. Нельзя выдумывать опыт. Письмо отправляешь Нику на согласование.`,
+    sender: `Ты Роман Гонцов, Application Manager. Ты НЕ отправляешь отклики сам. Когда письмо одобрено, ты отправляешь Нику ссылку на вакансию и финальный текст письма, а также ведёшь статусы откликов (отправлен вручную, ответ, отказ, собеседование).`,
+    content: `Ты Алиса Постова, Content Editor. Готовишь посты для Telegram-каналов и блога Ника про ИИ и заработок с ИИ. Пишешь живо и по делу, в стиле канала, опираешься на проверенные источники. Публикуешь только после одобрения Ника. (Агент пока не подключён.)`,
+    research: `Ты Виктор Рынков, Market Researcher. Исследуешь рынок и спрос: проверка гипотез по WorkFlow AI, ниши для заработка на автоматизации, конкуренты. Все выводы с источниками, без выдумок. (Агент пока не подключён.)`,
+  };
+  for (const [id, body] of Object.entries(P)) {
+    run('INSERT INTO prompts (agent_id,body,version,updated_at) VALUES (?,?,?,?)', id, body, 1, t);
+    run('INSERT INTO prompt_history (agent_id,version,body,ts) VALUES (?,?,?,?)', id, 1, body, t);
+  }
+  const S = [
+    ['web-research', 'Веб-поиск и чтение страниц', 'Искать и читать страницы, извлекать факты со ссылками на источники.'],
+    ['job-filter', 'Фильтр вакансий', 'Отбор по уровню (junior/associate), опыту до 3 лет, формату и вилке зарплаты.'],
+    ['company-brief', 'Сводка о компании', 'Краткое описание компании: чем занимается, размер, продукт, свежие новости.'],
+    ['cover-letter', 'Сопроводительные письма', 'Персонализированные письма под компанию с реальными кейсами Ника.'],
+    ['telegram-notify', 'Уведомления в Telegram', 'Отправка карточек и писем Нику на согласование.'],
+    ['post-writing', 'Написание постов', 'Тексты для Telegram-каналов и блога в стиле канала.'],
+    ['market-research', 'Исследование рынка', 'Проверка спроса, конкуренты, ниши, с источниками.'],
+    ['task-planning', 'Планирование и распределение задач', 'Дробление цели на задачи и распределение между сотрудниками.'],
+  ];
+  for (const x of S) run('INSERT INTO skills (id,name,description) VALUES (?,?,?)', ...x);
+  const AS = { captain: ['task-planning', 'telegram-notify'], scout: ['web-research', 'job-filter'], analyst: ['web-research', 'company-brief', 'telegram-notify'],
+    writer: ['cover-letter'], sender: ['telegram-notify'], content: ['post-writing', 'web-research'], research: ['market-research', 'web-research'] };
+  for (const [a, list] of Object.entries(AS)) for (const sk of list) run('INSERT INTO agent_skills VALUES (?,?)', a, sk);
+}
+seedPrompts();
 
 // --- HTTP ---
 function cors(req, res) {
@@ -134,6 +181,35 @@ http.createServer(async (req, res) => {
     run('UPDATE agents SET status=COALESCE(?,status), task=COALESCE(?,task), progress=COALESCE(?,progress), updated_at=? WHERE id=?',
       b.status ?? null, b.task ?? null, b.progress ?? null, now(), b.id);
     if (b.log) run('INSERT INTO events (ts,agent_id,level,message) VALUES (?,?,?,?)', now(), b.id, b.level || 'info', b.log);
+    return json(res, 200, { ok: true });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/agent-config') {
+    const id = url.searchParams.get('id');
+    return json(res, 200, {
+      prompt: q('SELECT * FROM prompts WHERE agent_id=?', id)[0] || null,
+      history: q('SELECT version, ts, substr(body,1,160) preview FROM prompt_history WHERE agent_id=? ORDER BY version DESC LIMIT 20', id),
+      skills: q('SELECT s.* FROM skills s JOIN agent_skills a ON a.skill_id=s.id WHERE a.agent_id=?', id),
+      allSkills: q('SELECT id,name,description FROM skills ORDER BY name'),
+    });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/prompt') {
+    const b = await body(req);
+    const body_ = String(b.body || '').trim();
+    if (!b.id || !body_ || body_.length > 8000) return json(res, 400, { error: 'bad prompt' });
+    const cur = q('SELECT version FROM prompts WHERE agent_id=?', b.id)[0];
+    if (!cur) return json(res, 404, { error: 'no agent' });
+    const v = cur.version + 1;
+    run('UPDATE prompts SET body=?, version=?, updated_at=? WHERE agent_id=?', body_, v, now(), b.id);
+    run('INSERT INTO prompt_history (agent_id,version,body,ts) VALUES (?,?,?,?)', b.id, v, body_, now());
+    run('INSERT INTO events (ts,agent_id,level,message) VALUES (?,?,?,?)', now(), b.id, 'info', `Промпт обновлён (версия ${v})`);
+    return json(res, 200, { ok: true, version: v });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/agent-skills') {
+    const b = await body(req);
+    if (!b.id || !Array.isArray(b.skills)) return json(res, 400, { error: 'bad request' });
+    run('DELETE FROM agent_skills WHERE agent_id=?', b.id);
+    for (const sk of b.skills) run('INSERT OR IGNORE INTO agent_skills VALUES (?,?)', b.id, String(sk));
     return json(res, 200, { ok: true });
   }
   if (req.method === 'POST' && url.pathname === '/api/scene') {

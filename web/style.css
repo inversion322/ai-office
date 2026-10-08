@@ -125,3 +125,35 @@ button{cursor:pointer;font:inherit}
   .desk{width:24%}.actor{width:9%}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* утка: доп. анимации */
+.actor .tuft{transform-box:fill-box;transform-origin:20% 100%;animation:tuft 2.6s ease-in-out infinite}
+@keyframes tuft{50%{transform:rotate(14deg)}}
+.actor.walking .feet{animation:steps .35s infinite alternate}
+@keyframes steps{from{transform:translateY(0)}to{transform:translateY(-2px)}}
+.actor.waiting .wiggle{animation:sway 2.4s ease-in-out infinite}
+@keyframes sway{50%{transform:rotate(2.5deg)}}
+
+/* модальное окно */
+.modal{position:fixed;inset:0;background:#1f243066;backdrop-filter:blur(2px);display:grid;place-items:center;z-index:50;padding:16px}
+.modal-card{width:min(860px,100%);max-height:92vh;overflow:auto;background:var(--surface);border-radius:18px;box-shadow:0 20px 60px #0004;border:1px solid var(--line)}
+.m-head{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.m-head h2{font-size:18px;font-weight:800}.m-head>.btn-ghost{margin-left:auto}
+.m-sub{color:var(--accent-ink);font-weight:700;font-size:12px}
+.av.big{width:56px;height:56px}.av.big svg{width:46px}
+.m-body{display:grid;grid-template-columns:1.5fr 1fr;gap:22px;padding:18px 20px 22px}
+.lbl{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);font-weight:800;margin-bottom:6px}
+textarea{width:100%;border:1px solid var(--line2);border-radius:12px;padding:12px;font:13px/1.5 "JetBrains Mono",monospace;color:var(--ink);background:var(--surface2);resize:vertical}
+.m-row{display:flex;align-items:center;gap:10px;margin-top:10px}
+.btn-primary{background:var(--ink);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-weight:700}
+.btn-primary:hover{background:#000}.btn-primary.wide{width:100%;margin-top:10px}
+.m-msg{min-height:18px;font-size:12px;color:var(--ok);font-weight:700;margin-top:6px}
+details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-weight:700;font-size:12px}
+.hist{list-style:none;margin-top:6px;max-height:160px;overflow:auto}.hist li{padding:6px 0;border-bottom:1px solid var(--line);font-size:12px}
+.hist small{display:block;color:var(--mut)}
+.skills{display:grid;gap:6px}
+.skill{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line);border-radius:10px;cursor:pointer;background:var(--surface2)}
+.skill:has(input:checked){background:#FFF8E6;border-color:#F3D98F}
+.skill input{margin-top:3px;accent-color:var(--accent)}
+.skill b{display:block;font-size:12.5px}.skill small{display:block;color:var(--mut);font-size:11px;font-weight:500}
+@media(max-width:760px){.m-body{grid-template-columns:1fr}}
