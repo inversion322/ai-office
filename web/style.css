@@ -127,8 +127,6 @@ button{cursor:pointer;font:inherit}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* утка: доп. анимации */
-.actor .tuft{transform-box:fill-box;transform-origin:20% 100%;animation:tuft 2.6s ease-in-out infinite}
-@keyframes tuft{50%{transform:rotate(14deg)}}
 .actor.walking .feet{animation:steps .35s infinite alternate}
 @keyframes steps{from{transform:translateY(0)}to{transform:translateY(-2px)}}
 .actor.waiting .wiggle{animation:sway 2.4s ease-in-out infinite}
