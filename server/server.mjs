@@ -27,6 +27,7 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, team TEXT NOT NULL,
   model TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'idle',   -- idle | working | waiting | error | offline
+  title TEXT, look TEXT,
   task TEXT, progress INTEGER DEFAULT 0, color TEXT, desk INTEGER, updated_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS tasks (
@@ -37,6 +38,11 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, agent_id TEXT,
   level TEXT NOT NULL DEFAULT 'info', message TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS scenes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL,
+  kind TEXT NOT NULL,            -- assign (Капитан выдаёт задачу) | chat (диалог двух агентов)
+  from_id TEXT NOT NULL, to_id TEXT NOT NULL, text TEXT NOT NULL, ttl INTEGER DEFAULT 9000
 );
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT, title TEXT, company TEXT, url TEXT UNIQUE,
@@ -53,16 +59,17 @@ const run = (sql, ...a) => db.prepare(sql).run(...a);
 function seedIfEmpty() {
   if (q('SELECT COUNT(*) c FROM agents')[0].c) return;
   const t = now();
+  // id, имя, должность, команда, модель, статус, задача, прогресс, цвет, место, внешность
   const A = [
-    ['xenon', 'Xenon', 'Оркестратор', 'core', 'claude', 'working', 'Распределяю задачи между агентами', 60, '#7c5cff', 0],
-    ['scout', 'Scout', 'Поиск вакансий', 'jobs', 'claude', 'working', 'Сканирую Himalayas, Wellfound, hh.ru', 35, '#22d3ee', 1],
-    ['analyst', 'Analyst', 'Карточки вакансий', 'jobs', 'claude', 'waiting', 'Ждёт новых вакансий', 0, '#34d399', 2],
-    ['writer', 'Writer', 'Сопроводительные', 'jobs', 'claude', 'idle', 'Ждёт одобрения вакансий', 0, '#f59e0b', 3],
-    ['sender', 'Sender', 'Отправка откликов', 'jobs', 'claude', 'idle', 'Только после вашего подтверждения', 0, '#f43f5e', 4],
-    ['content', 'Content', 'Посты для каналов', 'content', 'claude', 'offline', 'Не подключён', 0, '#a78bfa', 5],
-    ['research', 'Research', 'Ресёрч рынка', 'research', 'claude', 'offline', 'Не подключён', 0, '#fb923c', 6],
+    ['captain', 'Капитан Кряк', 'Chief of Staff', 'core', 'claude', 'working', 'Распределяю задачи по команде', 60, '#E8A317', 0, 'captain'],
+    ['scout', 'Артём Следов', 'Job Scout', 'jobs', 'claude', 'working', 'Сканирую Himalayas, Wellfound, hh.ru', 35, '#2F80ED', 1, 'glasses'],
+    ['analyst', 'Мария Лесникова', 'Vacancy Analyst', 'jobs', 'claude', 'waiting', 'Ждёт новых вакансий', 0, '#27AE60', 2, 'tie'],
+    ['writer', 'Елена Перова', 'Cover Letter Writer', 'jobs', 'claude', 'idle', 'Ждёт одобрения вакансий', 0, '#9B51E0', 3, 'pen'],
+    ['sender', 'Роман Гонцов', 'Application Manager', 'jobs', 'claude', 'idle', 'Только после вашего подтверждения', 0, '#EB5757', 4, 'cap'],
+    ['content', 'Алиса Постова', 'Content Editor', 'content', 'claude', 'offline', 'Не подключена', 0, '#F2994A', 5, 'headset'],
+    ['research', 'Виктор Рынков', 'Market Researcher', 'research', 'claude', 'offline', 'Не подключён', 0, '#56CCF2', 6, 'bowtie'],
   ];
-  for (const a of A) run('INSERT INTO agents VALUES (?,?,?,?,?,?,?,?,?,?,?)', ...a, t);
+  for (const a of A) run('INSERT INTO agents (id,name,role,team,model,status,task,progress,color,desk,look,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', ...a, t);
   const T = [
     ['scout', 'Обход Himalayas, Wellfound, remotepmjobs', 'running'],
     ['scout', 'Обход hh.ru (Москва, гибрид/офис)', 'planned'],
@@ -70,7 +77,7 @@ function seedIfEmpty() {
     ['writer', 'Сопроводительное письмо под компанию', 'planned'],
   ];
   for (const x of T) run('INSERT INTO tasks (agent_id,title,status,scheduled_at) VALUES (?,?,?,?)', ...x, t + 600000);
-  run("INSERT INTO events (ts,agent_id,level,message) VALUES (?,?,?,?)", t, 'xenon', 'info', 'Офис запущен (тестовые данные)');
+  run("INSERT INTO events (ts,agent_id,level,message) VALUES (?,?,?,?)", t, 'captain', 'info', 'Офис запущен (тестовые данные)');
   const J = [
     ['Himalayas', 'AI Product Manager', 'Acme AI (демо)', 'https://example.com/1', '$55k–70k', 'Remote', 'Демо-карточка: вакансия для проверки интерфейса', 'Хороший матч по роли', 'review'],
     ['hh.ru', 'Менеджер AI-продуктов', 'Компания N (демо)', 'https://example.com/2', '120 000 ₽', 'Гибрид, Москва', 'Демо-карточка', 'Средний матч', 'found'],
@@ -118,6 +125,7 @@ http.createServer(async (req, res) => {
       tasks: q("SELECT t.*, a.name agent_name FROM tasks t LEFT JOIN agents a ON a.id=t.agent_id WHERE t.status IN ('running','planned') ORDER BY t.status DESC, t.scheduled_at LIMIT 50"),
       events: q('SELECT e.*, a.name agent_name FROM events e LEFT JOIN agents a ON a.id=e.agent_id ORDER BY e.id DESC LIMIT 60'),
       jobs, funnel: stages,
+      scenes: q('SELECT * FROM scenes WHERE ts + ttl > ? ORDER BY id', now()),
     });
   }
   // Агенты пишут сюда статус
@@ -126,6 +134,12 @@ http.createServer(async (req, res) => {
     run('UPDATE agents SET status=COALESCE(?,status), task=COALESCE(?,task), progress=COALESCE(?,progress), updated_at=? WHERE id=?',
       b.status ?? null, b.task ?? null, b.progress ?? null, now(), b.id);
     if (b.log) run('INSERT INTO events (ts,agent_id,level,message) VALUES (?,?,?,?)', now(), b.id, b.level || 'info', b.log);
+    return json(res, 200, { ok: true });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/scene') {
+    const b = await body(req);
+    run('INSERT INTO scenes (ts,kind,from_id,to_id,text,ttl) VALUES (?,?,?,?,?,?)', now(), b.kind || 'chat', b.from, b.to, b.text, b.ttl || 9000);
+    run('DELETE FROM scenes WHERE ts < ?', now() - 3600000);
     return json(res, 200, { ok: true });
   }
   if (req.method === 'POST' && url.pathname === '/api/job') {

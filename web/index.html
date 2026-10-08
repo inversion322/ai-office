@@ -4,34 +4,49 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- Вход: адрес API и токен хранятся только в вашем браузере -->
 <div id="login" class="login hidden">
   <form id="loginForm">
+    <div class="login-duck" id="loginDuck"></div>
     <h1>AI Office</h1>
-    <p>Введите адрес API и токен доступа</p>
-    <input id="apiUrl" placeholder="https://....trycloudflare.com" autocomplete="off" required>
-    <input id="apiToken" type="password" placeholder="Токен" autocomplete="off" required>
+    <p>Адрес API и токен хранятся только в вашем браузере</p>
+    <input id="apiUrl" placeholder="https://….trycloudflare.com" autocomplete="off" required>
+    <input id="apiToken" type="password" placeholder="Токен доступа" autocomplete="off" required>
     <button type="submit">Войти</button>
-    <div id="loginErr" class="err"></div>
+    <div id="loginErr" class="err" role="alert"></div>
   </form>
 </div>
 
 <div id="app" class="app hidden">
-  <main class="stage">
+  <main class="main">
     <header class="topbar">
-      <div class="brand">▣ AI OFFICE</div>
-      <div id="conn" class="conn off">● нет связи</div>
+      <div class="brand"><span class="brand-mark"></span>AI Office</div>
+      <div id="conn" class="conn off">нет связи</div>
+      <div class="spacer"></div>
       <div id="clock" class="clock"></div>
-      <button id="logout" class="ghost">Выйти</button>
+      <button id="logout" class="btn-ghost">Выйти</button>
     </header>
 
-    <section class="office" id="office">
-      <div class="wall-screen" id="funnel"></div>
-      <div class="room" id="room"></div>
+    <section class="floor-wrap">
+      <div class="floor" id="floor">
+        <div class="wall">
+          <div class="window"></div>
+          <div class="board" id="funnel"></div>
+          <div class="window"></div>
+          <div class="shelf"><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="rug"></div>
+        <div class="plant p1"></div><div class="plant p2"></div>
+        <div id="desks"></div>
+        <div id="actors"></div>
+        <div id="bubbles"></div>
+      </div>
     </section>
 
     <section class="bottom">
@@ -43,16 +58,17 @@
 
   <aside class="side">
     <div class="stats">
-      <div><b id="sTotal">0</b><span>Всего агентов</span></div>
-      <div><b id="sActive" class="g">0</b><span>Активных</span></div>
-      <div><b id="sWait" class="y">0</b><span>Ждут вас</span></div>
+      <div><b id="sTotal">0</b><span>Сотрудников</span></div>
+      <div><b id="sActive" class="ok">0</b><span>В работе</span></div>
+      <div><b id="sWait" class="warn">0</b><span>Ждут вас</span></div>
     </div>
     <ul id="agentList" class="agents"></ul>
     <div id="detail" class="detail hidden"></div>
-    <div class="hint">Кликни на агента для деталей</div>
+    <div class="hint">Нажмите на сотрудника, чтобы увидеть детали</div>
   </aside>
 </div>
 
+<script src="duck.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
