@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Office</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Вход: адрес API и токен хранятся только в вашем браузере -->
+<div id="login" class="login hidden">
+  <form id="loginForm">
+    <h1>AI Office</h1>
+    <p>Введите адрес API и токен доступа</p>
+    <input id="apiUrl" placeholder="https://....trycloudflare.com" autocomplete="off" required>
+    <input id="apiToken" type="password" placeholder="Токен" autocomplete="off" required>
+    <button type="submit">Войти</button>
+    <div id="loginErr" class="err"></div>
+  </form>
+</div>
+
+<div id="app" class="app hidden">
+  <main class="stage">
+    <header class="topbar">
+      <div class="brand">▣ AI OFFICE</div>
+      <div id="conn" class="conn off">● нет связи</div>
+      <div id="clock" class="clock"></div>
+      <button id="logout" class="ghost">Выйти</button>
+    </header>
+
+    <section class="office" id="office">
+      <div class="wall-screen" id="funnel"></div>
+      <div class="room" id="room"></div>
+    </section>
+
+    <section class="bottom">
+      <div class="panel"><h3>Запланировано</h3><ul id="tasks"></ul></div>
+      <div class="panel"><h3>Вакансии</h3><ul id="jobs"></ul></div>
+      <div class="panel"><h3>Журнал</h3><ul id="events" class="log"></ul></div>
+    </section>
+  </main>
+
+  <aside class="side">
+    <div class="stats">
+      <div><b id="sTotal">0</b><span>Всего агентов</span></div>
+      <div><b id="sActive" class="g">0</b><span>Активных</span></div>
+      <div><b id="sWait" class="y">0</b><span>Ждут вас</span></div>
+    </div>
+    <ul id="agentList" class="agents"></ul>
+    <div id="detail" class="detail hidden"></div>
+    <div class="hint">Кликни на агента для деталей</div>
+  </aside>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
