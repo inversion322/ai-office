@@ -6,7 +6,7 @@
 <title>AI Office</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Manrope:wght@500;600;700;800&family=Pixelify+Sans:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -35,16 +35,11 @@
 
     <section class="floor-wrap">
       <div class="floor" id="floor">
-        <div class="wall">
-          <div class="window"></div>
-          <div class="board" id="funnel"></div>
-          <div class="window"></div>
-          <div class="shelf"><i></i><i></i><i></i><i></i></div>
-        </div>
-        <div class="rug"></div>
-        <div class="plant p1"></div><div class="plant p2"></div>
+        <canvas id="cvBack" width="320" height="180"></canvas>
+        <div class="wall"><div class="board" id="funnel"></div></div>
         <div id="desks"></div>
         <div id="actors"></div>
+        <canvas id="cvFront" width="320" height="180"></canvas>
         <div id="bubbles"></div>
       </div>
     </section>
@@ -91,6 +86,7 @@
 </div>
 
 <script src="duck.js"></script>
+<script src="office.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
