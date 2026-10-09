@@ -71,36 +71,52 @@ function bubbleAt(id, text, label, cls = '') {
   $('bubbles').appendChild(b);
   return b;
 }
-async function walk(id, x, y) {
+const px2pct = (x, y) => [x / OW * 100, y / OH * 100];
+function curPos(id) { const e = actors[id].el; return [parseFloat(e.style.left), parseFloat(e.style.top)]; }
+async function moveTo(id, x, y) {
+  const el = actors[id].el, [cx, cy] = curPos(id);
+  const dist = Math.hypot((x - cx) / 100 * OW, (y - cy) / 100 * OH);
+  const ms = Math.max(450, Math.round(dist / 60 * 1000));
+  el.style.transition = `left ${ms}ms linear, top ${ms}ms linear`;
+  place(id, x, y);
+  await sleep(ms + 60);
+  el.style.transition = '';
+}
+// маршрут между кабинетами идёт через двери
+function routeBetween(fromRoom, toRoom) {
+  const pts = [];
+  if (fromRoom !== toRoom) {
+    if (fromRoom && ROOMS[fromRoom]) { pts.push(px2pct(...ROOMS[fromRoom].door.in), px2pct(...ROOMS[fromRoom].door.out)); }
+    if (toRoom && ROOMS[toRoom]) { pts.push(px2pct(...ROOMS[toRoom].door.out), px2pct(...ROOMS[toRoom].door.in)); }
+  }
+  return pts;
+}
+async function walkPath(id, pts) {
   const el = actors[id].el;
   el.classList.add('walking'); el.classList.remove('typing');
-  place(id, x, y);
-  await sleep(1500);
+  for (const [x, y] of pts) await moveTo(id, x, y);
   el.classList.remove('walking');
 }
 function visitSpot(toId) {
-  const h = actors[toId].home, dx = (28 / OW) * 100;
-  return [h[0] + (h[0] > 60 ? -dx : dx), h[1]];
+  const room = AGENT_ROOM[toId], h = actors[toId].home;
+  if (room === 'jobs') return [72 / OW * 100, h[1]];                       // проход между столами отдела
+  if (room === 'cap') return [h[0] - 30 / OW * 100, h[1]];
+  return [h[0], h[1] + 26 / OH * 100];                                      // у открытых столов встают спереди
 }
 async function playScene(sc) {
   const A = actors[sc.from_id], B = actors[sc.to_id];
   if (!A || !B) return;
   const nameOf = (id) => (state.agents.find((a) => a.id === id) || {}).name || id;
-  if (sc.kind === 'assign') {
-    // Капитан подходит к сотруднику, показывает задачу, возвращается на место
-    await walk(sc.from_id, ...visitSpot(sc.to_id));
-    const bub = bubbleAt(sc.from_id, sc.text, `Задача → ${nameOf(sc.to_id)}`, 'assign');
-    await sleep(Math.min(sc.ttl || 4500, 5000));
-    bub.remove();
-    await walk(sc.from_id, ...A.home);
-  } else {
-    // диалог: говорящий идёт к собеседнику, оба показывают облачко
-    await walk(sc.from_id, ...visitSpot(sc.to_id));
-    const b1 = bubbleAt(sc.from_id, sc.text, `${nameOf(sc.from_id)} → ${nameOf(sc.to_id)}`);
-    await sleep(Math.min(sc.ttl || 4500, 5000));
-    b1.remove();
-    await walk(sc.from_id, ...A.home);
-  }
+  const fromRoom = AGENT_ROOM[sc.from_id], toRoom = AGENT_ROOM[sc.to_id];
+  const spot = visitSpot(sc.to_id);
+  await walkPath(sc.from_id, [...routeBetween(fromRoom, toRoom), spot]);
+  A.el.classList.add('visiting');
+  const isAssign = sc.kind === 'assign';
+  const bub = bubbleAt(sc.from_id, sc.text, isAssign ? `Задача → ${nameOf(sc.to_id)}` : `${nameOf(sc.from_id)} → ${nameOf(sc.to_id)}`, isAssign ? 'assign' : '');
+  await sleep(Math.min(sc.ttl || 4500, 5000));
+  bub.remove();
+  await walkPath(sc.from_id, [...routeBetween(toRoom, fromRoom), A.home]);
+  A.el.classList.remove('visiting');
 }
 async function pump() {
   if (sceneRunning) return;
@@ -122,7 +138,7 @@ function render(s) {
   $('sWait').textContent = s.jobs.filter((j) => j.stage === 'review').length;
 
   const max = Math.max(1, ...STAGES.map(([k]) => s.funnel[k] || 0));
-  $('funnel').innerHTML = STAGES.map(([k, n]) => `<div class="f-col"><b>${s.funnel[k] || 0}</b><i style="height:${4 + ((s.funnel[k] || 0) / max) * 26}px"></i>${n}</div>`).join('');
+  $('funnel').innerHTML = '<div class="kpi-title">KPI · поиск работы</div><div class="kpi-cols">' + STAGES.map(([k, n]) => `<div class="f-col"><b>${s.funnel[k] || 0}</b><i style="height:${3 + ((s.funnel[k] || 0) / max) * 18}px"></i>${n}</div>`).join('') + '</div>';
 
   buildOffice(agents);
   drawOffice(agents, officeTick);

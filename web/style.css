@@ -151,3 +151,10 @@ details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-weight:700;f
 .actor.walking .wiggle{animation:waddle .3s ease-in-out infinite alternate!important}
 .actor.offline .eyes,.actor.offline .ripple{animation:none}
 .av .duck .wl,.login-duck .duck .wl{animation:none}
+
+/* KPI-табло в отделе поиска работы и подписи кабинетов */
+.board{left:3.4%;transform:none;width:34.6%;top:7%;height:80%;flex-direction:column;align-items:stretch;gap:2px}
+.kpi-title{font:700 9px "Pixelify Sans",sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#7A4E00;text-align:center;line-height:1}
+.kpi-cols{display:flex;gap:1%;align-items:flex-end;flex:1;min-height:0}
+.room-label{position:absolute;z-index:7;pointer-events:none;font:600 9px "Pixelify Sans",sans-serif;text-transform:uppercase;letter-spacing:.05em;color:#3A5568;background:#EAF4FA;border:2px solid #5F7F95;padding:0 5px 1px;box-shadow:0 2px 0 #0002}
+.actor.walking,.actor.visiting{z-index:8}
