@@ -79,8 +79,8 @@ button{cursor:pointer;font:inherit}
 .agents li{display:flex;gap:11px;padding:8px 10px;border:1px solid transparent;border-radius:12px;cursor:pointer;align-items:center}
 .agents li:hover{background:var(--surface2)}
 .agents li.sel{background:#FFF8E6;border-color:#F3D98F}
-.av{width:56px;height:56px;border-radius:12px;display:grid;place-items:center;flex:none;background:var(--surface2);border:1px solid var(--line);overflow:hidden}
-.av svg{width:48px;height:auto;margin-top:0}
+.av{width:64px;height:64px;border-radius:12px;display:grid;place-items:center;flex:none;background:var(--surface2);border:1px solid var(--line);overflow:hidden}
+.av svg{width:46px;height:auto;margin-top:0}
 .agents b{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:800}
 .agents small{color:var(--mut);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:215px;font-weight:600;font-size:11.5px}
 .agents .title{color:var(--accent-ink);font-weight:700}
@@ -106,7 +106,7 @@ button{cursor:pointer;font:inherit}
 .m-head{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
 .m-head h2{font-size:18px;font-weight:800}.m-head>.btn-ghost{margin-left:auto}
 .m-sub{color:var(--accent-ink);font-weight:700;font-size:12px}
-.av.big{width:84px;height:84px}.av.big svg{width:72px}
+.av.big{width:96px;height:96px}.av.big svg{width:68px}
 .m-body{display:grid;grid-template-columns:1.5fr 1fr;gap:22px;padding:18px 20px 22px}
 .lbl{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);font-weight:800;margin-bottom:6px}
 textarea{width:100%;border:1px solid var(--line2);border-radius:12px;padding:12px;font:13px/1.5 "JetBrains Mono",monospace;color:var(--ink);background:var(--surface2);resize:vertical}

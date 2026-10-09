@@ -66,7 +66,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function bubbleAt(id, text, label, cls = '') {
   const [x, y] = [parseFloat(actors[id].el.style.left), parseFloat(actors[id].el.style.top)];
   const b = document.createElement('div');
-  b.className = 'bubble ' + cls; b.style.left = x + '%'; b.style.top = (y - 19) + '%';
+  b.className = 'bubble ' + cls; b.style.left = x + '%'; b.style.top = (y - 24) + '%';
   b.innerHTML = (label ? `<small>${esc(label)}</small>` : '') + esc(text);
   $('bubbles').appendChild(b);
   return b;

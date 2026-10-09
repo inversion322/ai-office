@@ -18,12 +18,12 @@ function duckSVG(a, opts = {}) {
   }[mood];
 
   const acc = {
-    captain: `<path d="M16 18 Q32 1 48 18 L46 22 Q32 11 18 22Z" fill="${c}" stroke="#8a5a00" stroke-width="1.4"/><rect x="15" y="19" width="34" height="4.5" rx="2.2" fill="#8a5a00"/>
-              <circle cx="32" cy="10.5" r="3.6" fill="#fff" stroke="#8a5a00" stroke-width="1"/><path d="M32 7.6 l1 2.1 2.3.3-1.7 1.6.4 2.3-2-1.1-2 1.1.4-2.3-1.7-1.6 2.3-.3z" fill="${c}"/>`,
+    captain: `<g transform="translate(0,-9)"><path d="M16 18 Q32 1 48 18 L46 22 Q32 11 18 22Z" fill="${c}" stroke="#8a5a00" stroke-width="1.4"/><rect x="15" y="19" width="34" height="4.5" rx="2.2" fill="#8a5a00"/>
+              <circle cx="32" cy="10.5" r="3.6" fill="#fff" stroke="#8a5a00" stroke-width="1"/><path d="M32 7.6 l1 2.1 2.3.3-1.7 1.6.4 2.3-2-1.1-2 1.1.4-2.3-1.7-1.6 2.3-.3z" fill="${c}"/></g>`,
     glasses: `<g fill="rgba(255,255,255,.35)" stroke="${INK}" stroke-width="2.3"><circle cx="23.5" cy="27.5" r="7.6"/><circle cx="40.5" cy="27.5" r="7.6"/></g><path d="M16 25.5 l-4-2.5 M48 25.5 l4-2.5" stroke="${INK}" stroke-width="2"/>`,
     tie: `<path d="M32 48 l-4.2 3.6 4.2 12 4.2-12z" fill="${c}" stroke="#14532d" stroke-width="1.2"/><path d="M28.4 47.6h7.2l-1.6 3h-4z" fill="#14532d"/>`,
-    pen: `<path d="M17 16 q15-10 30 0 q-2 6.5-15 5.5 q-12.5 1-15-5.5z" fill="${c}" stroke="#5b2a86" stroke-width="1.4"/>`,
-    cap: `<path d="M16 21 Q32 2 48 21Z" fill="${c}" stroke="#7a1f1f" stroke-width="1.4"/><path d="M30 21 h23 q3 0 3 3 h-26z" fill="#7a1f1f"/>`,
+    pen: `<g transform="translate(0,-9)"><path d="M17 16 q15-10 30 0 q-2 6.5-15 5.5 q-12.5 1-15-5.5z" fill="${c}" stroke="#5b2a86" stroke-width="1.4"/></g>`,
+    cap: `<g transform="translate(0,-9)"><path d="M16 21 Q32 2 48 21Z" fill="${c}" stroke="#7a1f1f" stroke-width="1.4"/><path d="M30 21 h23 q3 0 3 3 h-26z" fill="#7a1f1f"/></g>`,
     headset: `<path d="M12 30 q0-21 20-21 t20 21" fill="none" stroke="${INK}" stroke-width="3.4" stroke-linecap="round"/><rect x="7" y="26" width="7.5" height="13" rx="3.7" fill="${c}" stroke="${INK}" stroke-width="1.3"/><rect x="49.5" y="26" width="7.5" height="13" rx="3.7" fill="${c}" stroke="${INK}" stroke-width="1.3"/><path d="M10 39 q2 10 18 11" fill="none" stroke="${INK}" stroke-width="2"/><circle cx="29" cy="50" r="2.8" fill="${INK}"/>`,
     bowtie: `<path d="M32 50 l-8.5-5v10z M32 50 l8.5-5v10z" fill="${c}" stroke="#155e75" stroke-width="1.2"/><circle cx="32" cy="50" r="2.6" fill="#155e75"/>`,
   }[a.look] || '';
@@ -32,7 +32,7 @@ function duckSVG(a, opts = {}) {
   const wl = raised ? ' transform="rotate(128)"' : '';
   const size = opts.size || 64;
 
-  return `<svg class="duck" viewBox="0 0 64 76" width="${size}" height="${size * 76 / 64}" aria-hidden="true">
+  return `<svg class="duck" viewBox="0 -11 64 87" width="${size}" height="${size * 87 / 64}" aria-hidden="true">
     <defs>
       <linearGradient id="${u}y" x1="0.2" y1="0" x2="0.5" y2="1"><stop offset="0" stop-color="#FFEB5E"/><stop offset=".6" stop-color="#FFD21F"/><stop offset="1" stop-color="#FFB800"/></linearGradient>
       <linearGradient id="${u}k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF8A30"/><stop offset="1" stop-color="#E8451A"/></linearGradient>
