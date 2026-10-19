@@ -18,7 +18,8 @@ async function speechSeconds(segments) {
   const tmp = path.join(ROOT, 'smm', 'runs', '_len'); fs.mkdirSync(tmp, { recursive: true });
   const t = path.join(tmp, 'script.txt'); fs.writeFileSync(t, segments.join('\n\n'), 'utf8');
   let r, m;
-  for (let i = 0; i < 2 && !m; i++) {   // сервис озвучки иногда отвечает отказом: один повтор поверх повторов внутри narrate.py
+  for (let i = 0; i < 3 && !m; i++) {   // сервис озвучки отвечает отказом пачками: повторы внутри narrate.py плюс ещё два захода с паузой
+    if (i) await new Promise((r) => setTimeout(r, 25000));
     r = spawnSync('C:/hf_tts/venv/Scripts/python.exe', [path.join(ROOT, 'video', 'narrate.py'), '--lang', 'ru', '--text', t, '--out', path.join(tmp, 'len.mp3'), '--max-sec', '999'], { encoding: 'utf8' });
     m = /duration:\s*([\d.]+)\s*s/.exec(r.stdout || '');
   }
