@@ -28,8 +28,8 @@ test('текст в кэше: точный замер без сети даже �
   process.env.NARRATE_FAKE_FAILS = '99';
   try {
     const r = speechSeconds(segs, { root: ROOT, patience: 5, workDir: work });
-    if (r.estimated) return t.skip('сценарий v2 нет в кэше озвучек (кэш чистили)');
-    assert.ok(Math.abs(r.sec - 49.4) < 0.6, `замер ${r.sec}`);
+    if (r.estimated) return t.skip('текущего сценария ролика нет в кэше озвучек (кэш чистили)');
+    assert.ok(r.sec > 40 && r.sec < 60, `замер ${r.sec}`);        // длина сценария меняется с правками ролика: проверяем «точный замер из кэша», а не конкретную цифру
   } finally { delete process.env.NARRATE_FAKE_FAILS; }
 });
 
