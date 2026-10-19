@@ -26,7 +26,8 @@ function keepAlive(name, cmd, args, opts, onLine) {
     procs[name] = p; if (name === 'tunnel') watch.startedAt = Date.now();
     const feed = (b) => b.toString().split(/\r?\n/).forEach((l) => l && onLine && onLine(l));
     p.stdout.on('data', feed); p.stderr.on('data', feed);
-    p.on('exit', (c) => { log(`${name}: выход ${c}, перезапуск через 5 с`); setTimeout(start, 5000); });
+    p.on('exit', (c) => { const wait = c === 0 ? 60000 : 5000;      // код 0 = «уже запущен другим экземпляром»: не спамить журнал каждые 5 с, но подхватить, если тот упадёт
+      log(`${name}: выход ${c}, перезапуск через ${wait / 1000} с`); setTimeout(start, wait); });
   };
   start();
 }

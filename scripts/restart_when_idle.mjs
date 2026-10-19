@@ -65,6 +65,8 @@ function readState() {
 const health = async (url, ms = 4000) => { const ac = new AbortController(); const t = setTimeout(() => ac.abort(), ms); try { return (await fetch(url, { signal: ac.signal, cache: 'no-store' })).status; } catch { return 0; } finally { clearTimeout(t); } };
 const tunnelFile = path.join(DATA, 'tunnel-url.txt');
 const supLog = path.join(DATA, 'supervisor.log');
+// Хвост файла с байтового смещения. Нельзя резать строку по размеру файла: в журнале кириллица (2 байта на символ), и срез по символам пропускал нужную строку.
+export const readFrom = (file, byteOffset = 0) => { try { return fs.readFileSync(file).subarray(byteOffset).toString('utf8'); } catch { return ''; } };
 const readUrl = () => { try { return fs.readFileSync(tunnelFile, 'utf8').trim(); } catch { return ''; } };
 
 const killPid = (pid) => { try { execFileSync('taskkill', ['/F', '/PID', String(pid)], { windowsHide: true, stdio: 'ignore' }); return true; } catch { return false; } };
@@ -118,7 +120,7 @@ async function restartSupervisor() {
     await sleep(3000); r = await launchAndWait(oldUrl);
   }
   const newSup = (() => { const o = portOwner(API_PORT); const p = o && procs().find((x) => x.ProcessId === o); return p ? p.ParentProcessId : null; })();
-  const tail = fs.existsSync(supLog) ? fs.readFileSync(supLog, 'utf8').slice(logSize) : '';
+  const tail = readFrom(supLog, logSize);
   const res = { ...r, newSup, oldUrl, tail, logSize };
   log(`итог подъёма: api=${r.apiOk} адрес=${r.newUrl || '—'} снаружи=${r.outside} супервизор=${newSup}`);
   return res;
@@ -144,7 +146,7 @@ async function verify(res) {
       await sleep(5000);
     }
     if (!btn) problems.push(`кнопка «Офис» в Telegram указывает не на новый адрес (${last})`);
-    const tail2 = fs.existsSync(supLog) ? fs.readFileSync(supLog, 'utf8').slice(res.logSize || 0) : res.tail;
+    const tail2 = readFrom(supLog, res.logSize || 0);
     if (!/кнопка Mini App обновлена/.test(tail2)) problems.push('в журнале супервизора нет «кнопка Mini App обновлена»');
   }
   return problems;
