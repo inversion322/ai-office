@@ -165,42 +165,79 @@ details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-weight:700;f
 .tab:hover{background:#FFF1CC}
 .tab.on{background:#E8A317;box-shadow:0 2px 0 #0003}
 
-/* чат с сотрудниками (выезжающая панель справа: офис остаётся виден) */
+/* нижний блок: чат с сотрудниками (слева) и «Сейчас в работе» (справа) */
 .chat-btn{position:relative;margin-right:8px}
-.badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:6px;border-radius:99px;background:#EB5757;color:#fff;font:700 11px/18px "Manrope",sans-serif;text-align:center}
-.chat{position:fixed;top:0;right:0;bottom:0;width:min(440px,100vw);z-index:60;display:flex;flex-direction:column;background:#FFF9E8;border-left:3px solid #3A2A1F;box-shadow:-6px 0 0 #0002;font-family:"Manrope",sans-serif}
-.chat.hidden{display:none}
-.chat-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:2px solid #3A2A1F;background:#FFE7A8}
-.chat-title{font:700 15px "Manrope",sans-serif;flex:1;color:#3A2A1F}
-.chat-tabs{display:flex;gap:6px;padding:8px 10px;overflow-x:auto;border-bottom:2px solid #E6E1D6;background:#FFF1CC;scrollbar-width:thin}
-.chat-tab{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:4px 10px 4px 5px;border:2px solid #3A2A1F;border-radius:99px;background:#fff;cursor:pointer;font:700 12px "Manrope",sans-serif;color:#3A2A1F;white-space:nowrap;position:relative}
-.chat-tab .av{width:24px;height:28px;overflow:hidden;display:block}
-.chat-tab .av svg{width:24px;height:auto;display:block;margin-top:-1px}
-.chat-tab.on{background:#E8A317}
-.chat-tab .dot{width:9px;height:9px;border-radius:50%;background:#EB5757;position:absolute;top:-3px;right:-2px;border:2px solid #fff}
-.chat-tab .cnt{background:#EB5757;color:#fff;border-radius:99px;padding:0 6px;font-size:11px;line-height:17px}
-.chat-log{flex:1;min-height:0;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;background:#F5F3EE}
-.msg{max-width:88%;padding:7px 10px;border:2px solid #3A2A1F;border-radius:12px;font-size:13px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere;background:#fff;color:#1F2430}
-.msg.nick{align-self:flex-end;background:#FFD67A;border-bottom-right-radius:3px}
-.msg.ag{align-self:flex-start;border-bottom-left-radius:3px}
-.msg .who{display:block;font:700 11px "Manrope",sans-serif;color:#7A4E00;margin-bottom:2px}
-.msg .meta{display:block;font-size:10.5px;color:#6B7280;margin-top:3px;text-align:right}
-.msg.action{align-self:stretch;max-width:100%;background:#fff;border-color:#E8A317;box-shadow:0 2px 0 #0002}
-.msg.action.done{border-color:#B8B3A3;background:#FAF8F3}
-.msg .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.msg .btns button{font:700 12px "Manrope",sans-serif;padding:6px 10px;border:2px solid #3A2A1F;border-radius:8px;background:#FFE7A8;color:#3A2A1F;cursor:pointer}
-.msg .btns button:hover{background:#E8A317}
-.msg .btns button:disabled{opacity:.5;cursor:default}
-.msg .answered{display:block;margin-top:8px;font:700 12px "Manrope",sans-serif;color:#1F9D63}
-.msg .rev{display:flex;gap:6px;margin-top:8px;flex-direction:column}
-.msg .rev textarea{width:100%;min-height:54px;border:2px solid #3A2A1F;border-radius:8px;padding:6px;font:13px "Manrope",sans-serif;resize:vertical}
-.chat-empty{margin:auto;color:#6B7280;font-size:13px;text-align:center;padding:20px}
-.chat-typing{min-height:18px;padding:0 14px 4px;font-size:12px;color:#6B7280;background:#F5F3EE}
-.chat-form{display:flex;gap:8px;padding:10px;border-top:2px solid #3A2A1F;background:#FFE7A8}
-.chat-form textarea{flex:1;resize:none;max-height:120px;border:2px solid #3A2A1F;border-radius:10px;padding:8px 10px;font:13px "Manrope",sans-serif;background:#fff}
-.chat-hint{padding:4px 12px 8px;font-size:10.5px;color:#6B7280;background:#FFE7A8}
-@media (max-width:760px){.chat{width:100vw;border-left:0}}
-
+.badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:6px;border-radius:99px;background:var(--err);color:#fff;font:700 11px/18px "Manrope",sans-serif;text-align:center}
+.dock{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:14px;flex:1 0 340px;min-height:340px}
+.bottom .panel{max-height:200px}
+.dock-col{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}
+.dock-head{display:flex;align-items:center;gap:8px;padding:11px 14px 6px}
+.dock-head h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);font-weight:800}
+.dock-head.sub{padding-top:10px;border-top:1px solid var(--line)}
+.dock-sub{font-size:11px;color:var(--mut);margin-left:auto;font-weight:500}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 #1F9D6366;animation:livepulse 1.8s infinite}
+@keyframes livepulse{0%{box-shadow:0 0 0 0 #1F9D6366}70%{box-shadow:0 0 0 7px #1F9D6300}100%{box-shadow:0 0 0 0 #1F9D6300}}
+.chat-pinned{margin:0 12px 6px;padding:6px 8px;border:1px solid #EBCB7A;background:#FFF8E6;border-radius:12px;max-height:46%;overflow-y:auto;overflow-x:hidden;display:grid;grid-template-columns:minmax(0,1fr);gap:6px;flex:none}
+.chat-pinned h4{font-size:10.5px;font-weight:800;color:var(--accent-ink);text-transform:uppercase;letter-spacing:.06em}
+.act{background:#fff;border:1px solid var(--line2);border-radius:9px;padding:5px 8px;min-width:0}
+.act-line{display:flex;align-items:center;gap:8px;min-width:0}
+.act.fresh{animation:fresh 1.2s ease-out 2}
+@keyframes fresh{0%,100%{box-shadow:0 0 0 0 #E8A31700}50%{box-shadow:0 0 0 4px #E8A31766}}
+.act-text{flex:1 1 auto;min-width:0;font-size:12.5px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+.act-text[data-more]{cursor:pointer}
+.act.open .act-text{white-space:pre-wrap;overflow:visible;overflow-wrap:anywhere}
+.act-btns{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;min-width:0}
+.act-more{background:none;border:0;color:var(--accent-ink);font:700 11px 'Manrope',sans-serif;padding:0;text-decoration:underline;flex:none}
+.act-meta{font-size:10.5px;color:var(--mut);flex:1 0 100%;display:none}
+.act.open .act-meta{display:block;margin-top:4px}
+.btns{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;min-width:0}
+.btns button{font:700 11.5px 'Manrope',sans-serif;padding:4px 9px;border:1px solid var(--line2);border-radius:7px;background:#fff;color:var(--ink)}
+.act-btns button{font:700 11.5px 'Manrope',sans-serif;padding:4px 9px;border:1px solid var(--line2);border-radius:7px;background:#fff;color:var(--ink)}
+.act-btns button:first-child,.btns button:first-child{background:var(--accent);border-color:var(--accent);color:var(--ink)}
+.btns button:hover,.act-btns button:hover{filter:brightness(.95)}
+.btns button:disabled,.act-btns button:disabled{opacity:.5;cursor:default}
+.rev textarea{width:100%;min-height:56px;margin-top:8px;border:1px solid var(--line2);border-radius:8px;padding:7px 9px;font:13px "Manrope",sans-serif;resize:vertical;background:var(--surface2)}
+.chat-top{padding:9px 12px 6px;gap:10px}
+.chat-tabs{display:flex;gap:5px;overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}
+.chat-tabs::-webkit-scrollbar{display:none}
+.chat-tab{flex:0 0 auto;display:flex;align-items:center;gap:5px;padding:2px;border:1px solid var(--line);border-radius:99px;background:var(--surface2);font:700 12px 'Manrope',sans-serif;color:var(--ink);white-space:nowrap;position:relative}
+.chat-tab .av{width:24px;height:24px;overflow:hidden;display:block;border-radius:50%;background:#fff}
+.chat-tab .av svg{width:24px;height:auto;display:block}
+.chat-tab.on{background:#FFF1CC;border-color:var(--accent);padding-right:10px}
+.chat-tab .dot{width:9px;height:9px;border-radius:50%;background:var(--err);position:absolute;top:-2px;right:-1px;border:2px solid #fff}
+.chat-log{flex:1;min-height:80px;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:7px;background:var(--surface2);border-top:1px solid var(--line)}
+.msg{max-width:86%;padding:7px 11px;border-radius:12px;font-size:13px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
+.msg.nick{align-self:flex-end;background:#FDEFC8;border:1px solid #EBCB7A;border-bottom-right-radius:3px}
+.msg.ag{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:3px}
+.msg.sys{align-self:center;max-width:94%;background:transparent;border:1px dashed var(--line2);color:var(--mut);font-size:12px}
+.msg .who{display:block;font:800 11px "Manrope",sans-serif;color:var(--accent-ink);margin-bottom:2px}
+.msg .meta{display:block;font-size:10.5px;color:var(--mut);margin-top:3px;text-align:right}
+.msg .answered{display:block;margin-top:6px;font:700 12px "Manrope",sans-serif;color:var(--ok)}
+.chat-empty{margin:auto;color:var(--mut);font-size:13px;text-align:center;padding:16px}
+.chat-typing{padding:0 14px;font-size:12px;color:var(--mut);background:var(--surface2);flex:none}
+.chat-typing:empty{display:none}
+.chat-typing:not(:empty){padding:2px 14px}
+.chat-form{display:flex;gap:8px;padding:8px 12px;border-top:1px solid var(--line);background:var(--surface);flex:none}
+.chat-form textarea{flex:1;resize:none;max-height:110px;border:1px solid var(--line2);border-radius:10px;padding:8px 11px;font:13px "Manrope",sans-serif;background:var(--surface2)}
+.live-now{padding:0 12px 6px;display:grid;grid-template-columns:minmax(0,1fr);gap:6px;max-height:58%;overflow-y:auto;overflow-x:hidden;flex:none}
+.live-card{display:grid;grid-template-columns:30px minmax(0,1fr);gap:8px;align-items:center;padding:4px 8px;border:1px solid #BCD3F8;background:#F2F7FF;border-radius:10px;cursor:pointer;min-width:0}
+.live-card.err{border-color:#F0B8B8;background:#FFF3F3}
+.live-card.wait{border-color:var(--line);background:var(--surface2)}
+.live-card .av{width:30px;height:30px;overflow:hidden;border-radius:50%;background:#fff}
+.live-card .av svg{width:30px;height:auto;display:block}
+.live-card b{font-size:12px;display:block;line-height:1.2}
+.live-card .t{font-size:11.5px;color:var(--ink);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.live-card .m{font-size:10.5px;color:var(--mut);font-family:"JetBrains Mono",monospace}
+.live-card .bar{margin-top:3px;height:4px}.live-card .bar i{background:var(--info)}
+.live-empty{padding:6px 14px 12px;font-size:12.5px;color:var(--mut)}
+.live-feed{list-style:none;overflow-y:auto;overflow-x:hidden;flex:1;min-height:60px;padding:2px 14px 10px}
+.live-feed li{display:grid;grid-template-columns:auto 1fr;gap:4px 8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px;line-height:1.35}
+.live-feed li:last-child{border:0}
+.live-feed time{font:500 10.5px "JetBrains Mono",monospace;color:var(--mut);padding-top:1px}
+.live-feed b{font-weight:800}
+.live-feed li.err{color:var(--err)}
+.live-feed li.new time::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:4px}
+@media (max-width:980px){.dock{grid-template-columns:1fr}.dock-col{min-height:380px}}
 /* постоянная подпись «над чем работает» (над рабочим местом) */
 .work-badge{position:absolute;transform:translate(-50%,-100%);max-width:170px;white-space:normal;background:#EAF2FF;border:2px solid #2F6FE4;border-radius:10px;padding:4px 9px 6px;font-size:11px;font-weight:700;line-height:1.25;color:#1F2430;box-shadow:0 3px 0 #0002;overflow:hidden;animation:pop .25s ease-out}
 .work-badge small{display:block;color:#2F6FE4;font-weight:800;font-size:9px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:1px}

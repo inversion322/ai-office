@@ -17,9 +17,12 @@ async function speechSeconds(segments) {
   const { spawnSync } = await import('node:child_process');
   const tmp = path.join(ROOT, 'smm', 'runs', '_len'); fs.mkdirSync(tmp, { recursive: true });
   const t = path.join(tmp, 'script.txt'); fs.writeFileSync(t, segments.join('\n\n'), 'utf8');
-  const r = spawnSync('C:/hf_tts/venv/Scripts/python.exe', [path.join(ROOT, 'video', 'narrate.py'), '--lang', 'ru', '--text', t, '--out', path.join(tmp, 'len.mp3'), '--max-sec', '999'], { encoding: 'utf8' });
-  const m = /duration:\s*([\d.]+)\s*s/.exec(r.stdout || '');
-  if (!m) throw new Error('не удалось измерить озвучку: ' + (r.stderr || r.stdout || '').slice(0, 300));
+  let r, m;
+  for (let i = 0; i < 2 && !m; i++) {   // сервис озвучки иногда отвечает отказом: один повтор поверх повторов внутри narrate.py
+    r = spawnSync('C:/hf_tts/venv/Scripts/python.exe', [path.join(ROOT, 'video', 'narrate.py'), '--lang', 'ru', '--text', t, '--out', path.join(tmp, 'len.mp3'), '--max-sec', '999'], { encoding: 'utf8' });
+    m = /duration:\s*([\d.]+)\s*s/.exec(r.stdout || '');
+  }
+  if (!m) throw new Error('не удалось измерить озвучку: ' + String(r.stderr || r.stdout || '').trim().split('\n').pop().slice(0, 200));
   return Number(m[1]);
 }
 const NOTE = (v) => { try { return JSON.parse(v.notes || '{}'); } catch { return {}; } };
@@ -192,4 +195,17 @@ const run = cmd === 'topics' ? topics(opt('--hint', all))
   : cmd === 'script' ? script(a1, opt('--comment', rest))
   : cmd === 'produce' ? produce(a1, opt('--comment', rest))
   : Promise.resolve(console.log('Команды: topics [--hint …] | script <id> [--comment …] | produce <id> [--comment …]'));
-run.catch((e) => { console.error('ОШИБКА:', e.message); process.exit(1); });
+run.catch(async (e) => {
+  const msg = String((e && e.message) || e).split('\n')[0].slice(0, 220);
+  console.error('ОШИБКА:', msg);
+  try {   // статусы не должны зависать «в работе», а Ник должен узнать о сбое и получить кнопку «Повторить»
+    const who = cmd === 'script' ? 'scriptwriter' : cmd === 'produce' ? 'video' : 'research';
+    const stage = { script: 'сценария', produce: 'монтажа', topics: 'поиска тем' }[cmd] || cmd;
+    await agent(who, 'error', 'Сбой: ' + msg, 0, `Сбой этапа ${stage}: ${msg}`, 'error');
+    if (cmd === 'script') { await agent('factcheck', 'idle', 'Ждёт сценарий на проверку', 0); }
+    if (cmd === 'topics') { await agent('virality', 'idle', 'Ждёт темы для оценки', 0); }
+    await agent('captain_smm', 'waiting', `Сбой этапа ${stage}, ждёт вашего решения`, 0, `Этап ${stage} остановился с ошибкой`, 'error');
+    await safeNotify(`⚠️ Этап ${stage} остановился с ошибкой: ${msg}\n\nЭто сбой на нашей стороне, ваши действия не нужны. Нажмите «Повторить», и я запущу этап заново.`, [[['Повторить', cmd === 'topics' ? 'more:0' : `retry:${a1}`]]]);
+  } catch (e2) { console.error('не удалось отметить сбой:', e2.message); }
+  process.exit(1);
+});

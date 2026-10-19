@@ -82,6 +82,13 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
   }
 
   /* ---------- выполнение действий (кнопки и подтверждённые предложения) ---------- */
+  // Решение принято: закрываем устаревшие открытые карточки с такими же кнопками (и в Telegram убираем кнопки), чтобы не запустить лишнее
+  function supersede(prefix) {
+    for (const o of q("SELECT id, tg_msg FROM messages WHERE kind='action' AND status='open' AND buttons LIKE ?", `%"d":"${prefix}%`)) {
+      run("UPDATE messages SET status='answered', choice='superseded', answered_ts=?, answered_via='system' WHERE id=?", now(), o.id);
+      if (o.tg_msg && !NO_TG) tg('editMessageReplyMarkup', { chat_id: chatId(), message_id: o.tg_msg, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    }
+  }
   async function execAction(data, comment, via, srcMsg) {
     const [act, idStr] = String(data).split(':'); const id = Number(idStr);
     const v = act === 'confirm' || act === 'cancel' ? null : (id ? q('SELECT * FROM videos WHERE id=?', id)[0] : null);
@@ -94,22 +101,32 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     if (act === 'cancel') { cap('Хорошо, не делаю.', false); return {}; }
     if (act === 'pick' && v) {
       for (const o of q("SELECT id FROM videos WHERE stage='scored' AND id<>?", id)) setStage(o.id, 'idea');
+      supersede('pick:'); supersede('more:');
       setStage(id, 'script'); setAgent('captain_smm', 'working', `Тема выбрана: ${v.title}`, `Ник выбрал тему «${v.title}»`);
       cap(`Тема выбрана: «${v.title}».\nКсения пишет сценарий, Вера проверит каждый факт. Пришлю результат сюда.`);
       spawnPipeline(['script', String(id)]);
     } else if (act === 'more') {
+      supersede('pick:'); supersede('more:');
       for (const o of q("SELECT id FROM videos WHERE stage='scored'")) setStage(o.id, 'rejected');
       cap('Хорошо, ищу другие темы. Пришлю новый список.'); spawnPipeline(['topics', '--hint', 'другие темы, не повторяя уже предложенные']);
     } else if (act === 'approve' && v) {
+      supersede(`approve:${id}`); supersede(`revise:${id}`);
       setStage(id, 'editing');
       cap(`Сценарий утверждён: «${v.title}».\nКирилл Кадров (Opus 5.5) озвучивает и монтирует, обычно около часа. Пришлю готовый ролик.`);
       spawnPipeline(['produce', String(id)]);
     } else if (act === 'revise' && v) {
-      if (comment && comment.trim()) { cap('Передала Ксении: исправит, Вера проверит заново.'); spawnPipeline(['script', String(id), '--comment', comment.trim()]); }
+      if (comment && comment.trim()) { supersede(`approve:${id}`); supersede(`revise:${id}`); cap('Передала Ксении: исправит, Вера проверит заново.'); spawnPipeline(['script', String(id), '--comment', comment.trim()]); }
       else { kvSet('awaiting', JSON.stringify({ kind: 'script', id })); cap('Напишите одним сообщением, что поправить в сценарии (здесь или в Telegram). Ксения исправит и Вера проверит заново.'); }
     } else if (act === 'accept' && v) {
       setStage(id, 'approved'); setAgent('captain_smm', 'idle', 'Ролик принят, ждёт вашей публикации', `Ник принял ролик «${v.title}»`);
       cap('Ролик принят. Публикуете вы сами, когда готовы.');
+    } else if (act === 'resume') {
+      const dir = path.join(ROOT, 'video', 'med_detective'); const out = fs.openSync(path.join(dir, 'dosie01', '_run_v2b_log.txt'), 'a');
+      spawn(HERMES, ['-p', 'video', 'chat', '--query-file', 'dosie01/BRIEF_v2b.md', '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: dir, detached: true, stdio: ['ignore', out, out], windowsHide: true }).unref();
+      cap('Запустила Кирилла заново: он продолжит по сохранённым файлам. Ход работы виден справа в «Сейчас в работе».');
+    } else if (act === 'retry' && v) {
+      if (v.stage === 'editing') { cap(`Запускаю монтаж заново: «${v.title}».`); spawnPipeline(['produce', String(id)]); }
+      else { setStage(id, 'script'); cap(`Запускаю сценарий заново: «${v.title}».`); spawnPipeline(['script', String(id)]); }
     } else if (act === 'reject' && v) {
       setStage(id, 'rejected'); cap('Тема отклонена.');
     } else return { note: 'неизвестное действие' };
@@ -214,47 +231,87 @@ ${c.hist}
 
 
   /* ---------- сторож реальной работы: статус сотрудника не расходится с процессами на ПК ----------
-     Пока на ПК жив процесс `hermes … -p video … BRIEF*.md` (Кирилл), он показывается рабочим, даже если задачу запустили
-     вручную, а не через конвейер. Задача берётся из строки в первом абзаце BRIEF (или из имени файла), прогресс от времени. */
-  const WATCH = [{ id: 'video', re: /hermes\.exe"?\s+-p\s+video\b.*?(BRIEF[\w.-]*\.md)/i, label: 'Монтаж ролика' }];
-  const seenRun = new Map();
+     Пока на ПК жив процесс `hermes … -p video … BRIEF*.md` (Кирилл, запущенный не через конвейер), он показывается рабочим.
+     Живой лог: шаги модели из лога профиля, новые/изменённые файлы проекта, строки PROGRESS.md.
+     Завершение: есть итоговый mp4 → ролик уходит Нику в Telegram с кнопкой «Принять»; нет mp4 → статус «ошибка» и сообщение. */
+  const VIDEO_JOB = { agent: 'video', videoId: 1, dir: path.join(ROOT, 'video', 'med_detective', 'dosie01'), out: 'final/dosie01_v2.mp4' };
+  const PROC_RE = /hermes\.exe"?\s+-p\s+video\b.*?(BRIEF[\w.-]*\.md)/i;
+  const AGENT_LOG = path.join(process.env.LOCALAPPDATA || '', 'hermes', 'profiles', 'video', 'logs', 'agent.log');
+  const W = { pid: null, started: 0, lastScan: 0, lastProgress: '', steps: 0 };
+  const evt = (agent, msg, level = 'info') => { if (q('SELECT 1 FROM events WHERE agent_id=? AND message=? AND ts>?', agent, msg, now() - 15 * 60e3).length) return; run('INSERT INTO events (ts,agent_id,level,message) VALUES (?,?,?,?)', now(), agent, level, msg); };   // без дублей после перезапуска API
   function listProcs() {
     return new Promise((resolve) => {
-      const p = spawn('powershell.exe', ['-NoProfile', '-Command', "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'hermes' -and $_.CommandLine -match '-p ' } | ForEach-Object { $_.ProcessId.ToString() + '|' + $_.CreationDate.ToString('o') + '|' + $_.CommandLine }"], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      const p = spawn('powershell.exe', ['-NoProfile', '-Command', "Get-CimInstance Win32_Process -Filter \"Name='hermes.exe'\" | ForEach-Object { $_.ProcessId.ToString() + '|' + $_.CreationDate.ToString('o') + '|' + $_.CommandLine }"], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
       let o = ''; p.stdout.on('data', (b) => (o += b)); p.on('exit', () => resolve(o.split(/\r?\n/).filter(Boolean))); p.on('error', () => resolve([]));
     });
   }
-  function briefTask(file) {
-    try {
-      const t = fs.readFileSync(file, 'utf8');
-      const h = /^#\s*(.+)$/m.exec(t); if (h) return h[1].replace(/^Задание[^:]*:\s*/i, '').slice(0, 120);
-    } catch {}
-    return null;
+  const tailOf = (f, bytes = 70000) => { try { const fd = fs.openSync(f, 'r'); const st = fs.fstatSync(fd); const len = Math.min(bytes, st.size); const buf = Buffer.alloc(len); fs.readSync(fd, buf, 0, len, st.size - len); fs.closeSync(fd); return buf.toString('utf8'); } catch { return ''; } };
+  const briefTask = (file) => { try { const h = /^#\s*(.+)$/m.exec(fs.readFileSync(file, 'utf8')); if (h) return h[1].replace(/^Задание[^:]*:\s*/i, '').slice(0, 120); } catch {} return null; };
+  function modelSteps(since) {          // «API call #N» и последний инструмент из лога профиля video, только записи новее старта процесса
+    let steps = 0, lastTool = '';
+    for (const l of tailOf(AGENT_LOG).split(/\r?\n/)) {
+      const m = /^(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d),\d+ .*?(API call #(\d+)|tool (\w+) completed \(([\d.]+)s)/.exec(l); if (!m) continue;
+      if (Date.parse(`${m[1]}T${m[2]}`) < since - 5000) continue;
+      if (m[4]) steps = Math.max(steps, Number(m[4])); else if (m[5]) lastTool = `${m[5]} ${m[6]} с`;
+    }
+    return { steps, lastTool };
+  }
+  function scanFiles(since) {           // что изменилось в проекте ролика после прошлой проверки
+    const out = [];
+    const walk = (d, depth) => { let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of ents) { const f = path.join(d, e.name); if (e.isDirectory()) { if (depth < 2 && !/^(v1_archive|node_modules|frames|\.)/.test(e.name)) walk(f, depth + 1); }
+        else if (!/^(_run|PROGRESS)/.test(e.name)) { try { const st = fs.statSync(f); if (st.mtimeMs > since) out.push(path.relative(VIDEO_JOB.dir, f).replace(/\\/g, '/')); } catch {} } } };
+    walk(VIDEO_JOB.dir, 0); return out;
+  }
+  async function sendVideo(file, caption, buttons) {
+    const t = cfg().smmBotToken; if (!t || NO_TG) return null;
+    const fd = new FormData(); fd.append('chat_id', String(chatId())); fd.append('caption', caption.slice(0, 1000)); fd.append('supports_streaming', 'true');
+    const kb = kbOf(JSON.stringify(buttons.map((row) => row.map((x) => ({ t: x[0], d: x[1] }))))); if (kb) fd.append('reply_markup', JSON.stringify(kb));
+    fd.append('video', new Blob([fs.readFileSync(file)], { type: 'video/mp4' }), path.basename(file));
+    const r = await (await fetch(`https://api.telegram.org/bot${t}/sendVideo`, { method: 'POST', body: fd })).json();
+    return r.ok ? r.result.message_id : null;
+  }
+  async function finishVideoJob(ag) {
+    const mp4 = path.join(VIDEO_JOB.dir, VIDEO_JOB.out);
+    let ok = false, draft = false; try { ok = fs.statSync(mp4).mtimeMs > Date.now() - 3 * 3600e3; } catch {}
+    if (ok) { try { ok = fs.statSync(path.join(VIDEO_JOB.dir, 'RESULT_v2.md')).mtimeMs > Date.now() - 3 * 3600e3; } catch { ok = false; draft = true; } }
+    if (!ok) {
+      run('UPDATE agents SET status=?, task=?, progress=?, updated_at=? WHERE id=?', 'error', draft ? 'Остановился: есть черновой рендер, но без финальной проверки' : 'Остановился без результата: ролика v2 нет', 0, now(), VIDEO_JOB.agent);
+      evt(VIDEO_JOB.agent, draft ? 'Процесс остановился: есть черновой рендер, отчёта и финальной проверки нет' : 'Процесс монтажа остановился, итогового ролика нет', 'error');
+      post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: draft ? '⚠️ Кирилл остановился: черновой рендер v2 есть, но финальной проверки и отчёта нет, отдавать его на приёмку рано. Рабочие файлы сохранены, он продолжит с того места. Запустить заново?' : '⚠️ Кирилл остановился, и ролика v2 нет. Его рабочие файлы сохранены, он продолжит с того места. Запустить заново?', buttons: [[{ t: 'Запустить Кирилла заново', d: `resume:${VIDEO_JOB.videoId}` }]], mirrorTg: true });
+      return;
+    }
+    run('UPDATE agents SET status=?, task=?, progress=?, updated_at=? WHERE id=?', 'idle', 'Ролик v2 готов, ждёт вашего просмотра', 100, now(), VIDEO_JOB.agent);
+    evt(VIDEO_JOB.agent, 'Ролик v2 собран: ' + VIDEO_JOB.out);
+    let len = ''; try { len = fs.readFileSync(path.join(VIDEO_JOB.dir, 'RESULT_v2.md'), 'utf8').slice(0, 600); } catch {}
+    const caption = `🎬 Ролик №1 v2 готов (до 59 с, динамичнее). Посмотрите и скажите, принимаем ли.\n${len}`;
+    const buttons = [[['Принять ролик', `accept:${VIDEO_JOB.videoId}`]]];
+    let mid = null; try { mid = await sendVideo(mp4, caption, buttons); } catch (e) { console.error('sendVideo', e.message); }
+    post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: `🎬 Ролик №1 v2 готов: ${path.relative(ROOT, mp4)}${mid ? '\n(файл отправлен вам в Telegram)' : '\n(файл лежит на ПК, в Telegram отправить не удалось)'}\n${len}\nЕсли нужны правки, напишите Кириллу в чате.`, buttons: buttons.map((r) => r.map((x) => ({ t: x[0], d: x[1] }))), tgMsg: mid, mirrorTg: !mid });
+    run('UPDATE agents SET status=?, task=?, updated_at=? WHERE id=?', 'waiting', 'Ждёт вашего решения по ролику №1 v2', now(), 'captain_smm');
   }
   async function watchTick() {
-    const lines = await listProcs();
-    for (const w of WATCH) {
-      const hit = lines.map((l) => { const [pid, cd, ...cmd] = l.split('|'); return { pid, started: Date.parse(cd) || now(), cmd: cmd.join('|') }; })
-        .find((x) => w.re.test(x.cmd) && !/powershell|Get-CimInstance|bash\.exe|python/i.test(x.cmd.slice(0, 160)));
-      const ag = q('SELECT status,task FROM agents WHERE id=?', w.id)[0]; if (!ag) continue;
-      if (hit) {
-        const m = w.re.exec(hit.cmd);
-        const file = m && path.join(ROOT, 'video', 'med_detective', 'dosie01', m[1]);
-        const task = (file && briefTask(file)) || w.label;
-        const mins = Math.round((now() - hit.started) / 60000);
-        const pr = Math.min(90, 10 + Math.round(mins * 1.1));
-        const key = `${hit.pid}`;
-        if (ag.status !== 'working' || !String(ag.task).includes('⏱') ) {
-          run('UPDATE agents SET status=?, task=?, progress=?, updated_at=? WHERE id=?', 'working', `${task} ⏱ ${mins} мин`, pr, now(), w.id);
-        } else run('UPDATE agents SET task=?, progress=?, updated_at=? WHERE id=?', `${task} ⏱ ${mins} мин`, pr, now(), w.id);
-        if (!seenRun.has(key)) { seenRun.set(key, true); run('INSERT INTO events (ts,agent_id,level,message) VALUES (?,?,?,?)', now(), w.id, 'info', `Начал работу: ${task}`); }
-      } else if (ag.status === 'working' && String(ag.task).includes('⏱')) {
-        run('UPDATE agents SET status=?, task=?, progress=?, updated_at=? WHERE id=?', 'idle', 'Работа завершена, ждёт проверки результата', 100, now(), w.id);
-        run('INSERT INTO events (ts,agent_id,level,message) VALUES (?,?,?,?)', now(), w.id, 'info', 'Процесс монтажа завершился. Проверьте итог');
-      }
+    const procs = (await listProcs()).map((l) => { const [pid, cd, ...cmd] = l.split('|'); return { pid, started: Date.parse(cd) || now(), cmd: cmd.join('|') }; });
+    const hit = procs.find((x) => PROC_RE.test(x.cmd));
+    const ag = q('SELECT status,task FROM agents WHERE id=?', VIDEO_JOB.agent)[0]; if (!ag) return;
+    if (hit) {
+      const file = path.join(VIDEO_JOB.dir, PROC_RE.exec(hit.cmd)[1]);
+      const task = briefTask(file) || 'Монтаж ролика';
+      const mins = Math.round((now() - hit.started) / 60000);
+      if (W.pid !== hit.pid) { Object.assign(W, { pid: hit.pid, started: hit.started, lastScan: hit.started, lastProgress: '', steps: 0 }); evt(VIDEO_JOB.agent, `Начал работу: ${task}`); }
+      const { steps, lastTool } = modelSteps(hit.started);
+      if (steps && steps !== W.steps) W.steps = steps;
+      const files = scanFiles(W.lastScan); W.lastScan = now() - 1000;
+      if (files.length) evt(VIDEO_JOB.agent, `Обновил файлы: ${files.slice(0, 4).join(', ')}${files.length > 4 ? ` и ещё ${files.length - 4}` : ''}`);
+      try { const last = fs.readFileSync(path.join(VIDEO_JOB.dir, 'PROGRESS.md'), 'utf8').split(/\r?\n/).map((s) => s.trim()).filter(Boolean).pop();
+        if (last && last !== W.lastProgress) { W.lastProgress = last; evt(VIDEO_JOB.agent, last.slice(0, 220)); } } catch {}
+      const pr = Math.min(92, 8 + Math.round(mins * 1.2));
+      run('UPDATE agents SET status=?, task=?, progress=?, updated_at=? WHERE id=?', 'working', `${task} ⏱ ${mins} мин${W.steps ? ` · шаг ${W.steps}` : ''}`, pr, now(), VIDEO_JOB.agent);
+    } else if (ag.status === 'working' && String(ag.task).includes('⏱')) {
+      W.pid = null; await finishVideoJob(ag);
     }
   }
-  if (!process.env.OFFICE_NO_WATCH) { setInterval(() => watchTick().catch(() => {}), 20000); setTimeout(() => watchTick().catch(() => {}), 3000); }
+  if (!process.env.OFFICE_NO_WATCH) { setInterval(() => watchTick().catch((e) => console.error('watch', e.message)), 15000); setTimeout(() => watchTick().catch(() => {}), 3000); }
 
   /* ---------- HTTP ---------- */
   async function handle(req, res, url, body, json) {

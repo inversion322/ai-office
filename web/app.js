@@ -1,5 +1,5 @@
 // AI Office: фронтенд. Опрос API каждые 15 с, анимация сцен на клиенте.
-const POLL_MS = 15000;
+const POLL_MS = 5000;
 const STATUS = { working: 'работает', waiting: 'ждёт', idle: 'свободен', error: 'ошибка', offline: 'отключён' };
 const STAGES = [['found', 'Найдено'], ['review', 'Review'], ['approved', 'Одобрено'], ['letter', 'Письмо'], ['applied', 'Отправлено'], ['reply', 'Ответ']];
 // Конвейер роликов (офис Nick G SMM)

@@ -53,6 +53,25 @@
       <div class="panel"><h3 id="listTitle">Вакансии</h3><ul id="jobs"></ul></div>
       <div class="panel"><h3>Журнал</h3><ul id="events" class="log"></ul></div>
     </section>
+
+    <section class="dock" id="dock" aria-label="Чат и ход работы">
+      <div class="dock-col dock-chat">
+        <header class="dock-head chat-top"><h3 title="Переписка общая с Telegram-ботом @NickG_smm_bot">Чат</h3><nav class="chat-tabs" id="chatTabs" aria-label="Собеседники"></nav></header>
+        <div id="chatPinned" class="chat-pinned hidden" aria-live="polite"></div>
+        <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
+        <div class="chat-typing" id="chatTyping"></div>
+        <form class="chat-form" id="chatForm">
+          <textarea id="chatInput" rows="1" placeholder="Напишите сотруднику…" maxlength="2000" aria-label="Сообщение"></textarea>
+          <button class="btn-primary" type="submit" id="chatSend">Отправить</button>
+        </form>
+      </div>
+      <div class="dock-col dock-live">
+        <header class="dock-head"><h3>Сейчас в работе</h3><span class="live-dot" title="обновляется автоматически"></span><span class="dock-sub" id="liveCount"></span></header>
+        <div id="liveNow" class="live-now"></div>
+        <header class="dock-head sub"><h3>Лента работ</h3><span class="dock-sub">что происходит прямо сейчас</span></header>
+        <ul id="liveFeed" class="live-feed"></ul>
+      </div>
+    </section>
   </main>
 
   <aside class="side">
@@ -90,20 +109,6 @@
 </div>
 
 
-<aside id="chat" class="chat hidden" aria-label="Чат с сотрудниками">
-  <header class="chat-head">
-    <div class="chat-title" id="chatTitle">Чат</div>
-    <button id="chatClose" class="btn-ghost" type="button" aria-label="Закрыть чат">✕</button>
-  </header>
-  <nav class="chat-tabs" id="chatTabs" aria-label="Собеседники"></nav>
-  <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
-  <div class="chat-typing" id="chatTyping"></div>
-  <form class="chat-form" id="chatForm">
-    <textarea id="chatInput" rows="1" placeholder="Напишите сотруднику…" maxlength="2000"></textarea>
-    <button class="btn-primary" type="submit" id="chatSend">Отправить</button>
-  </form>
-  <div class="chat-hint">Enter отправляет, Shift+Enter новая строка. Переписка общая с Telegram-ботом @NickG_smm_bot.</div>
-</aside>
 
 <script src="duck.js"></script>
 <script src="office.js"></script>
