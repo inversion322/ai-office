@@ -66,3 +66,15 @@ test('какие кнопки просят текст: правки обязат
   for (const x of ['accept:1', 'pick:2', 'more:0', 'retry:3', 'approve:3', 'reject:3', '', null]) assert.equal(C.commentMode(x).ask, false, String(x));
   assert.match(C.commentMode('rework:1').sub, /приоритет/);
 });
+
+test('«✖ Убрать» отделяется от обычных кнопок (в карточке хранится как кнопка, на странице отдельный элемент)', () => {
+  const real = [[{ t: 'Принять ролик', d: 'accept:1' }, { t: 'Внести правки', d: 'rework:1' }], [{ t: '✖ Убрать', d: 'dismiss:0' }]];
+  const s = C.splitButtons(real); assert.deepEqual(s.main.map((x) => x.d), ['accept:1', 'rework:1']); assert.equal(s.dismiss, true);
+  assert.deepEqual(C.splitButtons([[{ t: 'Да', d: 'y' }]]), { main: [{ t: 'Да', d: 'y' }], dismiss: false }); assert.deepEqual(C.splitButtons(null), { main: [], dismiss: false });
+  assert.equal(C.isDismiss('dismiss:0'), true); assert.equal(C.isDismiss('accept:1'), false); assert.equal(C.isDismiss(null), false);
+  assert.equal(C.commentMode('dismiss:0').ask, false, 'убрать и перегенерировать не спрашивают текст'); assert.equal(C.commentMode('regen:3').ask, false);
+});
+test('кнопка сброса статуса есть только у ждущего и у сотрудника в ошибке, у работающего и свободного её нет', () => {
+  assert.equal(C.clearLabel('waiting'), 'Снять ожидание'); assert.equal(C.clearLabel('error'), 'Сбросить ошибку');
+  for (const s of ['working', 'idle', 'offline', '', null, undefined]) assert.equal(C.clearLabel(s), '');
+});

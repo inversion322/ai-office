@@ -67,6 +67,12 @@
     return who ? list.filter((m) => m.thread === who) : list;
   }
 
+  // «✖ Убрать» хранится в карточке как обычная кнопка (так она есть и в Telegram), но на странице это отдельный малозаметный элемент: рядом с «Принять» её не должно быть.
+  const isDismiss = (d) => /^dismiss:/.test(String(d || ''));
+  function splitButtons(b) { const all = normButtons(b); return { main: all.filter((x) => !isDismiss(x.d)), dismiss: all.some((x) => isDismiss(x.d)) }; }
+  // Ручной сброс статуса сотрудника доступен только когда он «ждёт» или в «ошибке»: работающего сбрасывать нельзя.
+  const clearLabel = (status) => (status === 'waiting' ? 'Снять ожидание' : status === 'error' ? 'Сбросить ошибку' : '');
+
   // Какие кнопки просят текст. Совпадает с тем, как их разбирает сервер (lib_chat.mjs execAction):
   //  rework/revise  — без текста сервер не продолжит («Напишите, что поправить»), значит текст обязателен;
   //  package        — «Другое название»: можно с пожеланием («короче»), можно без него.
@@ -88,6 +94,6 @@
   // Безопасный текст в HTML: страница строится из ответов сервера, в них не должно быть исполняемой разметки.
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  const api = { parseApi, gateFor, statusText, ago, targetFor, pendingCards, normButtons, squash, threadFilter, isMine, commentMode, esc, STATUS };
+  const api = { parseApi, gateFor, statusText, ago, targetFor, pendingCards, normButtons, squash, threadFilter, isMine, commentMode, splitButtons, isDismiss, clearLabel, esc, STATUS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MiniCore = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -95,3 +95,8 @@ body.chatting .tabbar{display:none}
 .back:active{background:var(--surface2)}
 
 .stale{position:absolute;left:0;right:0;z-index:5;background:#FDE7E7;color:#9B2C2C;font-weight:700;font-size:13px;padding:8px 14px;text-align:center;border-bottom:1px solid #F3C4C0;box-shadow:0 2px 8px #1f243014}
+
+.dismiss{margin-top:8px;min-height:36px;padding:0 4px;color:var(--mut);font-weight:700;font-size:13px}
+.dismiss:active{color:var(--err)}
+.clear{margin-top:8px;min-height:36px;padding:0 12px;border-radius:10px;border:1px solid var(--line2);background:var(--surface2);font-weight:700;font-size:13px;color:var(--ink)}
+.clear:disabled{opacity:.5}

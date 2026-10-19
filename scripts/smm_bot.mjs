@@ -21,7 +21,7 @@ async function onCallback(cq) {
     await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Напишите правки сообщением' });
     return;
   }
-  await tg('answerCallbackQuery', { callback_query_id: cq.id, text: r.ok ? 'Принято' : (r.error || 'Не вышло') });
+  await tg('answerCallbackQuery', { callback_query_id: cq.id, text: r.ok ? (r.dismissed ? 'Убрано' : 'Принято') : (r.error || 'Не вышло') });
   if (cq.message) await tg('editMessageReplyMarkup', { chat_id: cq.message.chat.id, message_id: cq.message.message_id, reply_markup: { inline_keyboard: [] } });
 }
 

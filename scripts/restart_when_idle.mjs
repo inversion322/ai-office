@@ -103,7 +103,7 @@ async function restartSupervisor() {
   // Цели: супервизор и все его дети нужных видов (туннель мог только стартовать и ещё не слушать порт метрик), плюс владельцы портов.
   const kids = list.filter((p) => p.ParentProcessId === supPid && OURS.test(p.CommandLine)).map((p) => p.ProcessId);
   const targets = [...new Set([supPid, ...kids, apiPid, cfPid].filter(Boolean))];
-  const oldUrl = readUrl(); const logSize = fs.existsSync(supLog) ? fs.statSync(supLog).size : 0;
+  const oldUrl = readUrl(); const logSize = fs.existsSync(supLog) ? fs.statSync(supLog).size : 0; const startedAt = Date.now();
   log(`перезапуск: останавливаю ${targets.join(', ')} (супервизор ${supPid}, API ${apiPid}, туннель ${cfPid || 'ещё не слушал'}), адрес до: ${oldUrl}`);
   // С этого места назад дороги нет: офис выключен, и ЛЮБОЙ исход обязан закончиться попыткой его поднять. Дальше исключений не бросаем.
   killPid(supPid);                                   // сначала супервизор, иначе он поднимет API и туннель обратно
@@ -121,7 +121,7 @@ async function restartSupervisor() {
   }
   const newSup = (() => { const o = portOwner(API_PORT); const p = o && procs().find((x) => x.ProcessId === o); return p ? p.ParentProcessId : null; })();
   const tail = readFrom(supLog, logSize);
-  const res = { ...r, newSup, oldUrl, tail, logSize };
+  const res = { ...r, newSup, oldUrl, tail, logSize, startedAt };
   log(`итог подъёма: api=${r.apiOk} адрес=${r.newUrl || '—'} снаружи=${r.outside} супервизор=${newSup}`);
   return res;
 }
@@ -146,8 +146,9 @@ async function verify(res) {
       await sleep(5000);
     }
     if (!btn) problems.push(`кнопка «Офис» в Telegram указывает не на новый адрес (${last})`);
-    const tail2 = readFrom(supLog, res.logSize || 0);
-    if (!/кнопка Mini App обновлена/.test(tail2)) problems.push('в журнале супервизора нет «кнопка Mini App обновлена»');
+    // Журнал смотрим по ВРЕМЕНИ строки, а не по смещению в файле: супервизор может переписать файл, и смещение указывало бы за его конец (ложная тревога 19.10 в 22:59, хотя кнопка была обновлена и Telegram это подтвердил). Главная проверка выше идёт по ответу Telegram, журнал только дополнительный.
+    const fresh = readFrom(supLog, 0).split('\n').filter((l) => /кнопка Mini App обновлена/.test(l) && Date.parse(l.slice(0, 24)) >= (res.startedAt || 0) - 2000);
+    if (!fresh.length && !btn) problems.push('в журнале супервизора нет «кнопка Mini App обновлена»');
   }
   return problems;
 }

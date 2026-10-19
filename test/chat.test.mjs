@@ -40,7 +40,8 @@ test('неизвестная кнопка и неизвестный вопрос
 });
 
 test('выбор темы закрывает устаревшие карточки выбора (нельзя запустить второй сценарий)', async () => {
-  const { chat, db } = make(); const a = topics(chat), b = topics(chat);
+  // Два РАЗНЫХ списка тем (с одинаковыми кнопками второй сразу заменил бы первый, см. тест ниже): оба открыты, выбор в одном закрывает другой.
+  const { chat, db } = make(); const a = topics(chat), b = chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: 'Другие темы', buttons: [[['Тема 7', 'pick:7'], ['Тема 9', 'pick:9']]] });
   assert.equal(chat.pending('smm'), 2);
   await chat.answer({ id: a, choice: 'pick:3', via: 'telegram' });
   const rows = db.prepare('SELECT id,status,choice,answered_via FROM messages WHERE kind=? ORDER BY id').all('action');
@@ -100,7 +101,9 @@ test('ожидание комментария истекает через 30 м�
 });
 
 test('«Принять ролик» закрывает и карточку правок: после приёмки поздняя кнопка «Внести правки» не запустит монтаж', async () => {
-  const { chat, db } = make(); const a = videoCard(chat), b = videoCard(chat);
+  // Дубль появиться через post() уже не может (его закрывает новая карточка), но в базе мог остаться старый: копируем строку напрямую, как это было до правила.
+  const { chat, db } = make(); const a = videoCard(chat);
+  const b = Number(db.prepare("INSERT INTO messages (ts,office,thread,sender,kind,text,buttons,status,source) SELECT ts,office,thread,sender,kind,text,buttons,status,source FROM messages WHERE id=?").run(a).lastInsertRowid);
   await chat.answer({ id: a, choice: 'accept:3', via: 'dashboard' });
   assert.equal(db.prepare('SELECT choice FROM messages WHERE id=?').get(b).choice, 'superseded');
   assert.equal(db.prepare('SELECT stage FROM videos WHERE id=3').get().stage, 'approved');
@@ -113,4 +116,90 @@ test('cleanReport: без markdown, без заголовка, обрезка п
   assert.ok(!/[`#*]/.test(s));
   const long = cleanReport('Первое предложение. ' + 'Очень длинное второе предложение без конца '.repeat(20), 120);
   assert.ok(long.length <= 125 && /[.…]$/.test(long), long);
+});
+
+
+/* ---------- «Убрать», замена дублей, сброс ожидания, перегенерация ---------- */
+const card = (chat, buttons, o = {}) => chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: 'Карточка', buttons, ...o });
+const row = (db, id) => db.prepare('SELECT * FROM messages WHERE id=?').get(id);
+const ds = (db, id) => JSON.parse(row(db, id).buttons).flat().map((b) => b.d);
+
+test('каждая карточка получает «✖ Убрать»; подтверждения «Да/Нет» и обычные сообщения не получают', () => {
+  const { chat, db } = make();
+  const a = card(chat, [[['Принять ролик', 'accept:3']]]); assert.deepEqual(ds(db, a), ['accept:3', 'dismiss:0']);
+  assert.equal(JSON.parse(row(db, a).buttons).flat().find((b) => b.d === 'dismiss:0').t, '✖ Убрать');
+  const conf = card(chat, [[['Да, сделать', 'confirm:1'], ['Нет', 'cancel:1']]], { ref: { data: 'accept:3' } }); assert.deepEqual(ds(db, conf), ['confirm:1', 'cancel:1']);
+  const plain = chat.say('captain_smm', 'просто текст'); assert.equal(row(db, plain).buttons, null);
+});
+
+test('новая карточка с тем же действием по тому же ролику заменяет старую (зависших дублей не копится)', () => {
+  const { chat, db } = make(); const a = card(chat, [[['Другое название', 'package:3']]]), b = card(chat, [[['Другое название', 'package:3']]]);
+  assert.equal(chat.pending('smm'), 1); assert.deepEqual([row(db, a).status, row(db, a).choice, row(db, a).answered_via], ['answered', 'superseded', 'system']); assert.equal(row(db, b).status, 'open');
+  const other = card(chat, [[['Другое название', 'package:5']]]); assert.equal(chat.pending('smm'), 2, 'другой ролик не затронут');
+  const c = card(chat, [[['Принять ролик', 'accept:3']]]); assert.equal(row(db, b).status, 'open', 'другое действие по тому же ролику не затронуто'); assert.equal(row(db, c).status, 'open');
+});
+
+test('«Убрать»: карточка закрыта без действий и без реплик в чате, повтор отклонён, ролик и стадия не тронуты', async () => {
+  const { chat, db } = make(); const a = card(chat, [[['Принять ролик', 'accept:3']]]);
+  const nick0 = db.prepare("SELECT COUNT(*) c FROM messages WHERE sender='nick'").get().c, msgs0 = db.prepare('SELECT COUNT(*) c FROM messages').get().c;
+  const r = await chat.answer({ id: a, choice: 'dismiss:0', via: 'telegram' });
+  assert.deepEqual([r.ok, r.dismissed], [true, true]); assert.equal(chat.pending('smm'), 0);
+  assert.deepEqual([row(db, a).status, row(db, a).choice, row(db, a).answered_via], ['dismissed', 'dismiss', 'telegram']);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM messages WHERE sender='nick'").get().c, nick0, 'реплика от имени Ника не пишется');
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM messages').get().c, msgs0, 'никаких новых сообщений (в том числе Капитана)');
+  assert.equal(db.prepare('SELECT stage FROM videos WHERE id=3').get().stage, 'scored', 'стадия ролика не менялась');
+  const again = await chat.answer({ id: a, choice: 'dismiss:0', via: 'dashboard' }); assert.equal(again.ok, false); assert.match(again.error, /уже ответили/);
+});
+
+test('«Убрать» работает и на старой карточке, у которой кнопки в базе ещё нет (по tg_msg, как из Telegram)', async () => {
+  const { chat, db } = make(); const a = card(chat, [[['Принять ролик', 'accept:3']]]);
+  db.prepare("UPDATE messages SET buttons=?, tg_msg=777 WHERE id=?").run(JSON.stringify([[{ t: 'Принять ролик', d: 'accept:3' }]]), a);
+  const r = await chat.answer({ tgMsg: 777, choice: 'dismiss:0', via: 'telegram' }); assert.equal(r.ok, true); assert.equal(row(db, a).status, 'dismissed');
+});
+
+test('«Убрать» снимает ожидание сотрудника только когда карточек у него не осталось', async () => {
+  const { chat, db } = make(); const a = card(chat, [[['Принять ролик', 'accept:3']]]), b = card(chat, [[['Другое название', 'package:5']]]);
+  db.prepare("UPDATE agents SET status='waiting', task='Ждёт утверждения' WHERE id='captain_smm'").run();
+  await chat.answer({ id: a, choice: 'dismiss:0', via: 'dashboard' });
+  assert.equal(db.prepare("SELECT status FROM agents WHERE id='captain_smm'").get().status, 'waiting', 'ещё одна карточка ждёт, статус сохраняется');
+  await chat.answer({ id: b, choice: 'dismiss:0', via: 'dashboard' });
+  assert.deepEqual(Object.values(db.prepare("SELECT status, task FROM agents WHERE id='captain_smm'").get()), ['idle', 'Свободен']);
+});
+
+test('сброс статуса сотрудника: ждёт и ошибка сбрасываются, работающий нет, при открытых карточках отказ с числом', () => {
+  const { chat, db } = make(); const st = (id) => db.prepare('SELECT status FROM agents WHERE id=?').get(id).status;
+  db.prepare("UPDATE agents SET status='waiting' WHERE id='scriptwriter'").run(); assert.deepEqual(chat.clearStatus('scriptwriter'), { ok: true, status: 'idle' }); assert.equal(st('scriptwriter'), 'idle');
+  db.prepare("UPDATE agents SET status='error' WHERE id='scriptwriter'").run(); assert.equal(chat.clearStatus('scriptwriter').ok, true); assert.equal(st('scriptwriter'), 'idle');
+  db.prepare("UPDATE agents SET status='working' WHERE id='scriptwriter'").run(); const w = chat.clearStatus('scriptwriter'); assert.equal(w.ok, false); assert.match(w.error, /работает/); assert.equal(st('scriptwriter'), 'working');
+  db.prepare("UPDATE agents SET status='waiting' WHERE id='captain_smm'").run(); card(chat, [[['Принять ролик', 'accept:3']]]);
+  const o = chat.clearStatus('captain_smm'); assert.equal(o.ok, false); assert.match(o.error, /карточки.*: 1/); assert.equal(st('captain_smm'), 'waiting');
+  assert.equal(chat.clearStatus('нет-такого').ok, false);
+});
+
+test('отклонение темы закрывает карточки сценария и не оставляет Капитана «ждущим» (раньше оставался «Вера не пропустила сценарий»)', async () => {
+  const { chat, db } = make(); db.prepare("UPDATE videos SET stage='script' WHERE id=3").run();
+  const a = card(chat, [[['Утвердить сценарий', 'approve:3'], ['Нужны правки', 'revise:3']], [['🔄 Перегенерировать', 'regen:3'], ['Отклонить тему', 'reject:3']]]);
+  db.prepare("UPDATE agents SET status='waiting', task='Вера не пропустила сценарий' WHERE id='captain_smm'").run();
+  await chat.answer({ id: a, choice: 'reject:3', via: 'telegram' });
+  assert.equal(db.prepare('SELECT stage FROM videos WHERE id=3').get().stage, 'rejected'); assert.equal(chat.pending('smm'), 0);
+  assert.equal(db.prepare("SELECT status FROM agents WHERE id='captain_smm'").get().status, 'idle');
+});
+
+test('«Перегенерировать»: стадия «сценарий», старые кнопки утверждения закрыты, запущен этап script --regen', async () => {
+  const { chat, db } = make(); db.prepare("UPDATE videos SET stage='checked' WHERE id=3").run();
+  const a = card(chat, [[['Утвердить сценарий', 'approve:3'], ['Нужны правки', 'revise:3']], [['🔄 Перегенерировать', 'regen:3'], ['Отклонить тему', 'reject:3']]]);
+  const r = await chat.answer({ id: a, choice: 'regen:3', via: 'dashboard' }); assert.equal(r.ok, true);
+  assert.equal(db.prepare('SELECT stage FROM videos WHERE id=3').get().stage, 'script');
+  assert.equal(db.prepare("SELECT status FROM agents WHERE id='captain_smm'").get().status, 'working');
+  const said = db.prepare("SELECT text FROM messages WHERE sender='captain_smm' ORDER BY id").all().map((m) => m.text).join('\n');
+  assert.match(said, /Перегенерирую сценарий «Витамин C» с нуля/); assert.match(said, /script 3 --regen/, 'в тестовом режиме этап не запускается, но называется с нужными аргументами');
+  assert.ok(!/--comment/.test(said), 'без пожелания комментарий не передаётся');
+});
+
+test('одноразовая миграция: уже висящая карточка без «Убрать» получает его при запуске', () => {
+  const { chat, db, dir } = make(); const a = card(chat, [[['Другое название', 'package:3']]]);
+  db.prepare('UPDATE messages SET buttons=? WHERE id=?').run(JSON.stringify([[{ t: 'Другое название', d: 'package:3' }]]), a);
+  setupChat({ db, ROOT: dir, DATA_DIR: dir });
+  assert.deepEqual(ds(db, a), ['package:3', 'dismiss:0']);
+  setupChat({ db, ROOT: dir, DATA_DIR: dir }); assert.deepEqual(ds(db, a), ['package:3', 'dismiss:0'], 'повторный запуск не дублирует кнопку');
 });

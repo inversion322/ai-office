@@ -42,8 +42,8 @@ function chatOnState(s) {
 /* ---------- закреплённые вопросы ---------- */
 function actHtml(m) {
   const ag = agentById(m.sender), reviseHere = revise && revise.mid === m.id, open = expanded.has(m.id) || reviseHere;
-  const flat = (m.buttons || []).flat();
-  const btns = `<div class="act-btns">${flat.map((b) => `<button type="button" data-act="${esc(b.d)}" data-mid="${m.id}">${esc(b.t)}</button>`).join('')}</div>`;
+  const flat = (m.buttons || []).flat().filter((b) => !/^dismiss:/.test(b.d));
+  const btns = `<div class="act-btns">${flat.map((b) => `<button type="button" data-act="${esc(b.d)}" data-mid="${m.id}">${esc(b.t)}</button>`).join('')}<button type="button" class="act-dismiss" data-act="dismiss:0" data-mid="${m.id}" title="Убрать карточку без действий">✖ Убрать</button></div>`;
   const rev = reviseHere
     ? `<div class="rev"><textarea id="revText" placeholder="${revise.choice.startsWith('rework:') ? 'Что поправить в ролике? Кирилл начнёт сразу.' : 'Что поправить в сценарии?'}">${esc(revise.text)}</textarea><div class="btns"><button type="button" data-revsend="1">Отправить правки</button><button type="button" data-revcancel="1">Отмена</button></div></div>`
     : btns;
@@ -74,6 +74,7 @@ function msgHtml(m) {
   const who = me ? '' : `<span class="who">${esc(ag ? ag.name : m.sender)}</span>`;
   if (m.kind === 'action') {
     if (m.status === 'open') return `<div class="msg sys">⏳ ${esc(m.text.split('\n')[0].slice(0, 110))}<br>Ждёт вашего ответа: кнопки закреплены выше.<span class="meta">${hhmm(m.ts)}</span></div>`;
+    if (m.status === 'dismissed') return `<div class="msg sys">${who}${esc(m.text.split('\n')[0].slice(0, 90))}<br>✖ Убрано вами без действия<span class="meta">${hhmm(m.ts)}</span></div>`;
     const stale = m.choice === 'superseded';
     const choice = ((m.buttons || []).flat().find((b) => b.d === m.choice) || {}).t || m.choice;
     if (stale) return `<div class="msg sys">${who}${esc(m.text.split('\n')[0].slice(0, 90))}<br>⏹ Неактуально: решение уже принято по другому вопросу<span class="meta">${hhmm(m.ts)}</span></div>`;
@@ -148,6 +149,7 @@ $('chatPinned').addEventListener('click', (e) => {
   const more = e.target.closest('[data-more]'); if (more) { const id = Number(more.dataset.more); expanded.has(id) ? expanded.delete(id) : expanded.add(id); pinKey = ''; return renderPinned(); }
   const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
   if (b.dataset.act.startsWith('revise:') || b.dataset.act.startsWith('rework:')) { revise = { mid: Number(b.dataset.mid), choice: b.dataset.act, text: '' }; pinKey = ''; return renderPinned(); }
+  if (b.dataset.act.startsWith('dismiss:') && !confirm('Убрать карточку? Действие не выполнится, вернуть её будет нельзя.')) return;
   b.disabled = true; answerAction(b.dataset.mid, b.dataset.act);
 });
 document.addEventListener('dblclick', (e) => { const el = e.target.closest('[data-id]'); if (el && agentById(el.dataset.id)) openThread(el.dataset.id); });

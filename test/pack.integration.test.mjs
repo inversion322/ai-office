@@ -46,7 +46,7 @@ test('пакет: одно сообщение с названием и хэшт�
   assert.match(card.text, /НАЗВАНИЕ/); assert.match(card.text, /Сахар делает детей гиперактивными\? Ответ в конце/);
   const tagLine = card.text.split('\n').find((l) => l.startsWith('#МедицинскийДетектив')); assert.ok(tagLine, 'нет строки с хэштегами');
   const tags = tagLine.split(' '); assert.equal(tags.length, 5); assert.ok(!/fyp|viral/i.test(tagLine));
-  assert.match(card.text, /Убрала:.*fyp/); assert.equal(card.kind, 'action'); assert.deepEqual(card.buttons.flat().map((b) => b.d), ['package:8']);
+  assert.match(card.text, /Убрала:.*fyp/); assert.equal(card.kind, 'action'); assert.deepEqual(card.buttons.flat().map((b) => b.d).filter((d) => d !== 'dismiss:0'), ['package:8']);
   assert.ok(fs.existsSync(path.join(ROOT, 'smm', 'runs', 'package_8', 'publish_pack.txt')));
   assert.equal((await api('/api/state?office=smm')).agents.find((x) => x.id === 'packager').status, 'idle');
 });
@@ -60,7 +60,7 @@ test('автопроверка бракует кликбейт «шок/врач
 test('если честного названия так и не вышло: сбой не молчит, Нику предложено повторить, сотрудник в «ошибка»', { skip: !can }, async () => {
   fs.rmSync(path.join(ROOT, 'smm', 'runs', 'package_8'), { recursive: true, force: true });
   const res = await runStage(['package', '8'], { FAKE_PACK_MODE: 'bad' }); assert.notEqual(res.code, 0);
-  const card = await lastCard(); assert.match(card.text, /названия и хэштегов/); assert.deepEqual(card.buttons.flat().map((b) => b.d), ['package:8']);
+  const card = await lastCard(); assert.match(card.text, /названия и хэштегов/); assert.deepEqual(card.buttons.flat().map((b) => b.d).filter((d) => d !== 'dismiss:0'), ['package:8']);
   assert.equal((await api('/api/state?office=smm')).agents.find((x) => x.id === 'packager').status, 'error');
 });
 

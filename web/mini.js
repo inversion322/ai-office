@@ -125,14 +125,14 @@
     const prog = busy && Number(a.progress) ? `<div class="bar"><i style="width:${Math.min(100, Number(a.progress))}%"></i></div>` : '';
     return `<article class="agent ${C.esc(a.status)}" data-open="${C.esc(a.id)}"><div class="duck" data-duck="${C.esc(a.id)}"></div>
       <div class="agent-body"><div class="agent-top"><b>${C.esc(a.name.split(' ')[0])}</b><span class="st ${C.esc(a.status)}">${C.esc(C.statusText(a.status))}</span></div>
-      <div class="role">${C.esc(a.title || a.role)}</div><div class="task">${C.esc(a.task || '—')}</div>${prog}</div></article>`;
+      <div class="role">${C.esc(a.title || a.role)}</div><div class="task">${C.esc(a.task || '—')}</div>${prog}${C.clearLabel(a.status) ? `<button class="clear" data-clear="${C.esc(a.id)}">${C.clearLabel(a.status)}</button>` : ''}</div></article>`;
   }
-  document.addEventListener('click', (e) => { const a = e.target.closest('.agent[data-open]'); if (a) { S.who = a.dataset.open; show('chat'); $('msg').focus(); } });
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-clear]')) return; const a = e.target.closest('.agent[data-open]'); if (a) { S.who = a.dataset.open; show('chat'); $('msg').focus(); } });
 
   function cardHtml(m) {
-    const btns = C.normButtons(m.buttons).map((b) => `<button class="btn" data-ans="${C.esc(b.d)}" data-id="${m.id}">${C.esc(b.t)}</button>`).join('');
+    const btns = C.splitButtons(m.buttons).main.map((b) => `<button class="btn" data-ans="${C.esc(b.d)}" data-id="${m.id}">${C.esc(b.t)}</button>`).join('');
     const sq = C.squash(m.text); const open = !!m._open;
-    return `<div class="card" data-card="${m.id}"><div class="card-from">${C.esc(agentName(m.sender))}</div><div class="card-text">${C.esc(open ? m.text : sq.text + (sq.cut ? ' …' : ''))}</div>${sq.cut ? `<button class="more" data-more="${m.id}">${open ? 'Свернуть' : 'Подробнее'}</button>` : ''}<div class="card-btns">${btns}</div></div>`;
+    return `<div class="card" data-card="${m.id}"><div class="card-from">${C.esc(agentName(m.sender))}</div><div class="card-text">${C.esc(open ? m.text : sq.text + (sq.cut ? ' …' : ''))}</div>${sq.cut ? `<button class="more" data-more="${m.id}">${open ? 'Свернуть' : 'Подробнее'}</button>` : ''}<div class="card-btns">${btns}</div><button class="dismiss" data-ans="dismiss:0" data-id="${m.id}">✖ Убрать</button></div>`;
   }
 
   function renderChat() {
@@ -178,8 +178,19 @@
     if (e.target.closest('[data-pinmore]')) { S.pinOpen = !S.pinOpen; $('pinned').dataset.sig = ''; renderNow(); return; }
     const more = e.target.closest('[data-more]');
     if (more) { const m = S.chat.messages.find((x) => x.id === Number(more.dataset.more)); if (m) { m._open = !m._open; $('pinned').dataset.sig = ''; renderNow(); } return; }
+    const clr = e.target.closest('[data-clear]');
+    if (clr && !clr.disabled) {
+      clr.disabled = true;
+      try { const r = await raw('/api/chat/clear-status', { method: 'POST', body: JSON.stringify({ agent: clr.dataset.clear }) }); const j = await r.json(); if (!j.ok) throw new Error(j.error || 'не вышло'); tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success'); $('crew').dataset.sig = ''; await pull(); }
+      catch (er) { clr.disabled = false; tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('error'); tg.showAlert ? tg.showAlert(String(er.message || er)) : alert(String(er.message || er)); }
+      return;
+    }
     const b = e.target.closest('[data-ans]'); if (!b || b.disabled) return;
     const id = Number(b.dataset.id), choice = b.dataset.ans;
+    if (C.isDismiss(choice)) {         // убранное не вернуть, поэтому переспрашиваем (в Telegram есть штатное окно подтверждения)
+      const ok = await new Promise((res) => { if (tg.showConfirm) tg.showConfirm('Убрать карточку? Действие не выполнится, вернуть её будет нельзя.', res); else res(window.confirm('Убрать карточку без действия?')); });
+      if (!ok) return;
+    }
     const mode = C.commentMode(choice);                          // в Telegram нет окна с вводом текста, поэтому свой нижний лист
     let comment;
     if (mode.ask) { comment = await askText(mode); if (comment === null) return; comment = comment || undefined; }

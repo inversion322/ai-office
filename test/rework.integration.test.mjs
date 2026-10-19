@@ -66,7 +66,7 @@ test('правки: приоритет включается и выключае�
   const chat = await api('/api/chat?office=smm');
   const card = chat.messages.filter((m) => m.kind === 'action' && m.status === 'open').pop();
   assert.ok(card, 'нет карточки с результатом');
-  assert.deepEqual(card.buttons.flat().map((b) => b.d), ['accept:9', 'rework:9']);
+  assert.deepEqual(card.buttons.flat().map((b) => b.d).filter((d) => d !== 'dismiss:0'), ['accept:9', 'rework:9']);
   assert.match(card.text + ' ', /Ролик №9 v2/);
 });
 
@@ -76,7 +76,7 @@ test('правки не вышли: приоритет снят, прежняя 
   assert.equal((await api('/api/priority')).active, false);
   assert.ok(fs.existsSync(path.join(PROJ, 'final', 'dosie09_v2.mp4')) && !fs.existsSync(path.join(PROJ, 'final', 'dosie09_v3.mp4')));
   const card = (await api('/api/chat?office=smm')).messages.filter((m) => m.kind === 'action' && m.status === 'open').pop();
-  assert.ok(/не готовы/.test(card.text)); assert.deepEqual(card.buttons.flat().map((b) => b.d), ['rework:9', 'accept:9']);
+  assert.ok(/не готовы/.test(card.text)); assert.deepEqual(card.buttons.flat().map((b) => b.d).filter((d) => d !== 'dismiss:0'), ['rework:9', 'accept:9']);
   const a = (await api('/api/state?office=smm')).agents.find((x) => x.id === 'video'); assert.equal(a.status, 'error');
 });
 

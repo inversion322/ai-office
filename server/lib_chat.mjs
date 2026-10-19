@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS messages (
   sender TEXT NOT NULL,                  -- nick | id сотрудника | system
   kind TEXT NOT NULL DEFAULT 'text',     -- text | action
   text TEXT NOT NULL, buttons TEXT,      -- JSON [[{t,d}]]
-  status TEXT, choice TEXT, answered_ts INTEGER, answered_via TEXT,   -- для action: open | answered
+  status TEXT, choice TEXT, answered_ts INTEGER, answered_via TEXT,   -- для action: open | answered | dismissed (Ник убрал карточку без действия)
   source TEXT, tg_msg INTEGER, ref TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
@@ -72,13 +72,29 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
   }
 
   /* ---------- сообщения ---------- */
+  // Любую карточку, ждущую ответа, Ник может убрать без последствий: бывают зависшие и ненужные (например, «Другое название» к уже принятому ролику).
+  // Подтверждения предложений («Да, сделать» / «Нет») уже имеют отказ, им отдельная кнопка не нужна.
+  const DISMISS = { t: '✖ Убрать', d: 'dismiss:0' };
+  const isDismiss = (x) => x && /^dismiss:/.test(x.d);
+  const withDismiss = (rows) => (rows.flat().some(isDismiss) ? rows : [...rows, [DISMISS]]);
   function post({ office = 'smm', thread, sender, kind = 'text', text, buttons = null, source = 'pipeline', ref = null, tgMsg = null, mirrorTg = false, silent = false }) {
-    const b = buttons ? JSON.stringify(buttons.map((row) => row.map((x) => (Array.isArray(x) ? { t: x[0], d: x[1] } : x)))) : null;
+    let rows = buttons ? buttons.map((row) => row.map((x) => (Array.isArray(x) ? { t: x[0], d: x[1] } : x))) : null;
+    if (rows && kind === 'action' && !ref) rows = withDismiss(rows);
+    const b = rows ? JSON.stringify(rows) : null;
     const r = run('INSERT INTO messages (ts,office,thread,sender,kind,text,buttons,status,source,tg_msg,ref) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       now(), office, thread, sender, kind, String(text).slice(0, 12000), b, kind === 'action' ? 'open' : null, source, tgMsg, ref ? JSON.stringify(ref) : null);
     const id = Number(r.lastInsertRowid);
+    // Новая карточка с тем же действием по тому же ролику заменяет старую: две одинаковые «Принять ролик» или «Пакет публикации» всегда устаревшие.
+    if (rows && kind === 'action' && !ref) for (const x of rows.flat()) if (x.d && !/^(dismiss|confirm|cancel):/.test(x.d)) supersedeExact(x.d, id);
     if (mirrorTg && !tgMsg && office === 'smm') mirror(id, silent).catch((e) => console.error('mirror', e.message));
     return id;
+  }
+  function closeCard(o, status, choice, via) {
+    run('UPDATE messages SET status=?, choice=?, answered_ts=?, answered_via=? WHERE id=? AND status=\'open\'', status, choice, now(), via, o.id);
+    if (o.tg_msg && !NO_TG) tg('editMessageReplyMarkup', { chat_id: chatId(), message_id: o.tg_msg, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  }
+  function supersedeExact(d, exceptId) {
+    for (const o of q("SELECT id, tg_msg FROM messages WHERE kind='action' AND status='open' AND id<>? AND buttons LIKE ?", exceptId, `%"d":"${d}"%`)) closeCard(o, 'answered', 'superseded', 'system');
   }
   const say = (agentId, text, mirrorTg = false) => post({ thread: agentId, sender: agentId, text, mirrorTg });
   const setAgent = (id, status, task, log) => {
@@ -159,10 +175,45 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     } else if (act === 'retry' && v) {
       if (v.stage === 'editing') { cap(`Запускаю монтаж заново: «${v.title}».`); spawnPipeline(['produce', String(id)]); }
       else { setStage(id, 'script'); cap(`Запускаю сценарий заново: «${v.title}».`); spawnPipeline(['script', String(id)]); }
+    } else if (act === 'regen' && v) {
+      supersede(`approve:${id}`); supersede(`revise:${id}`); supersede(`regen:${id}`);
+      try { const aw = JSON.parse(kvGet('awaiting') || 'null'); if (aw && aw.id === id) kvDel('awaiting'); } catch {}
+      setStage(id, 'script'); setAgent('captain_smm', 'working', `Сценарий заново: ${v.title}`, `Ник просит новый сценарий «${v.title}» с нуля`);
+      cap(`Перегенерирую сценарий «${v.title}» с нуля.\nКсения напишет другую версию: другой крючок и другая композиция, а не правку прежней; Вера проверит факты заново. Прежняя версия сохранена в истории. Результат пришлю сюда.`);
+      spawnPipeline(['script', String(id), '--regen', ...(comment && comment.trim() ? ['--comment', comment.trim()] : [])]);
     } else if (act === 'reject' && v) {
+      supersede(`approve:${id}`); supersede(`revise:${id}`); supersede(`regen:${id}`);
       setStage(id, 'rejected'); cap('Тема отклонена.');
+      settleWaiting('smm', ['captain_smm', 'scriptwriter', 'factcheck']);      // раньше Капитан так и оставался «ждёт: Вера не пропустила сценарий»
     } else return { note: 'неизвестное действие' };
     return {};
+  }
+
+  // «Убрать»: карточка закрывается без действий и без реплик в чате; кнопки гаснут в обоих каналах; сотрудник, который только из-за неё «ждал», освобождается.
+  function dismissCard(m, via) {
+    closeCard(m, 'dismissed', 'dismiss', via || 'dashboard');
+    try { const aw = JSON.parse(kvGet('awaiting') || 'null'); if (aw && aw.mid === m.id) kvDel('awaiting'); } catch {}
+    settleWaiting(m.office, [m.sender, m.thread, 'captain_smm']);
+    return { ok: true, dismissed: true };
+  }
+  // Сотрудник в статусе «ждёт», у которого не осталось открытых карточек, больше никого не ждёт.
+  function settleWaiting(office, ids) {
+    for (const id of new Set(ids)) {
+      const a = q("SELECT status FROM agents WHERE id=? AND office=?", id, office)[0]; if (!a || a.status !== 'waiting') continue;
+      const open = q("SELECT COUNT(*) c FROM messages WHERE office=? AND kind='action' AND status='open' AND (thread=? OR sender=?)", office, id, id)[0].c;
+      if (!open) setAgent(id, 'idle', 'Свободен', 'Ждать больше нечего: решение принято или карточка убрана');
+    }
+  }
+  // Ручной сброс «зависшего» статуса (ждёт / ошибка). Работающего сотрудника не трогаем: он действительно занят.
+  function clearStatus(agentId) {
+    const a = q('SELECT id, status, office FROM agents WHERE id=?', agentId)[0];
+    if (!a) return { ok: false, error: 'нет такого сотрудника' };
+    if (a.status === 'working') return { ok: false, error: 'сотрудник сейчас работает, сбрасывать нечего' };
+    if (a.status !== 'waiting' && a.status !== 'error') return { ok: true, status: a.status, note: 'уже свободен' };
+    const open = q("SELECT COUNT(*) c FROM messages WHERE office=? AND kind='action' AND status='open' AND (thread=? OR sender=?)", a.office, a.id, a.id)[0].c;
+    if (open) return { ok: false, error: `сначала уберите или ответьте на карточки, которые он ждёт: ${open}` };
+    setAgent(a.id, 'idle', 'Свободен', a.status === 'error' ? 'Ник сбросил ошибку' : 'Ник снял ожидание');
+    return { ok: true, status: 'idle' };
   }
 
   // Ответ Ника на действие (из дашборда, Telegram или подтверждение предложения агента)
@@ -170,6 +221,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     const m = id ? q('SELECT * FROM messages WHERE id=?', id)[0] : q('SELECT * FROM messages WHERE tg_msg=?', tgMsg)[0];
     if (!m || m.kind !== 'action') return { ok: false, error: 'такого вопроса нет' };
     if (m.status !== 'open') return { ok: false, error: 'на этот вопрос уже ответили' };
+    if (/^dismiss:/.test(String(choice))) return dismissCard(m, via);
     const btn = JSON.parse(m.buttons || '[]').flat().find((b) => b.d === choice);
     if (!btn) return { ok: false, error: 'нет такой кнопки' };
     // «Внести правки» / «Вернуть на правки» без текста (кнопка в Telegram): карточка остаётся открытой, пока не придёт комментарий, иначе кнопка «Принять» пропала бы зря
@@ -222,7 +274,7 @@ ${c.hist}
 
 Новое сообщение Ника: ${text}
 
-Если Ник просит выполнить шаг конвейера (выбрать тему, утвердить сценарий, вернуть его на правки, принять или отклонить ролик, внести правки в готовый ролик, найти другие темы), НЕ говори, что уже сделала: предложи действие в поле action, Ник подтвердит кнопкой. Типы: pick (video_id), more, approve (video_id), revise (video_id, comment), rework (video_id, comment: что именно поправить в готовом ролике, дословно по просьбе Ника), accept (video_id), reject (video_id), package (video_id, comment: пожелание к названию или хэштегам, например «короче» или «без вопроса»).
+Если Ник просит выполнить шаг конвейера (выбрать тему, утвердить сценарий, вернуть его на правки, принять или отклонить ролик, внести правки в готовый ролик, найти другие темы), НЕ говори, что уже сделала: предложи действие в поле action, Ник подтвердит кнопкой. Типы: pick (video_id), more, approve (video_id), revise (video_id, comment: что поправить в прежнем сценарии), regen (video_id, comment: пожелание; переписать сценарий с нуля, когда прежний не нравится в целом, а не в деталях), rework (video_id, comment: что именно поправить в готовом ролике, дословно по просьбе Ника), accept (video_id), reject (video_id), package (video_id, comment: пожелание к названию или хэштегам, например «короче» или «без вопроса»).
 Итог запиши в файл ${outFile} строго как JSON: {"reply":"текст ответа Нику","action":null или {"type":"pick","video_id":3,"comment":""}}. После записи файла ничего больше не делай.`, 'utf8');
         await new Promise((resolve) => {
           const p = spawn(HERMES, ['-p', office === 'smm' ? (REPLY_PROFILE[thread] || 'smm') : 'jobs', 'chat', '--query-file', qFile, '-Q', '--oneshot', '--max-turns', '30', '--run-budget', '420'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -232,12 +284,12 @@ ${c.hist}
       }
       if (!rep) rep = 'Не получилось ответить сейчас, повторите вопрос чуть позже.';
       post({ office, thread, sender: thread, text: rep, source: 'agent', mirrorTg: true });
-      const ACTS = new Set(['pick', 'more', 'approve', 'revise', 'rework', 'accept', 'reject', 'package']);
+      const ACTS = new Set(['pick', 'more', 'approve', 'revise', 'regen', 'rework', 'accept', 'reject', 'package']);
       if (action && ACTS.has(action.type)) {
         const v = action.video_id ? q('SELECT title FROM videos WHERE id=?', Number(action.video_id))[0] : null;
         if (action.type === 'more' || v) {
           const data = `${action.type}:${action.type === 'more' ? 0 : Number(action.video_id)}`;
-          const label = { pick: 'Выбрать тему', more: 'Искать другие темы', approve: 'Утвердить сценарий', revise: 'Вернуть на правки', rework: 'Внести правки в ролик', package: 'Придумать название и хэштеги заново', accept: 'Принять ролик', reject: 'Отклонить' }[action.type];
+          const label = { pick: 'Выбрать тему', more: 'Искать другие темы', approve: 'Утвердить сценарий', revise: 'Вернуть на правки', regen: 'Перегенерировать сценарий с нуля', rework: 'Внести правки в ролик', package: 'Придумать название и хэштеги заново', accept: 'Принять ролик', reject: 'Отклонить' }[action.type];
           const mid = post({ office, thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: `Правильно ли я поняла: ${label.toLowerCase()}${v ? ` «${v.title}»` : ''}${action.comment ? ` (${action.comment})` : ''}?`, ref: { data, comment: action.comment || '' }, buttons: [[['Да, сделать', 'confirm:0'], ['Нет', 'cancel:0']]], mirrorTg: false });
           run('UPDATE messages SET buttons=? WHERE id=?', JSON.stringify([[{ t: 'Да, сделать', d: `confirm:${mid}` }, { t: 'Нет', d: `cancel:${mid}` }]]), mid);
           mirror(mid).catch(() => {});
@@ -376,6 +428,7 @@ ${c.hist}
     }
     if (req.method === 'POST' && p === '/api/chat/incoming') { const b = await body(req); json(res, 200, incoming({ text: b.text, source: b.source || 'telegram' })); return true; }
     if (req.method === 'POST' && p === '/api/chat/answer') { const b = await body(req); json(res, 200, await answer({ id: b.id, tgMsg: b.tg_msg, choice: b.choice, comment: b.comment, via: b.via || 'dashboard' })); return true; }
+    if (req.method === 'POST' && p === '/api/chat/clear-status') { const b = await body(req); json(res, 200, clearStatus(String(b.agent || ''))); return true; }
     if (req.method === 'GET' && p === '/api/priority') { json(res, 200, priority()); return true; }
     if (req.method === 'POST' && p === '/api/priority') { const b = await body(req); json(res, 200, setPriority({ active: !!b.active, video_id: b.video_id, label: b.label })); return true; }
     if (req.method === 'POST' && p === '/api/chat/post') {
@@ -385,6 +438,13 @@ ${c.hist}
     }
     return false;
   }
+  // Одноразово: уже висящие карточки тоже получают «Убрать» (в базе и в Telegram), иначе зависшее нельзя было бы убрать из бота.
+  for (const o of q("SELECT id, tg_msg, buttons FROM messages WHERE kind='action' AND status='open' AND ref IS NULL AND buttons IS NOT NULL")) {
+    let rows; try { rows = JSON.parse(o.buttons); } catch { continue; }
+    if (!Array.isArray(rows) || rows.flat().some(isDismiss)) continue;
+    const nb = JSON.stringify(withDismiss(rows)); run('UPDATE messages SET buttons=? WHERE id=?', nb, o.id);
+    if (o.tg_msg && !NO_TG) tg('editMessageReplyMarkup', { chat_id: chatId(), message_id: o.tg_msg, reply_markup: kbOf(nb) }).catch(() => {});
+  }
   const pending = (office) => q("SELECT COUNT(*) c FROM messages WHERE office=? AND status='open'", office)[0].c;
-  return { handle, pending, post, say, answer, incoming, priority };
+  return { handle, pending, post, say, answer, incoming, priority, clearStatus };
 }

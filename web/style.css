@@ -276,3 +276,7 @@ details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-weight:700;f
 
 /* невысокое окно: отступы компактнее, чтобы поле ввода чата не уходило под сгиб */
 @media (max-height:860px){.main{padding:8px 12px 10px;gap:8px}.stage{gap:8px}}
+
+.act-btns .act-dismiss{background:transparent;border-color:transparent;color:var(--mut);font-weight:700;margin-left:auto}
+.act-btns .act-dismiss:hover{color:var(--err);filter:none}
+.clear-wait{margin-top:8px}

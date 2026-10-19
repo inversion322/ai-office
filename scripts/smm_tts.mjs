@@ -26,6 +26,8 @@ function measure(segments, { root, patience, dir, stem, script }) {
   const estSec = em ? Number(em[1]) : null;
   const estSeg = sm ? sm[1].split(',').map(Number) : [];
 
+  // Тестовый режим: никакого синтеза и сети, только оценка по тексту (так интеграционные тесты не зависят от Edge TTS).
+  if (process.env.SMM_TTS_ESTIMATE_ONLY && estSec != null) return { sec: estSec + ESTIMATE_MARGIN, estimated: true, perSeg: estSeg, reason: 'тест' };
   const real = run(['--out', path.join(dir, stem + '.mp3'), '--max-sec', '999', '--patience', String(patience)]);
   const rm = DURATION.exec(real.stdout || '');
   if (rm) {

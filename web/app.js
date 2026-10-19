@@ -173,7 +173,8 @@ function render(s) {
   $('sTotal').textContent = agents.length;
   $('sActive').textContent = agents.filter((a) => a.status === 'working').length;
   const isSmm = (s.office || officeId) === 'smm';
-  $('sWait').textContent = isSmm ? (s.videos || []).filter((v) => NEED_NICK.includes(v.stage)).length : s.jobs.filter((j) => j.stage === 'review').length;
+  // SMM: «ждут вас» = открытые карточки (то же число, что значок в мини-аппе и в чате). Считать по стадии ролика нельзя: убранная карточка оставляла ролик «ждущим» без кнопок.
+  $('sWait').textContent = isSmm ? (Number(s.pending) || 0) : s.jobs.filter((j) => j.stage === 'review').length;
   renderTabs(s);
   if (typeof chatOnState === 'function') chatOnState(s);
   const L = applyOffice(s.office || officeId);
@@ -214,7 +215,7 @@ function renderDetail() {
   box.innerHTML = `<h4>${esc(a.name)}</h4><div class="t">${esc(a.title || a.role)}</div>
     <p>Статус: <b>${STATUS[a.status] || esc(a.status)}</b></p><p>Модель: <b>${esc(a.model)}</b></p><p>Команда: <b>${esc(a.team)}</b></p>
     <p>Задача: <b>${esc(a.task || '—')}</b></p><div class="bar"><i style="width:${Number(a.progress) || 0}%"></i></div>
-    <button class="btn-primary wide" id="openCfg" data-open="${esc(a.id)}">Промпт и навыки</button>`;
+    <button class="btn-primary wide" id="openCfg" data-open="${esc(a.id)}">Промпт и навыки</button>${a.status === 'waiting' || a.status === 'error' ? `<button class="btn-ghost wide clear-wait" data-clearwait="${esc(a.id)}">${a.status === 'waiting' ? 'Снять ожидание' : 'Сбросить ошибку'}</button>` : ''}`;
 }
 
 async function tick() {
@@ -280,6 +281,14 @@ async function openConfig(id) {
 }
 function closeConfig() { $('modal').classList.add('hidden'); cfgId = null; }
 document.addEventListener('click', (e) => { const b = e.target.closest('[data-open]'); if (b) openConfig(b.dataset.open).catch((er) => alert(er.message)); });
+// «Зависший» статус (ждёт / ошибка) можно сбросить вручную; работающего сотрудника сервер не даёт сбросить.
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-clearwait]'); if (!b || b.disabled) return;
+  b.disabled = true;
+  try { const r = await api('/api/chat/clear-status', { method: 'POST', body: JSON.stringify({ agent: b.dataset.clearwait }) }); if (!r.ok) alert(r.error || 'Не вышло'); await tick(); }
+  catch (er) { alert('Ошибка: ' + er.message); }
+  b.disabled = false;
+});
 $('mClose').onclick = closeConfig;
 $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) closeConfig(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cfgId) closeConfig(); });
