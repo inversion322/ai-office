@@ -64,7 +64,7 @@ function renderPinned() {
 }
 
 /* ---------- переписка ---------- */
-function renderTabs() {
+function renderChatTabs() {
   const seen = seenMap(), cur = thread();
   const unread = (t) => chatData.messages.some((m) => m.thread === t && m.sender !== 'nick' && m.id > (seen[t] || 0));
   $('chatTabs').innerHTML = (((state && state.agents) || []).map((a) => `<button type="button" class="chat-tab ${cur === a.id ? 'on' : ''}" data-thread="${esc(a.id)}" title="${esc(a.name)}" aria-label="${esc(a.name)}"><span class="av">${duckSVG(a, { size: 26 })}</span>${cur === a.id ? esc(firstName(a)) : ''}${unread(a.id) && cur !== a.id ? '<span class="dot"></span>' : ''}</button>`).join(''));
@@ -88,7 +88,7 @@ function renderLog() {
   const log = $('chatLog');
   if (key !== chatKey) {
     const near = log.scrollHeight - log.scrollTop - log.clientHeight < 90 || chatKey === '' || !chatKey.startsWith(`["${cur}"`);
-    log.innerHTML = msgs.length ? msgs.map(msgHtml).join('') : `<div class="chat-empty">Здесь пока пусто.<br>Напишите ${ag ? esc(firstName(ag)) : 'сотруднику'}: он ответит в своей роли. Начните сообщение с имени в Telegram, и переписка появится и тут.</div>`;
+    log.innerHTML = msgs.length ? msgs.map(msgHtml).join('') : `<div class="chat-empty">Здесь пока пусто.<br>Напишите ${ag ? esc(firstName(ag)) : 'сотруднику'}: он ответит в своей роли.${officeId === 'smm' ? '<br>В Telegram-боте начните сообщение с имени, и переписка появится и тут.' : ''}</div>`;
     if (near) log.scrollTop = log.scrollHeight;
     chatKey = key;
   }
@@ -97,7 +97,7 @@ function renderLog() {
   const m = seenMap(); m[cur] = Math.max(0, m[cur] || 0, ...msgs.map((x) => x.id)); localStorage.setItem(seenKey(), JSON.stringify(m));
   $('chatInput').placeholder = `Написать: ${ag ? ag.name : 'сотруднику'}…`;
 }
-function renderChat() { renderTabs(); renderPinned(); renderLog(); }
+function renderChat() { renderChatTabs(); renderPinned(); renderLog(); }
 
 /* ---------- «Сейчас в работе» ---------- */
 function liveCard(a, kind) {
