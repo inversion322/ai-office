@@ -1,0 +1,93 @@
+/* Чистая логика Mini App без обращений к DOM: разбор ссылки, решения по состоянию экрана, подписи. Тестируется в Node (test/mini_core.test.mjs). */
+(function (root) {
+  'use strict';
+
+  // Адрес API берём из ссылки ?api=… (его подставляет бот при смене туннеля). Принимаем только https на trycloudflare:
+  // иначе любой, кто подсунет ссылку с чужим адресом, получил бы подпись Telegram (initData) на свой сервер.
+  const API_HOST_OK = /^[a-z0-9-]+\.trycloudflare\.com$/i;
+  function parseApi(search) {
+    let raw; try { raw = new URLSearchParams(search).get('api'); } catch { return { ok: false, reason: 'нет адреса' }; }
+    if (!raw) return { ok: false, reason: 'нет адреса' };
+    let u; try { u = new URL(raw); } catch { return { ok: false, reason: 'адрес не разобрать' }; }
+    if (u.protocol !== 'https:') return { ok: false, reason: 'нужен https' };
+    if (!API_HOST_OK.test(u.hostname)) return { ok: false, reason: 'неизвестный хост' };
+    if (u.username || u.password || u.port) return { ok: false, reason: 'лишнее в адресе' };
+    return { ok: true, api: u.origin };
+  }
+
+  // Что показать на «воротах» по ответу сервера/сети. Главное: человеку сказать, ЧТО делать, а не «ошибка».
+  function gateFor(kind, extra) {
+    switch (kind) {
+      case 'not-telegram': return { title: 'Откройте через Telegram', text: 'Эта страница работает только внутри бота @NickG_smm_bot: нажмите кнопку «Офис» рядом с полем ввода.', retry: false };
+      case 'no-api': return { title: 'Нет адреса офиса', text: 'Откройте офис кнопкой «Офис» в чате с ботом: адрес подставляется сам.', retry: false };
+      case 'bad-api': return { title: 'Адрес офиса не подходит', text: 'Ссылка выглядит поддельной (' + (extra || '') + '). Откройте офис кнопкой «Офис» в чате с ботом.', retry: false };
+      case 'forbidden': return { title: 'Нет доступа', text: 'Офис открывается только владельцу.', retry: false };
+      case 'expired': return { title: 'Сессия устарела', text: 'Закройте и откройте офис заново кнопкой «Офис».', retry: true };
+      case 'offline': return { title: 'Офис не отвечает', text: 'Скорее всего, туннель только что сменил адрес. Бот обновит кнопку «Офис» за минуту: закройте окно и откройте заново. Если не помогает, проверьте, что ПК включён.', retry: true };
+      default: return { title: 'Не получилось войти', text: 'Что-то пошло не так' + (extra && String(extra).length > 3 ? ' (' + String(extra).slice(0, 120) + ')' : '') + '. Закройте и откройте офис кнопкой «Офис» ещё раз.', retry: true };
+    }
+  }
+
+  // Статус сотрудника для людей.
+  const STATUS = { working: 'работает', waiting: 'ждёт', idle: 'свободен', error: 'ошибка', offline: 'отключён' };
+  const statusText = (s) => STATUS[s] || String(s || '');
+
+  // Сколько времени назад (для ленты и чата): «только что», «5 мин», «2 ч», «вчера».
+  function ago(ts, now) {
+    const s = Math.max(0, Math.round((now - ts) / 1000));
+    if (s < 45) return 'только что';
+    if (s < 3600) return Math.round(s / 60) + ' мин';
+    if (s < 86400) return Math.round(s / 3600) + ' ч';
+    return Math.round(s / 86400) + ' дн';
+  }
+
+  // Кому слать, если Ник пишет без выбора: имя в начале сообщения («Ксения, …») угадывает сервер; здесь только выбор вкладкой.
+  function targetFor(selected, agents) { return selected && agents.some((a) => a.id === selected) ? selected : null; }
+
+  // Ждущие ответа карточки: открытые action-сообщения, самые свежие сверху.
+  function pendingCards(messages) {
+    return (messages || []).filter((m) => m.kind === 'action' && m.status === 'open').sort((a, b) => b.id - a.id);
+  }
+
+  // Кнопки приходят рядами: [[{t,d}, {t,d}], [{t,d}]] (так их хранит чат) или плоско, или парами [текст, данные]. Приводим к плоскому списку {t,d}.
+  function normButtons(b) {
+    const out = [];
+    const take = (x) => {
+      if (Array.isArray(x)) { if (x.length === 2 && typeof x[0] === 'string' && typeof x[1] === 'string') out.push({ t: x[0], d: x[1] }); else x.forEach(take); return; }
+      if (x && typeof x === 'object') { const t = x.t || x.text, d = x.d || x.data; if (t && d) out.push({ t: String(t), d: String(d) }); }
+    };
+    take(b); return out;
+  }
+
+  // Что показывать в чате с выбранным сотрудником: только его поток. Ваши сообщения лежат в потоке того, кому адресованы: показывать их всем подряд
+  // значило бы выдать «Принять ролик» (Капитану) за реплику Ксении. Без выбора («Всем») виден общий поток.
+  const isMine = (m) => m.sender === 'nick';
+  function threadFilter(messages, who) {
+    const list = messages || [];
+    return who ? list.filter((m) => m.thread === who) : list;
+  }
+
+  // Какие кнопки просят текст. Совпадает с тем, как их разбирает сервер (lib_chat.mjs execAction):
+  //  rework/revise  — без текста сервер не продолжит («Напишите, что поправить»), значит текст обязателен;
+  //  package        — «Другое название»: можно с пожеланием («короче»), можно без него.
+  function commentMode(choice) {
+    const act = String(choice || '').split(':')[0];
+    if (act === 'rework' || act === 'revise') return { ask: true, required: true, title: 'Что исправить?', sub: act === 'rework' ? 'Кирилл учтёт это сразу, у ролика будет приоритет.' : 'Ксения исправит, Вера проверит заново.', cta: 'Отправить правки' };
+    if (act === 'package') return { ask: true, required: false, title: 'Какое название нужно?', sub: 'Можно без пожелания: Тимофей предложит другие варианты.', cta: 'Предложить другое' };
+    return { ask: false };
+  }
+
+  // Свёрнутый вид карточки: без пустых строк (они съедают место и прячут суть) и не больше N непустых строк. Возвращает { text, cut }.
+  function squash(text, lines = 4, maxChars = 220) {
+    const rows = String(text || '').split('\n').map((x) => x.trim()).filter(Boolean);
+    let out = rows.slice(0, lines).join('\n'); let cut = rows.length > lines;
+    if (out.length > maxChars) { out = out.slice(0, maxChars).replace(/\s+\S*$/, ''); cut = true; }
+    return { text: out, cut };
+  }
+
+  // Безопасный текст в HTML: страница строится из ответов сервера, в них не должно быть исполняемой разметки.
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  const api = { parseApi, gateFor, statusText, ago, targetFor, pendingCards, normButtons, squash, threadFilter, isMine, commentMode, esc, STATUS };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MiniCore = api;
+})(typeof window !== 'undefined' ? window : globalThis);

@@ -72,3 +72,8 @@ test('приёмка ролика запускает пакет (кнопка «
   for (let i = 0; i < 40 && !fs.existsSync(path.join(ROOT, 'smm', 'runs', 'package_8', 'publish_pack.txt')); i++) await sleep(500);
   assert.ok(fs.existsSync(path.join(ROOT, 'smm', 'runs', 'package_8', 'publish_pack.txt')), 'этап package не запустился после приёмки');
 });
+
+test('страховка: тестовый режим с рабочим адресом :8787 отказывается стартовать, а не пишет в рабочий офис', { skip: !can }, async () => {
+  const res = await new Promise((resolve) => { const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'package', '8'], { cwd: ROOT, env: { ...process.env, OFFICE_NO_TG: '1', OFFICE_API: 'http://127.0.0.1:8787', HERMES_BIN: FAKE }, stdio: ['ignore', 'pipe', 'pipe'] }); let o = ''; p.stdout.on('data', (b) => (o += b)); p.stderr.on('data', (b) => (o += b)); p.on('exit', (code) => resolve({ code, out: o })); });
+  assert.notEqual(res.code, 0); assert.match(res.out, /не может работать с рабочим API/);
+});

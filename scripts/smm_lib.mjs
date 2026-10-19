@@ -9,6 +9,9 @@ const CFG_PATH = path.join(ROOT, 'server', 'data', 'config.json');
 export const cfg = () => JSON.parse(fs.readFileSync(CFG_PATH, 'utf8'));
 export const OWNER = 323028999;                                   // Telegram id Ника (личный чат)
 export const API = process.env.OFFICE_API || 'http://127.0.0.1:8787';
+// Страховка от тестов, пишущих в рабочий офис: тестовый режим (OFFICE_NO_TG) и боевой адрес :8787 несовместимы.
+// Именно так в рабочий чат попали записи тестов, пока этой проверки не было.
+if (process.env.OFFICE_NO_TG && /:8787(\/|$)/.test(API)) throw new Error('Тестовый режим (OFFICE_NO_TG) не может работать с рабочим API ' + API + ': задайте OFFICE_API тестового сервера');
 export const HERMES = process.env.HERMES_BIN || path.join(process.env.LOCALAPPDATA || '', 'hermes', 'hermes-agent', '.hermes', 'bin', 'hermes.exe');
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Запуск модели-сотрудника. HERMES_BIN, оканчивающийся на .mjs, запускается как скрипт Node: тестовая имитация Кирилла без вызова настоящей модели.

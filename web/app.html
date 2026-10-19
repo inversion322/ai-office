@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#F5F3EE">
+<title>AI Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="mini.css">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+<div id="gate" class="gate">
+  <div id="gateDuck" class="gate-duck"></div>
+  <h1 id="gateTitle">AI Office</h1>
+  <p id="gateText">Подключаюсь к офису…</p>
+  <button id="gateRetry" class="btn hidden" type="button">Повторить</button>
+</div>
+
+<div id="app" class="app hidden">
+  <header class="top">
+    <button id="back" class="back hidden" type="button" aria-label="Назад">‹</button>
+    <div class="brand"><span class="brand-mark"></span><span id="brandText">Nick G SMM</span></div>
+    <div id="conn" class="conn off" title="связь с офисом">·</div>
+  </header>
+
+  <div id="stale" class="stale hidden" role="status">Нет связи с офисом: показаны данные на <b id="staleAt"></b></div>
+
+  <main class="views">
+    <section id="v-now" class="view">
+      <div id="pinned" class="pinned hidden" aria-live="polite"></div>
+      <div id="crew" class="crew"></div>
+      <div id="clips" class="clips"></div>
+    </section>
+
+    <section id="v-chat" class="view hidden">
+      <nav id="who" class="who" aria-label="Кому писать"></nav>
+      <div id="log" class="log" role="log" aria-live="polite"></div>
+      <div id="typing" class="typing"></div>
+    </section>
+
+    <section id="v-feed" class="view hidden">
+      <ul id="feed" class="feed"></ul>
+    </section>
+  </main>
+
+  <form id="composer" class="composer hidden">
+    <textarea id="msg" rows="1" maxlength="2000" placeholder="Напишите сотруднику…" aria-label="Сообщение"></textarea>
+    <button class="send" type="submit" id="send" aria-label="Отправить">↑</button>
+  </form>
+
+  <nav class="tabbar" role="tablist">
+    <button role="tab" data-v="now" class="on">Сейчас</button>
+    <button role="tab" data-v="chat">Чат<b id="badge" class="badge hidden">0</b></button>
+    <button role="tab" data-v="feed">Лента</button>
+  </nav>
+</div>
+
+<div id="sheet" class="sheet hidden" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="sheet-card">
+    <h3 id="sheetTitle">Что исправить?</h3>
+    <p class="sheet-sub">Сотрудник учтёт это сразу.</p>
+    <textarea id="sheetText" rows="4" maxlength="2000" placeholder="Например: сделай первую сцену короче и крупнее текст"></textarea>
+    <div class="sheet-btns"><button class="btn ghost" id="sheetCancel" type="button">Отмена</button><button class="btn" id="sheetOk" type="button">Отправить правки</button></div>
+  </div>
+</div>
+
+<script src="duck.js"></script>
+<script src="mini_core.js"></script>
+<script src="mini.js"></script>
+</body>
+</html>

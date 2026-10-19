@@ -88,8 +88,11 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
   const setStage = (id, stage) => run('UPDATE videos SET stage=?, updated_at=? WHERE id=?', stage, now(), id);
 
   function spawnPipeline(args) {
+    // Тестовый сервер (OFFICE_CHAT_STUB) не должен запускать настоящих сотрудников: это тратит лимит Claude и пишет в рабочие журналы.
+    // Настоящий запуск в тесте разрешён только с подменой модели (HERMES_BIN), как в интеграционных тестах.
+    if (STUB && !process.env.HERMES_BIN) { console.error('spawnPipeline: тестовый режим без HERMES_BIN, этап', args.join(' '), 'не запущен'); post({ thread: 'captain_smm', sender: 'captain_smm', text: `(тест) этап «${args.join(' ')}» не запущен: в тестовом режиме нет подмены модели.` }); return; }
     fs.mkdirSync(path.join(ROOT, 'smm'), { recursive: true });
-    const out = fs.openSync(path.join(ROOT, 'smm', 'pipeline.log'), 'a');
+    const out = fs.openSync(path.join(ROOT, 'smm', STUB ? 'pipeline.test.log' : 'pipeline.log'), 'a');
     const port = process.env.PORT || 8787;      // этап ходит в тот же сервер, что его запустил
     spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), ...args], { cwd: ROOT, detached: true, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, OFFICE_API: process.env.OFFICE_API || `http://127.0.0.1:${port}` } }).unref();
   }

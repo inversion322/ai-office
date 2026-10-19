@@ -1,4 +1,5 @@
 // AI Office API: Node + SQLite, без внешних зависимостей.
+import { verifyInitData, makeSessions } from './lib_tgauth.mjs';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -168,12 +169,23 @@ function cors(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
 }
+const OWNER_ID = Number(cfg.ownerTgId || 323028999);       // Ник; Mini App пускает только его
+const sessions = makeSessions();
 const authed = (req) => {
   const h = req.headers.authorization || '';
-  const given = Buffer.from(h.replace(/^Bearer /, ''));
+  const bearer = h.replace(/^Bearer /, '');
+  const given = Buffer.from(bearer);
   const real = Buffer.from(cfg.token);
-  return given.length === real.length && crypto.timingSafeEqual(given, real);
+  if (given.length === real.length && crypto.timingSafeEqual(given, real)) return 'full';  // постоянный токен (дашборд на Pages, агенты, скрипты)
+  const s = sessions.check(bearer);                                                       // сессия Mini App, выданная по подписи Telegram
+  return s && s.userId === OWNER_ID ? 'mini' : false;
 };
+// Сессия телефона видит всё, что нужно для просмотра, и отвечает/пишет сотрудникам. Менять промпты, статусы агентов и сцены (то, чем пользуются сами агенты) она не может:
+// если телефон потеряют или в странице найдут дыру, офис не перепишут.
+export const MINI_ALLOWED = [['GET', '/api/state'], ['GET', '/api/chat'], ['POST', '/api/chat/send'], ['POST', '/api/chat/answer'], ['GET', '/api/priority']];
+const miniOk = (method, p) => MINI_ALLOWED.some(([m, x]) => m === method && x === p);
+let authFails = [];                                                                       // защита от перебора подписи: не больше 20 неудач в минуту
+
 const json = (res, code, obj) => {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(obj));
@@ -185,7 +197,18 @@ http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
   const url = new URL(req.url, 'http://x');
   if (url.pathname === '/health') return json(res, 200, { ok: true });
-  if (!authed(req)) return json(res, 401, { error: 'unauthorized' });
+  if (req.method === 'POST' && url.pathname === '/api/tg-login') {
+    const t = Date.now(); authFails = authFails.filter((x) => t - x < 60000);
+    if (authFails.length >= 20) return json(res, 429, { error: 'слишком много попыток' });
+    const b = await body(req);
+    const v = verifyInitData(b.initData, cfg.smmBotToken);
+    if (!v.ok) { authFails.push(t); return json(res, 401, { error: 'unauthorized', reason: v.reason }); }
+    if (v.userId !== OWNER_ID) { authFails.push(t); return json(res, 403, { error: 'forbidden' }); }
+    return json(res, 200, { ok: true, token: sessions.issue(v.userId), name: v.user.first_name || '' });
+  }
+  const level = authed(req);
+  if (!level) return json(res, 401, { error: 'unauthorized' });
+  if (level === 'mini' && !miniOk(req.method, url.pathname)) return json(res, 403, { error: 'forbidden for mini app' });
 
   if (req.method === 'GET' && url.pathname === '/api/state') {
     const asked = url.searchParams.get('office');
