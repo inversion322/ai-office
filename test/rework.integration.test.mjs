@@ -34,7 +34,7 @@ before(async () => {
   fs.writeFileSync(path.join(PROJ, 'final', 'dosie09_v1.mp4'), Buffer.alloc(2048, 7));
   fs.writeFileSync(path.join(PROJ, 'script_ru.txt'), 'Абзац один.\n\nАбзац два.\n', 'utf8');
   fs.writeFileSync(path.join(PROJ, 'PROGRESS.md'), '- старая строка\n');
-  server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1' }, stdio: 'ignore' });
+  server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE }, stdio: 'ignore' });
   for (let i = 0; i < 40; i++) { try { const r = await fetch(API + '/api/priority', { headers: { Authorization: 'Bearer ' + token } }); if (r.ok) return; } catch {} await sleep(300); }
   throw new Error('тестовый API не поднялся');
 });

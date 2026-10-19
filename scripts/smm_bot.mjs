@@ -33,7 +33,7 @@ async function onMessage(m) {
     return;
   }
   if (text.startsWith('/start') || text.startsWith('/topics')) {
-    if (text.startsWith('/start')) await tg('sendMessage', { chat_id: OWNER, text: 'Это бот офиса Nick G SMM. Сюда приходят темы на выбор, сценарии на утверждение и готовые ролики. Можно писать сотрудникам: начните сообщение с имени («Ксения, …», «Лев, …», «Вера, …», «Кирилл, …», «Виктор, …»); без имени отвечает Капитан Кряк. То же самое есть в чате дашборда, переписка общая. /status: что в работе, /topics: темы, ждущие выбора.' });
+    if (text.startsWith('/start')) await tg('sendMessage', { chat_id: OWNER, text: 'Это бот офиса Nick G SMM. Сюда приходят темы на выбор, сценарии на утверждение и готовые ролики. Можно писать сотрудникам: начните сообщение с имени («Ксения, …», «Лев, …», «Вера, …», «Кирилл, …», «Виктор, …», «Тимофей, …»); без имени отвечает Капитан Кряк. То же самое есть в чате дашборда, переписка общая. /status: что в работе, /topics: темы, ждущие выбора.' });
     const tm = topicsMessage(await videos());
     if (tm) return notify(tm.text, tm.buttons);
     return text.startsWith('/topics') ? tg('sendMessage', { chat_id: OWNER, text: 'Тем, ждущих выбора, нет.' }) : undefined;

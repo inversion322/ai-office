@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { cleanReport } from './lib_text.mjs';
 
 const OWNER = 323028999;
-const NAMES = { капитан: 'captain_smm', кряк: 'captain_smm', виктор: 'research', ксения: 'scriptwriter', лев: 'virality', вера: 'factcheck', кирилл: 'video' };
+const NAMES = { капитан: 'captain_smm', кряк: 'captain_smm', виктор: 'research', ксения: 'scriptwriter', лев: 'virality', вера: 'factcheck', кирилл: 'video', тимофей: 'packager' };
 const REPLY_PROFILE = { video: 'video' };     // Кирилл отвечает на Opus 5.5, остальные SMM на профиле smm
 const STAGE_LABEL = { idea: 'идея', scored: 'оценена, ждёт выбора', script: 'сценарий пишется/проверяется', checked: 'сценарий проверен, ждёт утверждения', editing: 'монтаж', produced: 'ролик готов, ждёт приёма', approved: 'принят', rejected: 'отклонена', published: 'опубликован' };
 
@@ -90,7 +90,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
   function spawnPipeline(args) {
     fs.mkdirSync(path.join(ROOT, 'smm'), { recursive: true });
     const out = fs.openSync(path.join(ROOT, 'smm', 'pipeline.log'), 'a');
-    spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), ...args], { cwd: ROOT, detached: true, stdio: ['ignore', out, out], windowsHide: true }).unref();
+    const port = process.env.PORT || 8787;      // этап ходит в тот же сервер, что его запустил
+    spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), ...args], { cwd: ROOT, detached: true, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, OFFICE_API: process.env.OFFICE_API || `http://127.0.0.1:${port}` } }).unref();
   }
 
   /* ---------- выполнение действий (кнопки и подтверждённые предложения) ---------- */
@@ -141,12 +142,15 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     } else if (act === 'accept' && v) {
       supersede(`accept:${id}`); supersede(`rework:${id}`);
       setStage(id, 'approved'); setAgent('captain_smm', 'idle', 'Ролик принят, ждёт вашей публикации', `Ник принял ролик «${v.title}»`);
-      cap('Ролик принят. Публикуете вы сами, когда готовы.');
+      cap('Ролик принят. Тимофей уже придумывает название и хэштеги, пришлю одним сообщением. Публикуете вы сами, когда готовы.');
+      spawnPipeline(['package', String(id)]);
     } else if (act === 'resume') {
       const job = jobInfo() || { ver: 'v2', brief: 'dosie01/BRIEF_v2b.md' };
       const dir = path.join(ROOT, 'video', 'med_detective'); const out = fs.openSync(path.join(dir, 'dosie01', `_run_${job.ver}_resume_log.txt`), 'a');
       spawn(HERMES, ['-p', 'video', 'chat', '--query-file', job.brief, '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: dir, detached: true, stdio: ['ignore', out, out], windowsHide: true }).unref();
       cap('Запустила Кирилла заново: он продолжит по сохранённым файлам. Ход работы виден справа в «Сейчас в работе».');
+    } else if (act === 'package' && v) {
+      cap(`Запускаю Тимофея заново: название и хэштеги для «${v.title}».`); spawnPipeline(['package', String(id), ...(comment && comment.trim() ? ['--comment', comment.trim()] : [])]);
     } else if (act === 'retry' && v) {
       if (v.stage === 'editing') { cap(`Запускаю монтаж заново: «${v.title}».`); spawnPipeline(['produce', String(id)]); }
       else { setStage(id, 'script'); cap(`Запускаю сценарий заново: «${v.title}».`); spawnPipeline(['script', String(id)]); }
@@ -213,7 +217,7 @@ ${c.hist}
 
 Новое сообщение Ника: ${text}
 
-Если Ник просит выполнить шаг конвейера (выбрать тему, утвердить сценарий, вернуть его на правки, принять или отклонить ролик, внести правки в готовый ролик, найти другие темы), НЕ говори, что уже сделала: предложи действие в поле action, Ник подтвердит кнопкой. Типы: pick (video_id), more, approve (video_id), revise (video_id, comment), rework (video_id, comment: что именно поправить в готовом ролике, дословно по просьбе Ника), accept (video_id), reject (video_id).
+Если Ник просит выполнить шаг конвейера (выбрать тему, утвердить сценарий, вернуть его на правки, принять или отклонить ролик, внести правки в готовый ролик, найти другие темы), НЕ говори, что уже сделала: предложи действие в поле action, Ник подтвердит кнопкой. Типы: pick (video_id), more, approve (video_id), revise (video_id, comment), rework (video_id, comment: что именно поправить в готовом ролике, дословно по просьбе Ника), accept (video_id), reject (video_id), package (video_id, comment: пожелание к названию или хэштегам, например «короче» или «без вопроса»).
 Итог запиши в файл ${outFile} строго как JSON: {"reply":"текст ответа Нику","action":null или {"type":"pick","video_id":3,"comment":""}}. После записи файла ничего больше не делай.`, 'utf8');
         await new Promise((resolve) => {
           const p = spawn(HERMES, ['-p', office === 'smm' ? (REPLY_PROFILE[thread] || 'smm') : 'jobs', 'chat', '--query-file', qFile, '-Q', '--oneshot', '--max-turns', '30', '--run-budget', '420'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -223,12 +227,12 @@ ${c.hist}
       }
       if (!rep) rep = 'Не получилось ответить сейчас, повторите вопрос чуть позже.';
       post({ office, thread, sender: thread, text: rep, source: 'agent', mirrorTg: true });
-      const ACTS = new Set(['pick', 'more', 'approve', 'revise', 'rework', 'accept', 'reject']);
+      const ACTS = new Set(['pick', 'more', 'approve', 'revise', 'rework', 'accept', 'reject', 'package']);
       if (action && ACTS.has(action.type)) {
         const v = action.video_id ? q('SELECT title FROM videos WHERE id=?', Number(action.video_id))[0] : null;
         if (action.type === 'more' || v) {
           const data = `${action.type}:${action.type === 'more' ? 0 : Number(action.video_id)}`;
-          const label = { pick: 'Выбрать тему', more: 'Искать другие темы', approve: 'Утвердить сценарий', revise: 'Вернуть на правки', rework: 'Внести правки в ролик', accept: 'Принять ролик', reject: 'Отклонить' }[action.type];
+          const label = { pick: 'Выбрать тему', more: 'Искать другие темы', approve: 'Утвердить сценарий', revise: 'Вернуть на правки', rework: 'Внести правки в ролик', package: 'Придумать название и хэштеги заново', accept: 'Принять ролик', reject: 'Отклонить' }[action.type];
           const mid = post({ office, thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: `Правильно ли я поняла: ${label.toLowerCase()}${v ? ` «${v.title}»` : ''}${action.comment ? ` (${action.comment})` : ''}?`, ref: { data, comment: action.comment || '' }, buttons: [[['Да, сделать', 'confirm:0'], ['Нет', 'cancel:0']]], mirrorTg: false });
           run('UPDATE messages SET buttons=? WHERE id=?', JSON.stringify([[{ t: 'Да, сделать', d: `confirm:${mid}` }, { t: 'Нет', d: `cancel:${mid}` }]]), mid);
           mirror(mid).catch(() => {});

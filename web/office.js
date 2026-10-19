@@ -17,8 +17,8 @@ const OFFICE_LAYOUTS = {
     rooms: { jobs: { x: 6, y: 43, w: 196, h: 130, door: { in: [190, 126], out: [208, 126] } },
              cap:  { x: 214, y: 52, w: 74, h: 98, door: { in: [251, 138], out: [251, 160] } } },
     plants: [[300, 150], [300, 100], [4, 176]],
-    desks: { captain_smm: [78.4, 56.7], research: [14, 47], virality: [31, 47], scriptwriter: [48, 47], factcheck: [48, 80.6], video: [31, 80.6] },
-    agentRoom: { captain_smm: 'cap', research: 'jobs', virality: 'jobs', scriptwriter: 'jobs', factcheck: 'jobs', video: 'jobs' } },
+    desks: { captain_smm: [78.4, 56.7], research: [14, 47], virality: [31, 47], scriptwriter: [48, 47], factcheck: [48, 80.6], video: [31, 80.6], packager: [65, 80.6] },
+    agentRoom: { captain_smm: 'cap', research: 'jobs', virality: 'jobs', scriptwriter: 'jobs', factcheck: 'jobs', video: 'jobs', packager: 'jobs' } },
 };
 let OFFICE_DESKS, AGENT_ROOM, PLANTS;
 function applyOffice(id) {
