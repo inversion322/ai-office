@@ -12,20 +12,8 @@ import { ROOT, api, agent, scene, promptOf, videos, getVideo, setVideo, runAgent
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 const safeNotify = async (text, buttons) => { try { await notify(text, buttons); } catch (e) { console.error('УВЕДОМЛЕНИЕ НЕ ДОСТАВЛЕНО:', e.message); fs.appendFileSync(path.join(ROOT, 'smm', 'undelivered.txt'), `\n--- ${new Date().toISOString()}\n${text}\n`); } };
 const MAX_SPEECH = 52, MAX_WORDS = 115;      // озвучка до 52 с (rate +25%), итоговый ролик строго до 59 с
-// Реальная длина озвучки: синтез Dmitry + ffprobe (несколько секунд), без субтитров
-async function speechSeconds(segments) {
-  const { spawnSync } = await import('node:child_process');
-  const tmp = path.join(ROOT, 'smm', 'runs', '_len'); fs.mkdirSync(tmp, { recursive: true });
-  const t = path.join(tmp, 'script.txt'); fs.writeFileSync(t, segments.join('\n\n'), 'utf8');
-  let r, m;
-  for (let i = 0; i < 3 && !m; i++) {   // сервис озвучки отвечает отказом пачками: повторы внутри narrate.py плюс ещё два захода с паузой
-    if (i) await new Promise((r) => setTimeout(r, 25000));
-    r = spawnSync('C:/hf_tts/venv/Scripts/python.exe', [path.join(ROOT, 'video', 'narrate.py'), '--lang', 'ru', '--text', t, '--out', path.join(tmp, 'len.mp3'), '--max-sec', '999'], { encoding: 'utf8' });
-    m = /duration:\s*([\d.]+)\s*s/.exec(r.stdout || '');
-  }
-  if (!m) throw new Error('не удалось измерить озвучку: ' + String(r.stderr || r.stdout || '').trim().split('\n').pop().slice(0, 200));
-  return Number(m[1]);
-}
+import { speechSeconds as measureSpeech } from './smm_tts.mjs';
+const speechSeconds = (segments) => measureSpeech(segments, { root: ROOT });   // { sec, estimated, perSeg }
 const NOTE = (v) => { try { return JSON.parse(v.notes || '{}'); } catch { return {}; } };
 
 /* ---------------- 1. Темы ---------------- */
@@ -111,16 +99,19 @@ async function script(id, comment) {
     });
     prev = readJson(sj);
     if (!prev || !Array.isArray(prev.segments)) { await agent('scriptwriter', 'error', 'Сценарий не получился', 0, `Нет script.json (код ${t1.code})`, 'error'); await safeNotify(`⚠️ Сценарий «${v.title}» не получился, см. ${dir}`); throw new Error('нет script.json'); }
-    const dur = await speechSeconds(prev.segments), words = prev.segments.join(' ').split(/\s+/).length;
-    console.log(`круг ${round}: ${words} слов, озвучка ${dur.toFixed(1)} с`);
+    const sp = await speechSeconds(prev.segments), dur = sp.sec, words = prev.segments.join(' ').split(/\s+/).length;
+    const tag = sp.estimated ? ' (оценка по тексту, сервис озвучки недоступен)' : '';
+    console.log(`круг ${round}: ${words} слов, озвучка ${dur.toFixed(1)} с${tag}`);
+    if (sp.estimated) await say('scriptwriter', `Сервис озвучки сейчас не отвечает, длину оценила по тексту с запасом: ≈${dur.toFixed(0)} с. Точный замер будет при озвучке ролика.`);
     if (dur > MAX_SPEECH) {
       await agent('scriptwriter', 'working', `Сокращаю: озвучка ${dur.toFixed(0)} с при лимите ${MAX_SPEECH}`, 60, `Сценарий слишком длинный (${dur.toFixed(1)} с), сокращаю`, 'warn');
-      changes = [`Озвучка ${dur.toFixed(1)} с при лимите ${MAX_SPEECH} с (диктор +25%). Сократи до ${Math.floor(words * MAX_SPEECH / dur) - 3} слов, сохрани хук, суть улик и оговорки авторов.`];
+      const cut = Math.ceil(dur - MAX_SPEECH + 2), perSeg = (sp.perSeg || []).map((x, i) => `${i + 1}) ${x.toFixed(1)} с, ${String(prev.segments[i] || '').split(/\s+/).length} сл.`).join('; ');
+      changes = [`Озвучка ${dur.toFixed(1)} с${tag} при лимите ${MAX_SPEECH} с (диктор +25%). Нужно убрать минимум ${cut} с, это примерно ${Math.ceil(cut / 0.45)} слов (одно слово ≈ 0,45 с). Длина по абзацам: ${perSeg}. Режь в самых длинных абзацах, сохрани хук, суть улик и оговорки авторов.`];
       if (round === 3) { check = { verdict: 'fix', summary: `Сценарий не укладывается в лимит: ${dur.toFixed(1)} с`, required_changes: changes, claims: [] }; ok = false; break; }
       continue;
     }
-    await agent('scriptwriter', 'idle', 'Сценарий передан на проверку фактов', 100, `Сценарий готов (круг ${round}, озвучка ${dur.toFixed(0)} с)`);
-    await say('scriptwriter', `Сценарий готов (круг ${round}): ${words} слов, озвучка ${dur.toFixed(0)} с. Передала Вере на проверку фактов.`);
+    await agent('scriptwriter', 'idle', 'Сценарий передан на проверку фактов', 100, `Сценарий готов (круг ${round}, озвучка ${dur.toFixed(0)} с${sp.estimated ? ', оценка' : ''})`);
+    await say('scriptwriter', `Сценарий готов (круг ${round}): ${words} слов, озвучка ${dur.toFixed(0)} с${sp.estimated ? ' (оценка)' : ''}. Передала Вере на проверку фактов.`);
     await scene('scriptwriter', 'factcheck', 'Вера, проверь, пожалуйста, каждую фразу с фактом.', 'chat');
     await agent('factcheck', 'working', 'Проверяю факты по первоисточникам', 30, 'Начала проверку фактов');
     const t2 = await runAgent({
@@ -192,10 +183,23 @@ async function produce(id, comment) {
 const [cmd, a1, ...rest] = process.argv.slice(2);
 const opt = (name, from) => { const i = from.indexOf(name); return i >= 0 ? from[i + 1] : ''; };
 const all = [a1, ...rest];
-const run = cmd === 'topics' ? topics(opt('--hint', all))
+const runOnce = () => cmd === 'topics' ? topics(opt('--hint', all))
   : cmd === 'script' ? script(a1, opt('--comment', rest))
   : cmd === 'produce' ? produce(a1, opt('--comment', rest))
   : Promise.resolve(console.log('Команды: topics [--hint …] | script <id> [--comment …] | produce <id> [--comment …]'));
+// Временные сбои (сервис озвучки, сеть, API): один автоповтор через 2 минуты, и только потом тревога Нику
+const TRANSIENT = /NoAudioReceived|WSServerHandshake|TTS_UNAVAILABLE|ECONNRESET|ECONNREFUSED|fetch failed|ETIMEDOUT|timed out|не удалось ни измерить/i;
+const run = (async () => {
+  try { await runOnce(); }
+  catch (e) {
+    if (!TRANSIENT.test(String((e && e.message) || e))) throw e;
+    const who = cmd === 'script' ? 'scriptwriter' : cmd === 'produce' ? 'video' : 'research';
+    console.error('временный сбой, повтор через 2 минуты:', String(e.message).split('\n')[0]);
+    await agent(who, 'working', 'Временный сбой сервиса, повторю через 2 минуты', 5, `Временный сбой: ${String(e.message).split('\n')[0].slice(0, 160)}`, 'warn');
+    await new Promise((r) => setTimeout(r, 120000));
+    await runOnce();
+  }
+})();
 run.catch(async (e) => {
   const msg = String((e && e.message) || e).split('\n')[0].slice(0, 220);
   console.error('ОШИБКА:', msg);
@@ -206,7 +210,7 @@ run.catch(async (e) => {
     if (cmd === 'script') { await agent('factcheck', 'idle', 'Ждёт сценарий на проверку', 0); }
     if (cmd === 'topics') { await agent('virality', 'idle', 'Ждёт темы для оценки', 0); }
     await agent('captain_smm', 'waiting', `Сбой этапа ${stage}, ждёт вашего решения`, 0, `Этап ${stage} остановился с ошибкой`, 'error');
-    await safeNotify(`⚠️ Этап ${stage} остановился с ошибкой: ${msg}\n\nЭто сбой на нашей стороне, ваши действия не нужны. Нажмите «Повторить», и я запущу этап заново.`, [[['Повторить', cmd === 'topics' ? 'more:0' : `retry:${a1}`]]]);
+    await safeNotify(`⚠️ Этап ${stage} остановился с ошибкой (после автоповтора): ${msg}\n\nЭто сбой на нашей стороне, не ваш. Нажмите «Повторить», когда удобно, и я запущу этап заново.`, [[['Повторить', cmd === 'topics' ? 'more:0' : `retry:${a1}`]]]);
   } catch (e2) { console.error('не удалось отметить сбой:', e2.message); }
   process.exit(1);
 });
