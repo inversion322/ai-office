@@ -30,6 +30,7 @@
       <nav id="officeTabs" class="tabs" aria-label="Офисы"></nav>
       <div id="conn" class="conn off">нет связи</div>
       <div class="spacer"></div>
+      <button id="chatBtn" class="btn-ghost chat-btn" type="button" title="Чат с сотрудниками">💬 Чат<b id="chatBadge" class="badge hidden">0</b></button>
       <div id="clock" class="clock"></div>
       <button id="logout" class="btn-ghost">Выйти</button>
     </header>
@@ -88,8 +89,25 @@
   </div>
 </div>
 
+
+<aside id="chat" class="chat hidden" aria-label="Чат с сотрудниками">
+  <header class="chat-head">
+    <div class="chat-title" id="chatTitle">Чат</div>
+    <button id="chatClose" class="btn-ghost" type="button" aria-label="Закрыть чат">✕</button>
+  </header>
+  <nav class="chat-tabs" id="chatTabs" aria-label="Собеседники"></nav>
+  <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
+  <div class="chat-typing" id="chatTyping"></div>
+  <form class="chat-form" id="chatForm">
+    <textarea id="chatInput" rows="1" placeholder="Напишите сотруднику…" maxlength="2000"></textarea>
+    <button class="btn-primary" type="submit" id="chatSend">Отправить</button>
+  </form>
+  <div class="chat-hint">Enter отправляет, Shift+Enter новая строка. Переписка общая с Telegram-ботом @NickG_smm_bot.</div>
+</aside>
+
 <script src="duck.js"></script>
 <script src="office.js"></script>
 <script src="app.js"></script>
+<script src="chat.js"></script>
 </body>
 </html>

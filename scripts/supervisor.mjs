@@ -35,6 +35,7 @@ function saveUrl(url) {
 }
 
 keepAlive('api', process.execPath, ['server.mjs'], { cwd: path.join(root, 'server') }, (l) => log('api: ' + l));
+keepAlive('smm-bot', process.execPath, ['scripts/smm_bot.mjs'], { cwd: root }, (l) => log('smm-bot: ' + l));
 setTimeout(() => keepAlive('tunnel', CF, ['tunnel', '--url', 'http://127.0.0.1:8787', '--no-autoupdate'], {}, (l) => {
   const m = l.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
   if (m) saveUrl(m[0]);

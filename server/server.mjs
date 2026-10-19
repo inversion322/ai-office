@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { ensureExtraAgents } from './lib_extra_agents.mjs';
+import { setupChat } from './lib_chat.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.OFFICE_DATA_DIR || path.join(__dirname, 'data');
@@ -150,6 +151,7 @@ function seedPrompts() {
 }
 seedPrompts();
 ensureExtraAgents(db);
+const chat = setupChat({ db, ROOT: path.resolve(__dirname, '..'), DATA_DIR });
 // Разовое разделение офисов: Виктор и Алиса (не подключены) уходят в резерв, в офис поиска работы и в SMM они не входят.
 if (!q("SELECT 1 x FROM kv WHERE k='office_split_v1'")[0]) {
   run("UPDATE agents SET office='reserve' WHERE id IN ('content')");
@@ -196,7 +198,7 @@ http.createServer(async (req, res) => {
     const vstages = {};
     for (const v of videos) vstages[v.stage] = (vstages[v.stage] || 0) + 1;
     return json(res, 200, {
-      ts: now(), office, offices: OFFICES, agents,
+      ts: now(), office, offices: OFFICES, agents, pending: chat.pending(office),
       tasks: q("SELECT t.*, a.name agent_name FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE a.office=? AND t.status IN ('running','planned') ORDER BY t.status DESC, t.scheduled_at LIMIT 50", office),
       events: q("SELECT e.*, a.name agent_name FROM events e LEFT JOIN agents a ON a.id=e.agent_id WHERE a.office=? OR (a.id IS NULL AND ?='jobs') ORDER BY e.id DESC LIMIT 60", office, office),
       jobs, funnel: stages, videos, vfunnel: vstages,
@@ -268,5 +270,6 @@ http.createServer(async (req, res) => {
       b.source, b.title, b.company, b.url, b.salary ?? '', b.format ?? '', b.summary ?? '', b.fit ?? '', b.stage || 'found', now(), now());
     return json(res, 200, { ok: true });
   }
+  if (await chat.handle(req, res, url, body, json)) return;
   json(res, 404, { error: 'not found' });
 }).listen(PORT, '127.0.0.1', () => console.log(`AI Office API: http://127.0.0.1:${PORT}`));

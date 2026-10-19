@@ -63,7 +63,22 @@ function setStatusClasses(agents) {
     if (ac.st !== a.status) { ac.st = a.status; ac.el.innerHTML = duckSVG(a); }
     const walking = ac.el.classList.contains('walking');
     ac.el.className = `actor ${a.status}${a.status === 'working' && !walking ? ' typing' : ''}${walking ? ' walking' : ''}`;
+    updateBadge(a, walking);
   });
+}
+/* постоянная подпись над сотрудником: над чем работает прямо сейчас (виден ход работы, а не только жесты утки) */
+function updateBadge(a, walking) {
+  const layer = $('bubbles'); if (!layer) return;
+  let b = layer.querySelector(`.work-badge[data-id="${a.id}"]`);
+  const show = a.status === 'working' && a.task && !walking;
+  if (!show) { if (b) b.remove(); return; }
+  const [x, y] = [parseFloat(actors[a.id].el.style.left), parseFloat(actors[a.id].el.style.top)];
+  if (!b) { b = document.createElement('div'); b.className = 'work-badge'; b.dataset.id = a.id; layer.appendChild(b); }
+  const pr = Math.max(0, Math.min(100, Number(a.progress) || 0));
+  const short = String(a.task).replace(/\s*\(дело[^)]*\)/i, '').replace(/\s*⏱.*$/, '');
+  const mins = (/⏱\s*([^]*)$/.exec(a.task) || [])[1];
+  b.style.left = (x + 1) + '%'; b.style.top = (y + 2.5) + '%'; b.title = a.task; b.classList.add('side');
+  b.innerHTML = `<small>⚙ работает${mins ? ' · ' + esc(mins) : ''}</small>${esc(short.length > 46 ? short.slice(0, 44) + '…' : short)}${pr ? `<i style="width:${pr}%"></i>` : ''}`;
 }
 
 /* ---------- сцены: диалоги и выдача задач ---------- */
@@ -147,6 +162,7 @@ function switchOffice(id) {
   $('actors').innerHTML = ''; $('desks').innerHTML = ''; $('bubbles').innerHTML = '';
   playedScenes.clear(); sceneQueue = []; selected = null; state = null;
   applyOffice(id); drawOffice([], officeTick);
+  if (typeof chatOnOfficeSwitch === 'function') chatOnOfficeSwitch();
   tick();
 }
 document.addEventListener('click', (e) => { const t = e.target.closest('[data-office]'); if (t) switchOffice(t.dataset.office); });
@@ -159,6 +175,7 @@ function render(s) {
   const isSmm = (s.office || officeId) === 'smm';
   $('sWait').textContent = isSmm ? (s.videos || []).filter((v) => NEED_NICK.includes(v.stage)).length : s.jobs.filter((j) => j.stage === 'review').length;
   renderTabs(s);
+  if (typeof chatOnState === 'function') chatOnState(s);
   const L = applyOffice(s.office || officeId);
   $('lblDept').textContent = L.dept; $('lblCap').textContent = L.cap;
   $('lblDept').style.left = ((ROOMS.jobs.x + 5.5) / OW * 100) + '%'; $('lblDept').style.top = ((ROOMS.jobs.y + 2) / OH * 100) + '%';
