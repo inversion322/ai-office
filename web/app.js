@@ -2,6 +2,11 @@
 const POLL_MS = 15000;
 const STATUS = { working: 'работает', waiting: 'ждёт', idle: 'свободен', error: 'ошибка', offline: 'отключён' };
 const STAGES = [['found', 'Найдено'], ['review', 'Review'], ['approved', 'Одобрено'], ['letter', 'Письмо'], ['applied', 'Отправлено'], ['reply', 'Ответ']];
+// Конвейер роликов (офис Nick G SMM)
+const VSTAGES = [['idea', 'Идеи'], ['scored', 'Оценены'], ['script', 'Сценарий'], ['checked', 'Проверен'], ['produced', 'Видео'], ['approved', 'Принято']];
+const VSTAGE_NAME = Object.fromEntries(VSTAGES.concat([['published', 'Опубликован'], ['rejected', 'Отклонён']]));
+const NEED_NICK = ['scored', 'checked', 'produced'];            // стадии, где ход за Ником
+let officeId = localStorage.getItem('office_id') || 'jobs';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -18,7 +23,7 @@ const store = {
 
 async function fetchState() {
   const { url, token } = store.get();
-  const r = await fetch(url + '/api/state', { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store' });
+  const r = await fetch(url + '/api/state?office=' + encodeURIComponent(officeId), { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store' });
   if (r.status === 401) throw new Error('Неверный токен');
   if (!r.ok) throw new Error('API ответил ' + r.status);
   return r.json();
@@ -130,15 +135,37 @@ function enqueueScenes(list) {
   pump();
 }
 
+/* ---------- переключатель офисов ---------- */
+function renderTabs(s) {
+  const box = $('officeTabs'); if (!box || !s.offices) return;
+  box.innerHTML = s.offices.map((o) => `<button type="button" class="tab ${o.id === (s.office || officeId) ? 'on' : ''}" data-office="${esc(o.id)}">${esc(o.name)}</button>`).join('');
+}
+function switchOffice(id) {
+  if (id === officeId) return;
+  officeId = id; localStorage.setItem('office_id', id);
+  Object.keys(actors).forEach((k) => delete actors[k]);
+  $('actors').innerHTML = ''; $('desks').innerHTML = ''; $('bubbles').innerHTML = '';
+  playedScenes.clear(); sceneQueue = []; selected = null; state = null;
+  applyOffice(id); drawOffice([], officeTick);
+  tick();
+}
+document.addEventListener('click', (e) => { const t = e.target.closest('[data-office]'); if (t) switchOffice(t.dataset.office); });
+
 /* ---------- отрисовка данных ---------- */
 function render(s) {
   const agents = s.agents;
   $('sTotal').textContent = agents.length;
   $('sActive').textContent = agents.filter((a) => a.status === 'working').length;
-  $('sWait').textContent = s.jobs.filter((j) => j.stage === 'review').length;
+  const isSmm = (s.office || officeId) === 'smm';
+  $('sWait').textContent = isSmm ? (s.videos || []).filter((v) => NEED_NICK.includes(v.stage)).length : s.jobs.filter((j) => j.stage === 'review').length;
+  renderTabs(s);
+  const L = applyOffice(s.office || officeId);
+  $('lblDept').textContent = L.dept; $('lblCap').textContent = L.cap;
+  $('listTitle').textContent = isSmm ? 'Ролики' : 'Вакансии';
 
-  const max = Math.max(1, ...STAGES.map(([k]) => s.funnel[k] || 0));
-  $('funnel').innerHTML = '<div class="kpi-title">KPI · поиск работы</div><div class="kpi-cols">' + STAGES.map(([k, n]) => `<div class="f-col"><b>${s.funnel[k] || 0}</b><i style="height:${3 + ((s.funnel[k] || 0) / max) * 18}px"></i>${n}</div>`).join('') + '</div>';
+  const ST = isSmm ? VSTAGES : STAGES, FN = isSmm ? (s.vfunnel || {}) : s.funnel;
+  const max = Math.max(1, ...ST.map(([k]) => FN[k] || 0));
+  $('funnel').innerHTML = `<div class="kpi-title">KPI · ${isSmm ? 'ролики' : 'поиск работы'}</div><div class="kpi-cols">` + ST.map(([k, n]) => `<div class="f-col"><b>${FN[k] || 0}</b><i style="height:${3 + ((FN[k] || 0) / max) * 18}px"></i>${n}</div>`).join('') + '</div>';
 
   buildOffice(agents);
   drawOffice(agents, officeTick);
@@ -152,7 +179,9 @@ function render(s) {
     </li>`).join('');
 
   $('tasks').innerHTML = s.tasks.map((t) => `<li>${t.status === 'running' ? '▶' : '⏱'} ${esc(t.title)}<small>${esc(t.agent_name || '')}</small></li>`).join('') || '<li>Пока пусто</li>';
-  $('jobs').innerHTML = s.jobs.slice(0, 12).map((j) => `<li>${esc(j.title)}<small>${esc(j.company)} · ${esc(j.salary)} · ${esc(j.format)} · ${esc(j.stage)}</small></li>`).join('') || '<li>Пока пусто</li>';
+  $('jobs').innerHTML = (isSmm
+    ? (s.videos || []).slice(0, 12).map((v) => `<li>${NEED_NICK.includes(v.stage) ? '👉 ' : ''}${esc(v.title)}<small>${v.rubric === 'tips' ? 'Советы' : 'Миф'} · ${esc(VSTAGE_NAME[v.stage] || v.stage)} · балл ${v.score ?? '—'}</small></li>`)
+    : s.jobs.slice(0, 12).map((j) => `<li>${esc(j.title)}<small>${esc(j.company)} · ${esc(j.salary)} · ${esc(j.format)} · ${esc(j.stage)}</small></li>`)).join('') || '<li>Пока пусто</li>';
   $('events').innerHTML = s.events.map((e) => `<li>${new Date(e.ts).toLocaleTimeString('ru')} ${esc(e.agent_name || '')}: ${esc(e.message)}</li>`).join('');
   renderDetail();
   enqueueScenes(s.scenes || []);

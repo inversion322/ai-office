@@ -27,6 +27,7 @@
   <main class="main">
     <header class="topbar">
       <div class="brand"><span class="brand-mark"></span>AI Office</div>
+      <nav id="officeTabs" class="tabs" aria-label="Офисы"></nav>
       <div id="conn" class="conn off">нет связи</div>
       <div class="spacer"></div>
       <div id="clock" class="clock"></div>
@@ -40,15 +41,15 @@
         <div id="desks"></div>
         <div id="actors"></div>
         <canvas id="cvFront" width="320" height="180"></canvas>
-        <div class="room-label" style="left:3.6%;top:25%">Отдел поиска работы</div>
-        <div class="room-label" style="left:44.6%;top:31.5%">Кабинет руководителя</div>
+        <div class="room-label" id="lblDept" style="left:3.6%;top:25%">Отдел поиска работы</div>
+        <div class="room-label" id="lblCap" style="left:44.6%;top:31.5%">Кабинет руководителя</div>
         <div id="bubbles"></div>
       </div>
     </section>
 
     <section class="bottom">
       <div class="panel"><h3>Запланировано</h3><ul id="tasks"></ul></div>
-      <div class="panel"><h3>Вакансии</h3><ul id="jobs"></ul></div>
+      <div class="panel"><h3 id="listTitle">Вакансии</h3><ul id="jobs"></ul></div>
       <div class="panel"><h3>Журнал</h3><ul id="events" class="log"></ul></div>
     </section>
   </main>

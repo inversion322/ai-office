@@ -6,9 +6,19 @@ const ROOMS = {
   jobs: { x: 6, y: 43, w: 120, h: 130, door: { in: [114, 126], out: [134, 126] } },    // отдел поиска работы (дверь справа)
   cap:  { x: 138, y: 52, w: 74, h: 98,  door: { in: [175, 138], out: [175, 160] } },   // кабинет Капитана (дверь снизу)
 };
-const AGENT_ROOM = { captain: 'cap', scout: 'jobs', sender: 'jobs', analyst: 'jobs', writer: 'jobs' };
-// Рассадка: отдел откликов U-образно по цепочке (scout -> analyst -> writer -> sender): scout и sender рядом.
-const OFFICE_DESKS = { captain: [54.7, 56.7], scout: [14, 47], sender: [31, 47], analyst: [14, 80.6], writer: [31, 80.6], content: [77, 50], research: [92, 50] };
+// Раскладки офисов: jobs (поиск работы) и smm (Nick G SMM). Стеклянный отдел с ключом 'jobs' общий по геометрии, подпись разная.
+const OFFICE_LAYOUTS = {
+  // Отдел откликов U-образно по цепочке (scout -> analyst -> writer -> sender): scout и sender рядом.
+  jobs: { dept: 'Отдел поиска работы', cap: 'Кабинет руководителя',
+    desks: { captain: [54.7, 56.7], scout: [14, 47], sender: [31, 47], analyst: [14, 80.6], writer: [31, 80.6] },
+    rooms: { captain: 'cap', scout: 'jobs', sender: 'jobs', analyst: 'jobs', writer: 'jobs' } },
+  // Студия SMM по цепочке: scriptwriter -> virality -> factcheck -> video, Капитан в своём кабинете.
+  smm: { dept: 'Студия SMM', cap: 'Кабинет руководителя',
+    desks: { captain_smm: [54.7, 56.7], scriptwriter: [14, 47], virality: [31, 47], factcheck: [31, 80.6], video: [14, 80.6] },
+    rooms: { captain_smm: 'cap', scriptwriter: 'jobs', virality: 'jobs', factcheck: 'jobs', video: 'jobs' } },
+};
+let OFFICE_DESKS = OFFICE_LAYOUTS.jobs.desks, AGENT_ROOM = OFFICE_LAYOUTS.jobs.rooms;
+function applyOffice(id) { const L = OFFICE_LAYOUTS[id] || OFFICE_LAYOUTS.jobs; OFFICE_DESKS = L.desks; AGENT_ROOM = L.rooms; return L; }
 
 function deskGeom(id) {
   const d = OFFICE_DESKS[id] || [50, 50];

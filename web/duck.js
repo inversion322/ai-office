@@ -24,6 +24,7 @@ function duckSVG(a, opts = {}) {
     tie: `<path d="M32 48 l-4.2 3.6 4.2 12 4.2-12z" fill="${c}" stroke="#14532d" stroke-width="1.2"/><path d="M28.4 47.6h7.2l-1.6 3h-4z" fill="#14532d"/>`,
     pen: `<g transform="translate(0,-9)"><path d="M17 16 q15-10 30 0 q-2 6.5-15 5.5 q-12.5 1-15-5.5z" fill="${c}" stroke="#5b2a86" stroke-width="1.4"/></g>`,
     cap: `<g transform="translate(0,-9)"><path d="M16 21 Q32 2 48 21Z" fill="${c}" stroke="#7a1f1f" stroke-width="1.4"/><path d="M30 21 h23 q3 0 3 3 h-26z" fill="#7a1f1f"/></g>`,
+    beret: `<g transform="translate(0,-9)"><ellipse cx="29" cy="15" rx="17" ry="6.4" fill="${c}" stroke="#0b5a5a" stroke-width="1.4" transform="rotate(-8 29 15)"/><circle cx="30" cy="8.8" r="1.8" fill="#0b5a5a"/></g>`,
     headset: `<path d="M12 30 q0-21 20-21 t20 21" fill="none" stroke="${INK}" stroke-width="3.4" stroke-linecap="round"/><rect x="7" y="26" width="7.5" height="13" rx="3.7" fill="${c}" stroke="${INK}" stroke-width="1.3"/><rect x="49.5" y="26" width="7.5" height="13" rx="3.7" fill="${c}" stroke="${INK}" stroke-width="1.3"/><path d="M10 39 q2 10 18 11" fill="none" stroke="${INK}" stroke-width="2"/><circle cx="29" cy="50" r="2.8" fill="${INK}"/>`,
     bowtie: `<path d="M32 50 l-8.5-5v10z M32 50 l8.5-5v10z" fill="${c}" stroke="#155e75" stroke-width="1.2"/><circle cx="32" cy="50" r="2.6" fill="#155e75"/>`,
   }[a.look] || '';

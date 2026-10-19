@@ -5,9 +5,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import { ensureExtraAgents } from './lib_extra_agents.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.OFFICE_DATA_DIR || path.join(__dirname, 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 // --- Конфиг: токен хранится в data/config.json, создаётся при первом запуске ---
@@ -63,6 +64,22 @@ CREATE TABLE IF NOT EXISTS jobs (
   created_at INTEGER, updated_at INTEGER
 );
 `);
+
+
+// --- Несколько офисов: у сотрудников и сцен есть поле office (jobs | smm), ролики SMM лежат в videos ---
+const hasCol = (t, c) => db.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c);
+if (!hasCol('agents', 'office')) db.exec("ALTER TABLE agents ADD COLUMN office TEXT NOT NULL DEFAULT 'jobs'");
+if (!hasCol('scenes', 'office')) db.exec("ALTER TABLE scenes ADD COLUMN office TEXT NOT NULL DEFAULT 'jobs'");
+db.exec(`
+CREATE TABLE IF NOT EXISTS videos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, office TEXT NOT NULL DEFAULT 'smm', title TEXT NOT NULL,
+  rubric TEXT NOT NULL DEFAULT 'myth',          -- myth | tips
+  stage TEXT NOT NULL DEFAULT 'idea',           -- idea | scored | script | checked | produced | approved | published | rejected
+  score REAL, notes TEXT, script_path TEXT, video_path TEXT, created_at INTEGER, updated_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+`);
+const OFFICES = [{ id: 'jobs', name: 'Поиск работы' }, { id: 'smm', name: 'Nick G SMM' }];
 
 const now = () => Date.now();
 const q = (sql, ...a) => db.prepare(sql).all(...a);
@@ -132,6 +149,12 @@ function seedPrompts() {
   for (const [a, list] of Object.entries(AS)) for (const sk of list) run('INSERT INTO agent_skills VALUES (?,?)', a, sk);
 }
 seedPrompts();
+ensureExtraAgents(db);
+// Разовое разделение офисов: Виктор и Алиса (не подключены) уходят в резерв, в офис поиска работы и в SMM они не входят.
+if (!q("SELECT 1 x FROM kv WHERE k='office_split_v1'")[0]) {
+  run("UPDATE agents SET office='reserve' WHERE id IN ('content','research')");
+  run("INSERT INTO kv (k,v) VALUES ('office_split_v1', ?)", String(now()));
+}
 
 // --- HTTP ---
 function cors(req, res) {
@@ -163,16 +186,21 @@ http.createServer(async (req, res) => {
   if (!authed(req)) return json(res, 401, { error: 'unauthorized' });
 
   if (req.method === 'GET' && url.pathname === '/api/state') {
-    const agents = q('SELECT * FROM agents ORDER BY desk');
-    const jobs = q('SELECT * FROM jobs ORDER BY updated_at DESC LIMIT 100');
+    const asked = url.searchParams.get('office');
+    const office = OFFICES.some((o) => o.id === asked) ? asked : 'jobs';
+    const agents = q('SELECT * FROM agents WHERE office=? ORDER BY desk', office);
+    const jobs = office === 'jobs' ? q('SELECT * FROM jobs ORDER BY updated_at DESC LIMIT 100') : [];
     const stages = {};
     for (const j of jobs) stages[j.stage] = (stages[j.stage] || 0) + 1;
+    const videos = office === 'smm' ? q("SELECT * FROM videos WHERE office='smm' ORDER BY updated_at DESC LIMIT 100") : [];
+    const vstages = {};
+    for (const v of videos) vstages[v.stage] = (vstages[v.stage] || 0) + 1;
     return json(res, 200, {
-      ts: now(), agents,
-      tasks: q("SELECT t.*, a.name agent_name FROM tasks t LEFT JOIN agents a ON a.id=t.agent_id WHERE t.status IN ('running','planned') ORDER BY t.status DESC, t.scheduled_at LIMIT 50"),
-      events: q('SELECT e.*, a.name agent_name FROM events e LEFT JOIN agents a ON a.id=e.agent_id ORDER BY e.id DESC LIMIT 60'),
-      jobs, funnel: stages,
-      scenes: q('SELECT * FROM scenes WHERE ts + ttl > ? ORDER BY id', now()),
+      ts: now(), office, offices: OFFICES, agents,
+      tasks: q("SELECT t.*, a.name agent_name FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE a.office=? AND t.status IN ('running','planned') ORDER BY t.status DESC, t.scheduled_at LIMIT 50", office),
+      events: q("SELECT e.*, a.name agent_name FROM events e LEFT JOIN agents a ON a.id=e.agent_id WHERE a.office=? OR (a.id IS NULL AND ?='jobs') ORDER BY e.id DESC LIMIT 60", office, office),
+      jobs, funnel: stages, videos, vfunnel: vstages,
+      scenes: q('SELECT * FROM scenes WHERE office=? AND ts + ttl > ? ORDER BY id', office, now()),
     });
   }
   // Агенты пишут сюда статус
@@ -214,9 +242,24 @@ http.createServer(async (req, res) => {
   }
   if (req.method === 'POST' && url.pathname === '/api/scene') {
     const b = await body(req);
-    run('INSERT INTO scenes (ts,kind,from_id,to_id,text,ttl) VALUES (?,?,?,?,?,?)', now(), b.kind || 'chat', b.from, b.to, b.text, b.ttl || 9000);
+    const off = (q('SELECT office FROM agents WHERE id=?', b.from)[0] || {}).office || 'jobs';
+    run('INSERT INTO scenes (ts,kind,from_id,to_id,text,ttl,office) VALUES (?,?,?,?,?,?,?)', now(), b.kind || 'chat', b.from, b.to, b.text, b.ttl || 9000, off);
     run('DELETE FROM scenes WHERE ts < ?', now() - 3600000);
     return json(res, 200, { ok: true });
+  }
+  // Ролики SMM-конвейера: создать или обновить (id -> обновление)
+  if (req.method === 'POST' && url.pathname === '/api/video') {
+    const b = await body(req);
+    const t = now();
+    if (b.id) {
+      run('UPDATE videos SET title=COALESCE(?,title), rubric=COALESCE(?,rubric), stage=COALESCE(?,stage), score=COALESCE(?,score), notes=COALESCE(?,notes), script_path=COALESCE(?,script_path), video_path=COALESCE(?,video_path), updated_at=? WHERE id=?',
+        b.title ?? null, b.rubric ?? null, b.stage ?? null, b.score ?? null, b.notes ?? null, b.script_path ?? null, b.video_path ?? null, t, b.id);
+      return json(res, 200, { ok: true, id: b.id });
+    }
+    if (!b.title) return json(res, 400, { error: 'title required' });
+    const r = run('INSERT INTO videos (office,title,rubric,stage,score,notes,script_path,video_path,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      'smm', String(b.title).slice(0, 300), b.rubric || 'myth', b.stage || 'idea', b.score ?? null, b.notes ?? null, b.script_path ?? null, b.video_path ?? null, t, t);
+    return json(res, 200, { ok: true, id: Number(r.lastInsertRowid) });
   }
   if (req.method === 'POST' && url.pathname === '/api/job') {
     const b = await body(req);
