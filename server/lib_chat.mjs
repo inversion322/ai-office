@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { cleanReport } from './lib_text.mjs';
+import { classifyAnswer, quickPick, topicMentioned, stripButtonTalk } from './lib_intent.mjs';
 
 const OWNER = 323028999;
 const NAMES = { капитан: 'captain_smm', кряк: 'captain_smm', виктор: 'research', ксения: 'scriptwriter', лев: 'virality', вера: 'factcheck', кирилл: 'video', тимофей: 'packager' };
@@ -106,12 +107,20 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
   function spawnPipeline(args) {
     // Тестовый сервер (OFFICE_CHAT_STUB) не должен запускать настоящих сотрудников: это тратит лимит Claude и пишет в рабочие журналы.
     // Настоящий запуск в тесте разрешён только с подменой модели (HERMES_BIN), как в интеграционных тестах.
-    if (STUB && !process.env.HERMES_BIN) { console.error('spawnPipeline: тестовый режим без HERMES_BIN, этап', args.join(' '), 'не запущен'); post({ thread: 'captain_smm', sender: 'captain_smm', text: `(тест) этап «${args.join(' ')}» не запущен: в тестовом режиме нет подмены модели.` }); return; }
+    if (STUB && !process.env.HERMES_BIN) { console.error('spawnPipeline: тестовый режим без HERMES_BIN, этап', args.join(' '), 'не запущен'); post({ thread: 'captain_smm', sender: 'captain_smm', text: `(тест) этап «${args.join(' ')}» не запущен: в тестовом режиме нет подмены модели.` }); return false; }
+    if (stageRunning(args)) { post({ thread: 'captain_smm', sender: 'captain_smm', text: `Этап «${args[0]}${args[1] && !String(args[1]).startsWith('--') ? ' №' + args[1] : ''}» уже идёт. Второй раз не запускаю: подождите результат.`, mirrorTg: true }); return false; }
     fs.mkdirSync(path.join(ROOT, 'smm'), { recursive: true });
     const out = fs.openSync(path.join(ROOT, 'smm', STUB ? 'pipeline.test.log' : 'pipeline.log'), 'a');
     const port = process.env.PORT || 8787;      // этап ходит в тот же сервер, что его запустил
-    spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), ...args], { cwd: ROOT, detached: true, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, OFFICE_API: process.env.OFFICE_API || `http://127.0.0.1:${port}` } }).unref();
+    const child = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), ...args], { cwd: ROOT, detached: true, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, OFFICE_API: process.env.OFFICE_API || `http://127.0.0.1:${port}` } });
+    RUNNING.set(stageKey(args), { pid: child.pid, ts: now() }); child.on('exit', () => RUNNING.delete(stageKey(args)));
+    child.unref(); return true;
   }
+  // Один и тот же этап одного ролика не запускается дважды: 20.10 четыре «Да, сделать» подряд запустили четыре Ксении на одну тему.
+  const RUNNING = new Map();
+  const stageKey = (args) => `${args[0]} ${args[1] && !String(args[1]).startsWith('--') ? args[1] : ''}`.trim();
+  const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  function stageRunning(args) { const k = stageKey(args), r = RUNNING.get(k); if (r && pidAlive(r.pid) && now() - r.ts < 4 * 3600e3) return true; RUNNING.delete(k); return false; }
 
   /* ---------- выполнение действий (кнопки и подтверждённые предложения) ---------- */
   // Решение принято: закрываем устаревшие открытые карточки с такими же кнопками (и в Telegram убираем кнопки), чтобы не запустить лишнее
@@ -121,6 +130,14 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       if (o.tg_msg && !NO_TG) tg('editMessageReplyMarkup', { chat_id: chatId(), message_id: o.tg_msg, reply_markup: { inline_keyboard: [] } }).catch(() => {});
     }
   }
+  // Открытые карточки подтверждения: новая заменяет старые того же действия (для выбора темы любые прежние: тема в работе только одна).
+  function closeConfirms(office, data, exceptId) {
+    const type = String(data).split(':')[0];
+    for (const o of q("SELECT id, tg_msg, ref FROM messages WHERE office=? AND kind='action' AND status='open' AND ref IS NOT NULL AND id<>?", office, exceptId || 0)) {
+      let r; try { r = JSON.parse(o.ref); } catch { continue; }
+      if (r && (r.data === data || (type === 'pick' && String(r.data).startsWith('pick:')))) closeCard(o, 'answered', 'superseded', 'system');
+    }
+  }
   async function execAction(data, comment, via, srcMsg) {
     const [act, idStr] = String(data).split(':'); const id = Number(idStr);
     const v = act === 'confirm' || act === 'cancel' ? null : (id ? q('SELECT * FROM videos WHERE id=?', id)[0] : null);
@@ -128,15 +145,19 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     if (act === 'confirm') {
       const m = q('SELECT * FROM messages WHERE id=?', id)[0]; const ref = m && m.ref && JSON.parse(m.ref);
       if (!ref) return { note: 'нет предложения' };
-      return execAction(ref.data, ref.comment, via, m);
+      closeConfirms(m.office, ref.data, m.id);                // другие открытые подтверждения того же действия устарели
+      return execAction(ref.data, [ref.comment, comment].filter((x) => x && String(x).trim()).join('. '), via, m);
     }
     if (act === 'cancel') { cap('Хорошо, не делаю.', false); return {}; }
     if (act === 'pick' && v) {
-      for (const o of q("SELECT id FROM videos WHERE stage='scored' AND id<>?", id)) setStage(o.id, 'idea');
       supersede('pick:'); supersede('more:');
+      if (['checked', 'editing', 'produced', 'approved'].includes(v.stage)) { cap(`Тема «${v.title}» уже в работе (${STAGE_LABEL[v.stage] || v.stage}), второй раз не запускаю.`); return {}; }
+      if (stageRunning(['script', String(id)])) { cap(`Ксения уже пишет сценарий по теме «${v.title}». Второй раз не запускаю.`, false); return {}; }
+      for (const o of q("SELECT id FROM videos WHERE stage='scored' AND id<>?", id)) setStage(o.id, 'idea');
+      const wish = comment && comment.trim() ? comment.trim() : '';
       setStage(id, 'script'); setAgent('captain_smm', 'working', `Тема выбрана: ${v.title}`, `Ник выбрал тему «${v.title}»`);
-      cap(`Тема выбрана: «${v.title}».\nКсения пишет сценарий, Вера проверит каждый факт. Пришлю результат сюда.`);
-      spawnPipeline(['script', String(id)]);
+      cap(`Тема выбрана: «${v.title}».\nКсения пишет сценарий, Вера проверит каждый факт.${wish ? `\nПожелание передано Ксении: «${wish.slice(0, 200)}».` : ''} Пришлю результат сюда.`);
+      spawnPipeline(['script', String(id), ...(wish ? ['--comment', wish] : [])]);
     } else if (act === 'more') {
       supersede('pick:'); supersede('more:');
       for (const o of q("SELECT id FROM videos WHERE stage='scored'")) setStage(o.id, 'rejected');
@@ -217,7 +238,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
   }
 
   // Ответ Ника на действие (из дашборда, Telegram или подтверждение предложения агента)
-  async function answer({ id, tgMsg, choice, comment, via }) {
+  async function answer({ id, tgMsg, choice, comment, via, echo = true }) {
     const m = id ? q('SELECT * FROM messages WHERE id=?', id)[0] : q('SELECT * FROM messages WHERE tg_msg=?', tgMsg)[0];
     if (!m || m.kind !== 'action') return { ok: false, error: 'такого вопроса нет' };
     if (m.status !== 'open') return { ok: false, error: 'на этот вопрос уже ответили' };
@@ -234,7 +255,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       tg('editMessageReplyMarkup', { chat_id: chatId(), message_id: m.tg_msg, reply_markup: { inline_keyboard: [] } }).catch(() => {});
       if (via === 'dashboard') tg('sendMessage', { chat_id: chatId(), text: `✅ Ответ из дашборда: ${btn.t}${comment ? ': ' + comment : ''}`, disable_notification: true }).catch(() => {});
     }
-    post({ office: m.office, thread: m.thread, sender: 'nick', text: comment ? `${btn.t}: ${comment}` : btn.t, source: via });
+    if (echo) post({ office: m.office, thread: m.thread, sender: 'nick', text: comment ? `${btn.t}: ${comment}` : btn.t, source: via });      // напечатанный ответ уже в чате, второй раз не дублируем
     try { await execAction(choice, comment, via, m); } catch (e) { post({ thread: m.thread, sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message }); return { ok: false, error: e.message }; }
     return { ok: true };
   }
@@ -257,7 +278,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     const outFile = path.join(dir, `${nickMsgId}_out.json`), qFile = path.join(dir, `${nickMsgId}_query.txt`);
     try {
       let rep = null, action = null;
-      if (STUB) { await new Promise((r) => setTimeout(r, 800)); rep = `(заглушка) ${ag.name} получил: «${text}»`; }
+      if (STUB) { await new Promise((r) => setTimeout(r, 800)); rep = `(заглушка) ${ag.name} получил: «${text}»`; if (process.env.OFFICE_CHAT_STUB_JSON) { try { const j = JSON.parse(process.env.OFFICE_CHAT_STUB_JSON); rep = j.reply; action = j.action || null; } catch {} } }
       else {
         const persona = (q('SELECT body FROM prompts WHERE agent_id=?', thread)[0] || {}).body || `Ты ${ag.name}, ${ag.role}.`;
         const c = context(office, thread);
@@ -274,8 +295,14 @@ ${c.hist}
 
 Новое сообщение Ника: ${text}
 
-Если Ник просит выполнить шаг конвейера (выбрать тему, утвердить сценарий, вернуть его на правки, принять или отклонить ролик, внести правки в готовый ролик, найти другие темы), НЕ говори, что уже сделала: предложи действие в поле action, Ник подтвердит кнопкой. Типы: pick (video_id), more, approve (video_id), revise (video_id, comment: что поправить в прежнем сценарии), regen (video_id, comment: пожелание; переписать сценарий с нуля, когда прежний не нравится в целом, а не в деталях), rework (video_id, comment: что именно поправить в готовом ролике, дословно по просьбе Ника), accept (video_id), reject (video_id), package (video_id, comment: пожелание к названию или хэштегам, например «короче» или «без вопроса»).
-Итог запиши в файл ${outFile} строго как JSON: {"reply":"текст ответа Нику","action":null или {"type":"pick","video_id":3,"comment":""}}. После записи файла ничего больше не делай.`, 'utf8');
+Если Ник просит выполнить шаг конвейера (выбрать тему, утвердить сценарий, вернуть его на правки, принять или отклонить ролик, внести правки в готовый ролик, найти другие темы), НЕ говори, что уже сделала: предложи действие в поле action (его выполнит или подтвердит система, ты кнопок не нажимаешь). Типы: pick (video_id), more, approve (video_id), revise (video_id, comment: что поправить в прежнем сценарии), regen (video_id, comment: пожелание; переписать сценарий с нуля, когда прежний не нравится в целом, а не в деталях), rework (video_id, comment: что именно поправить в готовом ролике, дословно по просьбе Ника), accept (video_id), reject (video_id), package (video_id, comment: пожелание к названию или хэштегам, например «короче» или «без вопроса»).
+ПРАВИЛА ПОНИМАНИЯ (Ник не должен повторять и объяснять дважды):
+1) Если Ник сам ясно назвал шаг и тему («выбираем тему #4», «перепиши сценарий с нуля», «ищи другие темы»), ставь в action "explicit":true: система выполнит сразу. Если ты лишь предполагаешь, чего он хочет, "explicit":false.
+2) В reply НИКОГДА не пиши «подтвердите кнопкой», «нажмите кнопку» и не пересказывай то, что сделает действие: подтверждение (когда оно нужно) система задаёт сама одной карточкой, и Ник может просто ответить «да» или «нет». Если action есть, reply оставь пустым или добавь только то, что не вошло в действие.
+3) Если в списке «Вопросы, ждущие ответа Ника» уже висит вопрос на это же действие, не предлагай его заново.
+4) Постоянные требования Ника к роликам уже заложены в конвейер и не требуют отдельного подтверждения: динамичный монтаж (смена картинки каждые 1-1,5 с), быстрая озвучка (+25%), хук в первые 1,5 с, длина до 59 с, призыв подписаться на канал в конце. Не пересказывай их и не переспрашивай; если Ник их повторил, скажи одной фразой, что это уже учтено. В comment кладёшь только НОВЫЕ пожелания, дословно его словами.
+5) Ответ из одного слова («да», «нет», «ок») к твоим вопросам система обработает сама, тебе такие сообщения не придут.
+Итог запиши в файл ${outFile} строго как JSON: {"reply":"текст ответа Нику","action":null или {"type":"pick","video_id":3,"comment":"","explicit":true}}. После записи файла ничего больше не делай.`, 'utf8');
         await new Promise((resolve) => {
           const p = spawn(HERMES, ['-p', office === 'smm' ? (REPLY_PROFILE[thread] || 'smm') : 'jobs', 'chat', '--query-file', qFile, '-Q', '--oneshot', '--max-turns', '30', '--run-budget', '420'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
           let out = ''; p.stdout.on('data', (b) => (out += b)); p.stderr.on('data', (b) => (out += b));
@@ -283,20 +310,55 @@ ${c.hist}
         });
       }
       if (!rep) rep = 'Не получилось ответить сейчас, повторите вопрос чуть позже.';
-      post({ office, thread, sender: thread, text: rep, source: 'agent', mirrorTg: true });
       const ACTS = new Set(['pick', 'more', 'approve', 'revise', 'regen', 'rework', 'accept', 'reject', 'package']);
-      if (action && ACTS.has(action.type)) {
-        const v = action.video_id ? q('SELECT title FROM videos WHERE id=?', Number(action.video_id))[0] : null;
-        if (action.type === 'more' || v) {
-          const data = `${action.type}:${action.type === 'more' ? 0 : Number(action.video_id)}`;
-          const label = { pick: 'Выбрать тему', more: 'Искать другие темы', approve: 'Утвердить сценарий', revise: 'Вернуть на правки', regen: 'Перегенерировать сценарий с нуля', rework: 'Внести правки в ролик', package: 'Придумать название и хэштеги заново', accept: 'Принять ролик', reject: 'Отклонить' }[action.type];
-          const mid = post({ office, thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: `Правильно ли я поняла: ${label.toLowerCase()}${v ? ` «${v.title}»` : ''}${action.comment ? ` (${action.comment})` : ''}?`, ref: { data, comment: action.comment || '' }, buttons: [[['Да, сделать', 'confirm:0'], ['Нет', 'cancel:0']]], mirrorTg: false });
-          run('UPDATE messages SET buttons=? WHERE id=?', JSON.stringify([[{ t: 'Да, сделать', d: `confirm:${mid}` }, { t: 'Нет', d: `cancel:${mid}` }]]), mid);
-          mirror(mid).catch(() => {});
-        }
-      }
+      // Шаги без дорогих последствий и с ясным указанием Ника выполняются сразу, вторым вопросом «правильно ли я поняла?» их не задерживаем.
+      // Дорогие и необратимые (утвердить сценарий = час работы Кирилла на Opus, принять, отклонить, правки готового ролика) подтверждаются одной карточкой.
+      const DIRECT = new Set(['pick', 'more', 'revise', 'regen', 'package']);
+      const v = action && ACTS.has(action.type) && action.video_id ? q('SELECT id, title FROM videos WHERE id=?', Number(action.video_id))[0] : null;
+      const valid = !!(action && ACTS.has(action.type) && (action.type === 'more' || v));
+      const wish = valid && action.comment ? String(action.comment).trim() : '';
+      const sure = valid && action.explicit === true && (action.type !== 'pick' || topicMentioned(text, v.id, v.title)) && (action.type !== 'revise' || !!wish);
+      if (valid && DIRECT.has(action.type) && sure) {
+        await execAction(`${action.type}:${action.type === 'more' ? 0 : v.id}`, wish, 'agent', null);   // своё сообщение Капитана («Тема выбрана…») пишет execAction; ответ модели не дублируем
+      } else if (valid) {
+        const talk = stripButtonTalk(rep);                                    // «подтвердите кнопкой» говорит карточка, а не модель
+        if (talk.length > 25) post({ office, thread, sender: thread, text: talk, source: 'agent', mirrorTg: true });
+        const data = `${action.type}:${action.type === 'more' ? 0 : v.id}`;
+        closeConfirms(office, data, 0);                                       // прежние такие же вопросы устарели: карточка остаётся одна
+        const label = { pick: 'Выбрать тему', more: 'Искать другие темы', approve: 'Утвердить сценарий', revise: 'Вернуть на правки', regen: 'Перегенерировать сценарий с нуля', rework: 'Внести правки в ролик', package: 'Придумать название и хэштеги заново', accept: 'Принять ролик', reject: 'Отклонить' }[action.type];
+        const mid = post({ office, thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: `Правильно ли я поняла: ${label.toLowerCase()}${v ? ` «${v.title}»` : ''}${wish ? ` (${wish})` : ''}?\n(можно ответить кнопкой или написать «да» / «нет»)`, ref: { data, comment: wish }, buttons: [[['Да, сделать', 'confirm:0'], ['Нет', 'cancel:0']]], mirrorTg: false });
+        run('UPDATE messages SET buttons=? WHERE id=?', JSON.stringify([[{ t: 'Да, сделать', d: `confirm:${mid}` }, { t: 'Нет', d: `cancel:${mid}` }]]), mid);
+        mirror(mid).catch(() => {});
+      } else post({ office, thread, sender: thread, text: rep, source: 'agent', mirrorTg: true });
+
     } catch (e) { post({ office, thread, sender: thread, text: 'Ошибка ответа: ' + e.message, source: 'agent' }); }
     finally { typing.set(thread, Math.max(0, (typing.get(thread) || 1) - 1)); if (!typing.get(thread)) typing.delete(thread); }
+  }
+
+
+  // Короткий однозначный ответ Ника понимается сразу, без модели: «да» / «нет» на открытый вопрос и «#4» / «выбираем тему 4» на список тем.
+  const COMMENT_TYPES = new Set(['pick', 'regen', 'revise', 'rework', 'package']);
+  function fastAnswer(office, text, source) {
+    const cards = q("SELECT * FROM messages WHERE office=? AND kind='action' AND status='open' AND ref IS NOT NULL ORDER BY id DESC", office);
+    const cl = classifyAnswer(text);
+    if (cl.kind && cards.length) {
+      const c = cards[0]; let ref = null; try { ref = JSON.parse(c.ref); } catch {}
+      const type = ref ? String(ref.data).split(':')[0] : '';
+      if (ref && !(cl.kind === 'yes' && cl.extra && !COMMENT_TYPES.has(type))) {       // «да, а ещё…» к действию без комментария уходит Капитану: ничего не теряем
+        for (const o of cards.slice(1)) closeCard(o, 'answered', 'superseded', 'system');     // новый ответ заменяет все прежние вопросы
+        answer({ id: c.id, choice: cl.kind === 'yes' ? `confirm:${c.id}` : `cancel:${c.id}`, comment: cl.extra || undefined, via: source, echo: false })
+          .then((r) => { if (r && r.ok === false) post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + (r.error || ''), mirrorTg: true }); })
+          .catch((e) => console.error('fastAnswer', e.message));
+        return cl.kind;
+      }
+    }
+    const n = quickPick(text);
+    if (n) {
+      const open = q("SELECT id FROM messages WHERE office=? AND kind='action' AND status='open' AND buttons LIKE ?", office, `%"d":"pick:${n}"%`);
+      const v = q('SELECT id, stage FROM videos WHERE id=?', n)[0];
+      if (open.length || (v && v.stage === 'scored')) { execAction(`pick:${n}`, '', source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true })); return 'pick'; }
+    }
+    return null;
   }
 
   // Сообщение Ника: из дашборда (thread задан) или из Telegram (thread по имени, иначе Капитан)
@@ -319,6 +381,8 @@ ${c.hist}
       execAction(`${aw.kind === 'rework' ? 'rework' : 'revise'}:${aw.id}`, body, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true }));
       return { ok: true, id, note: 'comment' };
     }
+    const fast = fastAnswer(office, body, source);
+    if (fast) return { ok: true, id, note: fast };
     reply(office, t, id, body).catch((e) => console.error('reply', e.message));
     return { ok: true, id };
   }

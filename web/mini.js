@@ -148,8 +148,12 @@
   function msgHtml(m) {
     const mine = C.isMine(m);
     const who = mine ? '' : `<div class="from">${C.esc(agentName(m.sender))}</div>`;
-    const action = m.kind === 'action' ? `<div class="tag ${m.status === 'open' ? 'open' : ''}">${m.status === 'open' ? 'ждёт вашего ответа' : 'отвечено'}</div>` : '';
-    return `<div class="m ${mine ? 'me' : 'them'}">${who}<div class="bubble">${C.esc(m.text)}</div>${action}<time>${C.esc(C.ago(m.ts, Date.now()))}</time></div>`;
+    const isOpen = m.kind === 'action' && m.status === 'open';
+    const action = m.kind === 'action' ? `<div class="tag ${isOpen ? 'open' : ''}">${isOpen ? 'ждёт вашего ответа' : m.status === 'dismissed' ? 'убрано' : 'отвечено'}</div>` : '';
+    // Кнопки стоят прямо под вопросом: раньше в чате была только подпись «ждёт вашего ответа», а кнопки жили на другом экране, и Ник печатал «да» вместо нажатия.
+    const sp = isOpen ? C.splitButtons(m.buttons) : null;
+    const btns = isOpen ? `<div class="card-btns">${sp.main.map((b) => `<button class="btn" data-ans="${C.esc(b.d)}" data-id="${m.id}">${C.esc(b.t)}</button>`).join('')}</div>${sp.dismiss ? `<button class="dismiss" data-ans="dismiss:0" data-id="${m.id}">✖ Убрать</button>` : ''}` : '';
+    return `<div class="m ${mine ? 'me' : 'them'}"${isOpen ? ` data-card="${m.id}"` : ''}>${who}<div class="bubble">${C.esc(m.text)}</div>${action}${btns}<time>${C.esc(C.ago(m.ts, Date.now()))}</time></div>`;
   }
   const nearBottom = () => { const l = $('log'); return l.scrollHeight - l.scrollTop - l.clientHeight < 80; };
   const scrollLog = (force) => { if (force) requestAnimationFrame(() => { $('log').scrollTop = $('log').scrollHeight; }); };

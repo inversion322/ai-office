@@ -102,7 +102,7 @@ async function script(id, comment, regen = false) {
   const history = loadHistory(path.join(dir, 'history'));
   let fresh = regen && history.length > 0;                       // писать с нуля, а не править прежний текст
   const banned = [];                                              // черновики этой же перегенерации, отброшенные автопроверкой
-  let prev = fresh ? null : readJson(sj), changes = comment && !fresh ? [`Правки Ника: ${comment}`] : [], check = null, ok = false, nv = null, nvWarn = false;
+  let prev = fresh ? null : readJson(sj), changes = comment && !fresh ? [`${prev ? 'Правки' : 'Пожелания'} Ника: ${comment}`] : [], check = null, ok = false, nv = null, nvWarn = false;
   if (regen && !fresh) console.log('перегенерация без истории: прежних версий нет, пишу обычным порядком');
   if (fresh) fs.rmSync(sj, { force: true });                       // прежний текст сохранён в history/; упавший запуск модели не должен принять его за новый
   const MAXR = fresh ? 4 : 3;                                     // у перегенерации один лишний круг на случай отбракованного по новизне черновика

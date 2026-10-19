@@ -203,3 +203,126 @@ test('одноразовая миграция: уже висящая карто�
   assert.deepEqual(ds(db, a), ['package:3', 'dismiss:0']);
   setupChat({ db, ROOT: dir, DATA_DIR: dir }); assert.deepEqual(ds(db, a), ['package:3', 'dismiss:0'], 'повторный запуск не дублирует кнопку');
 });
+
+
+/* ---------- «понимать с первого раза»: короткие ответы, прямое выполнение, без дублей ---------- */
+const tick = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+function confirmCard(chat, db, data, comment = '', title = 'Выбрать тему «Шаги»?') {
+  const id = chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: `Правильно ли я поняла: ${title}`, ref: { data, comment }, buttons: [[['Да, сделать', 'confirm:0'], ['Нет', 'cancel:0']]] });
+  db.prepare('UPDATE messages SET buttons=? WHERE id=?').run(JSON.stringify([[{ t: 'Да, сделать', d: `confirm:${id}` }, { t: 'Нет', d: `cancel:${id}` }]]), id);
+  return id;
+}
+const msgs = (db) => db.prepare('SELECT * FROM messages ORDER BY id').all();
+const stageOf = (db, id) => db.prepare('SELECT stage FROM videos WHERE id=?').get(id).stage;
+
+test('напечатанное «Да» отвечает на открытый вопрос: без модели, без новой карточки, ответ Ника не дублируется', async () => {
+  const { chat, db } = make(); const a = confirmCard(chat, db, 'pick:5');
+  chat.incoming({ text: 'Да', source: 'dashboard', thread: 'captain_smm' }); await tick(200);
+  assert.equal(stageOf(db, 5), 'script'); assert.equal(chat.pending('smm'), 0);
+  const all = msgs(db); assert.equal(all.filter((m) => m.sender === 'nick').length, 1, 'только напечатанное «Да», без эха кнопки');
+  assert.ok(!all.some((m) => /заглушка/.test(m.text)), 'модель не вызывалась');
+  assert.equal(all.filter((m) => /Тема выбрана/.test(m.text)).length, 1);
+  assert.equal(db.prepare('SELECT choice FROM messages WHERE id=?').get(a).choice, `confirm:${a}`);
+});
+
+test('четыре открытых вопроса на одно действие (как 20.10): «Да» запускает действие один раз, остальные закрываются', async () => {
+  const { chat, db } = make(); const ids = [1, 2, 3, 4].map(() => confirmCard(chat, db, 'pick:5'));
+  chat.incoming({ text: 'да, сделать', source: 'dashboard', thread: 'captain_smm' }); await tick(200);
+  assert.equal(chat.pending('smm'), 0); assert.equal(msgs(db).filter((m) => /Тема выбрана/.test(m.text)).length, 1, 'тема выбрана один раз');
+  const st = ids.map((i) => db.prepare('SELECT choice FROM messages WHERE id=?').get(i).choice); assert.equal(st.filter((c) => c === 'superseded').length, 3);
+});
+
+test('«Нет» отменяет вопрос, ничего не запускает', async () => {
+  const { chat, db } = make(); confirmCard(chat, db, 'pick:5');
+  chat.incoming({ text: 'не надо', source: 'telegram' }); await tick(200);
+  assert.equal(stageOf(db, 5), 'scored'); assert.equal(chat.pending('smm'), 0); assert.ok(msgs(db).some((m) => m.text === 'Хорошо, не делаю.'));
+});
+
+test('«Да, про 10000 шагов»: уточнение уходит как пожелание Ксении (для выбора темы), а не теряется и не вызывает повторный вопрос', async () => {
+  const { chat, db } = make(); confirmCard(chat, db, 'pick:5');
+  chat.incoming({ text: 'Да, про 10000 шагов', source: 'dashboard', thread: 'captain_smm' }); await tick(200);
+  assert.equal(stageOf(db, 5), 'script'); assert.ok(msgs(db).some((m) => /Пожелание передано Ксении: «про 10000 шагов»/.test(m.text)));
+});
+
+test('«Да, …» к действию без поля пожелания (принять ролик) уходит Капитану, вопрос остаётся открытым: ничего не теряется', async () => {
+  const { chat, db } = make(); db.prepare("INSERT INTO videos VALUES (8,'Ролик','produced',0)").run(); confirmCard(chat, db, 'accept:8', '', 'Принять ролик?');
+  chat.incoming({ text: 'Да, но поменяй музыку', source: 'dashboard', thread: 'captain_smm' }); await tick(1200);
+  assert.equal(chat.pending('smm'), 1); assert.ok(msgs(db).some((m) => /заглушка/.test(m.text)), 'ответил Капитан');
+  assert.equal(stageOf(db, 8), 'produced');
+});
+
+test('без открытых вопросов «Да» не выполняет ничего и уходит Капитану', async () => {
+  const { chat, db } = make(); chat.incoming({ text: 'Да', source: 'dashboard', thread: 'captain_smm' }); await tick(1200);
+  assert.equal(stageOf(db, 5), 'scored'); assert.ok(msgs(db).some((m) => /заглушка/.test(m.text)));
+});
+
+test('«#5» и «выбираем тему 5» выбирают тему из списка сразу, без модели', async () => {
+  const { chat, db } = make(); topics(chat);
+  chat.incoming({ text: 'Выбираем тему #5', source: 'dashboard', thread: 'captain_smm' }); await tick(200);
+  assert.equal(stageOf(db, 5), 'script'); assert.equal(chat.pending('smm'), 0); assert.ok(!msgs(db).some((m) => /заглушка/.test(m.text)));
+  assert.equal(msgs(db).filter((m) => /Тема выбрана/.test(m.text)).length, 1);
+});
+
+test('число без списка тем (ролик не ждёт выбора) не запускает ничего', async () => {
+  const { chat, db } = make(); db.prepare("INSERT INTO videos VALUES (9,'Старая','rejected',0)").run();
+  chat.incoming({ text: '9', source: 'dashboard', thread: 'captain_smm' }); await tick(1200);
+  assert.equal(stageOf(db, 9), 'rejected');
+});
+
+async function llm(json, text, make_) {
+  const { chat, db } = make_ || make(); process.env.OFFICE_CHAT_STUB_JSON = JSON.stringify(json);
+  try { chat.incoming({ text, source: 'dashboard', thread: 'captain_smm' }); await tick(1300); } finally { delete process.env.OFFICE_CHAT_STUB_JSON; }
+  return { chat, db };
+}
+
+test('модель: ясная команда «выбираем тему 5» выполняется сразу, одной репликой Капитана, пожелание уходит Ксении', async () => {
+  const { chat, db } = await llm({ reply: 'Ник, понял: тема 5. Подтвердите кнопкой, и Ксения возьмёт её.', action: { type: 'pick', video_id: 5, comment: 'хук поярче', explicit: true } }, 'Выбираем тему 5, хук поярче');
+  assert.equal(stageOf(db, 5), 'script'); assert.equal(chat.pending('smm'), 0);
+  const cap = msgs(db).filter((m) => m.sender === 'captain_smm').map((m) => m.text); assert.ok(cap.some((x) => /Пожелание передано Ксении: «хук поярче»/.test(x)));
+  assert.ok(!cap.some((x) => /кнопк/i.test(x)), 'нет «подтвердите кнопкой»');
+});
+
+test('модель: предположение (explicit=false) даёт ровно одну карточку «да/нет», слова про кнопку из ответа вырезаны', async () => {
+  const { chat, db } = await llm({ reply: 'Ник, понял: тема 5 «Шаги», балл 77. Нажмите кнопку, и Ксения возьмёт её.', action: { type: 'pick', video_id: 5, comment: '', explicit: false } }, 'наверное шаги');
+  assert.equal(stageOf(db, 5), 'scored'); assert.equal(chat.pending('smm'), 1);
+  const cap = msgs(db).filter((m) => m.sender === 'captain_smm'); assert.ok(!cap.some((m) => m.kind === 'text' && /кнопк/i.test(m.text)));
+  assert.match(cap.find((m) => m.kind === 'action').text, /написать «да» \/ «нет»/);
+});
+
+test('модель: тема в «ясной» команде не названа Ником (нет номера и слов названия): выполнение откладывается на подтверждение', async () => {
+  const { chat, db } = await llm({ reply: '', action: { type: 'pick', video_id: 5, comment: '', explicit: true } }, 'сделай уже что-нибудь');
+  assert.equal(stageOf(db, 5), 'scored'); assert.equal(chat.pending('smm'), 1);
+});
+
+test('модель: дорогие шаги (утвердить сценарий) даже при «ясной» команде идут через подтверждение', async () => {
+  const m = make(); m.db.prepare("INSERT INTO videos VALUES (8,'Ролик','checked',0)").run();
+  const { chat, db } = await llm({ reply: '', action: { type: 'approve', video_id: 8, comment: '', explicit: true } }, 'утверждаю сценарий 8', m);
+  assert.equal(stageOf(db, 8), 'checked'); assert.equal(chat.pending('smm'), 1);
+});
+
+test('модель: повторное предложение того же действия заменяет прежнюю карточку, дублей нет', async () => {
+  const m = make(); const j = { reply: '', action: { type: 'pick', video_id: 5, comment: '', explicit: false } };
+  await llm(j, 'наверное шаги', m); await llm(j, 'ну шаги же', m); await llm(j, 'шаги', m);
+  assert.equal(m.chat.pending('smm'), 1);
+});
+
+test('выбор темы, уже ушедшей дальше (сценарий проверен), второй раз не запускает этап', async () => {
+  const { chat, db } = make(); db.prepare("INSERT INTO videos VALUES (8,'Ролик','checked',0)").run();
+  const id = chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: 'Темы', buttons: [[['Тема 8', 'pick:8']]] });
+  await chat.answer({ id, choice: 'pick:8', via: 'dashboard' });
+  assert.equal(stageOf(db, 8), 'checked'); assert.ok(msgs(db).some((m) => /уже в работе/.test(m.text)));
+});
+
+test('этап запущен: второй такой же не стартует (настоящий запуск с подменой конвейера)', async () => {
+  const { chat, db, dir } = make();
+  fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true }); fs.writeFileSync(path.join(dir, 'scripts', 'smm_pipeline.mjs'), 'setTimeout(() => {}, 4000);');
+  process.env.HERMES_BIN = 'fake';
+  try {
+    const a = chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: 'Темы', buttons: [[['Тема 5', 'pick:5']]] });
+    await chat.answer({ id: a, choice: 'pick:5', via: 'dashboard' });
+    const b = chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: 'Ещё раз темы', buttons: [[['Тема 5', 'pick:5'], ['Тема 7', 'pick:7']]] });
+    await chat.answer({ id: b, choice: 'pick:5', via: 'telegram' });
+    assert.equal(msgs(db).filter((m) => /Тема выбрана/.test(m.text)).length, 1, 'вторая «Тема выбрана» не пришла');
+    assert.ok(msgs(db).some((m) => /Ксения уже пишет сценарий/.test(m.text)));
+  } finally { delete process.env.HERMES_BIN; }
+});
