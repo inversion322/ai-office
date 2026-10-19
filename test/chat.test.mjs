@@ -64,3 +64,53 @@ test('из Telegram имя в начале сообщения выбирает �
   const rows = db.prepare("SELECT thread FROM messages WHERE sender='nick' ORDER BY id").all().map((r) => r.thread);
   assert.deepEqual(rows, ['scriptwriter', 'captain_smm']);
 });
+
+import { cleanReport } from '../server/lib_text.mjs';
+
+const videoCard = (chat, id = 3) => chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: 'Ролик готов', buttons: [[['Принять ролик', `accept:${id}`], ['Внести правки', `rework:${id}`]]], tgMsg: 77 });
+
+test('«Внести правки» с комментарием: карточка закрыта, стадия editing, приоритет включён, прежняя кнопка «Принять» не останется', async () => {
+  const { chat, db } = make(); const id = videoCard(chat); db.prepare("UPDATE videos SET stage='produced' WHERE id=3").run();
+  const r = await chat.answer({ id, choice: 'rework:3', comment: 'заголовок крупнее', via: 'dashboard' });
+  assert.equal(r.ok, true); assert.equal(chat.pending('smm'), 0);
+  assert.equal(db.prepare('SELECT stage FROM videos WHERE id=3').get().stage, 'editing');
+  const p = chat.priority(); assert.equal(p.active, true); assert.equal(p.video_id, 3);
+  const row = db.prepare('SELECT status,choice FROM messages WHERE id=?').get(id); assert.deepEqual([row.status, row.choice], ['answered', 'rework:3']);
+});
+
+test('«Внести правки» без текста (Telegram): карточка и кнопка «Принять» остаются, следующий текст Ника становится комментарием', async () => {
+  const { chat, db } = make(); const id = videoCard(chat);
+  const r = await chat.answer({ id, choice: 'rework:3', via: 'telegram' });
+  assert.deepEqual([r.ok, r.pending], [true, 'comment']);
+  assert.equal(chat.pending('smm'), 1, 'карточка закрылась раньше времени');
+  assert.equal(chat.priority().active, false, 'приоритет включился до получения правок');
+  chat.incoming({ text: 'Замедли первую сцену', source: 'telegram' });
+  assert.equal(chat.pending('smm'), 0);
+  assert.equal(chat.priority().active, true);
+  const row = db.prepare('SELECT status,choice,answered_via FROM messages WHERE id=?').get(id); assert.deepEqual([row.status, row.choice, row.answered_via], ['answered', 'rework:3', 'telegram']);
+  assert.equal(db.prepare("SELECT v FROM kv WHERE k='awaiting'").get(), undefined, 'ожидание комментария не сброшено');
+});
+
+test('ожидание комментария истекает через 30 минут: старое «ожидание» не съедает обычное сообщение', async () => {
+  const { chat, db } = make(); const id = videoCard(chat);
+  await chat.answer({ id, choice: 'rework:3', via: 'telegram' });
+  db.prepare("UPDATE kv SET v=? WHERE k='awaiting'").run(JSON.stringify({ kind: 'rework', id: 3, mid: id, ts: Date.now() - 31 * 60e3 }));
+  chat.incoming({ text: 'Что в работе?', source: 'telegram' });
+  assert.equal(chat.pending('smm'), 1); assert.equal(chat.priority().active, false);
+});
+
+test('«Принять ролик» закрывает и карточку правок: после приёмки поздняя кнопка «Внести правки» не запустит монтаж', async () => {
+  const { chat, db } = make(); const a = videoCard(chat), b = videoCard(chat);
+  await chat.answer({ id: a, choice: 'accept:3', via: 'dashboard' });
+  assert.equal(db.prepare('SELECT choice FROM messages WHERE id=?').get(b).choice, 'superseded');
+  assert.equal(db.prepare('SELECT stage FROM videos WHERE id=3').get().stage, 'approved');
+});
+
+test('cleanReport: без markdown, без заголовка, обрезка по предложению', () => {
+  const md = '# Дело №01, ролик v2: отчёт Кирилла (19.10.2026)\n\nИтог: `final/dosie01_v2.mp4`, 50,7 с (лимит 59,0 с). Не опубликован, **ждёт** приёмки Ника.\n\n## Файлы\n- `final/x.mp4`';
+  const s = cleanReport(md);
+  assert.equal(s, 'Итог: final/dosie01_v2.mp4, 50,7 с (лимит 59,0 с). Не опубликован, ждёт приёмки Ника.');
+  assert.ok(!/[`#*]/.test(s));
+  const long = cleanReport('Первое предложение. ' + 'Очень длинное второе предложение без конца '.repeat(20), 120);
+  assert.ok(long.length <= 125 && /[.…]$/.test(long), long);
+});

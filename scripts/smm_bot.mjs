@@ -17,13 +17,21 @@ const save = () => { fs.mkdirSync(path.dirname(STATE), { recursive: true }); fs.
 async function onCallback(cq) {
   if (cq.from.id !== OWNER) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Нет доступа' });
   const r = await api('/api/chat/answer', { tg_msg: cq.message && cq.message.message_id, choice: cq.data, via: 'telegram' }).catch((e) => ({ ok: false, error: e.message }));
+  if (r.ok && r.pending === 'comment') {       // «Внести правки»: ждём комментарий, кнопки остаются
+    await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Напишите правки сообщением' });
+    return;
+  }
   await tg('answerCallbackQuery', { callback_query_id: cq.id, text: r.ok ? 'Принято' : (r.error || 'Не вышло') });
   if (cq.message) await tg('editMessageReplyMarkup', { chat_id: cq.message.chat.id, message_id: cq.message.message_id, reply_markup: { inline_keyboard: [] } });
 }
 
 async function onMessage(m) {
   if (m.from.id !== OWNER) return;
-  const text = String(m.text || '').trim(); if (!text) return;
+  const text = String(m.text || '').trim();
+  if (!text) {      // голосовые и вложения бот пока не распознаёт: честно сказать, а не молчать
+    if (m.voice || m.audio || m.video_note) await tg('sendMessage', { chat_id: OWNER, text: 'Голосовые в этом боте пока не распознаются. Напишите правки текстом, пожалуйста.' });
+    return;
+  }
   if (text.startsWith('/start') || text.startsWith('/topics')) {
     if (text.startsWith('/start')) await tg('sendMessage', { chat_id: OWNER, text: 'Это бот офиса Nick G SMM. Сюда приходят темы на выбор, сценарии на утверждение и готовые ролики. Можно писать сотрудникам: начните сообщение с имени («Ксения, …», «Лев, …», «Вера, …», «Кирилл, …», «Виктор, …»); без имени отвечает Капитан Кряк. То же самое есть в чате дашборда, переписка общая. /status: что в работе, /topics: темы, ждущие выбора.' });
     const tm = topicsMessage(await videos());

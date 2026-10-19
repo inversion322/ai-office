@@ -45,7 +45,7 @@ function actHtml(m) {
   const flat = (m.buttons || []).flat();
   const btns = `<div class="act-btns">${flat.map((b) => `<button type="button" data-act="${esc(b.d)}" data-mid="${m.id}">${esc(b.t)}</button>`).join('')}</div>`;
   const rev = reviseHere
-    ? `<div class="rev"><textarea id="revText" placeholder="Что поправить в сценарии?">${esc(revise.text)}</textarea><div class="btns"><button type="button" data-revsend="1">Отправить правки</button><button type="button" data-revcancel="1">Отмена</button></div></div>`
+    ? `<div class="rev"><textarea id="revText" placeholder="${revise.choice.startsWith('rework:') ? 'Что поправить в ролике? Кирилл начнёт сразу.' : 'Что поправить в сценарии?'}">${esc(revise.text)}</textarea><div class="btns"><button type="button" data-revsend="1">Отправить правки</button><button type="button" data-revcancel="1">Отмена</button></div></div>`
     : btns;
   const long = m.text.length > 70 || m.text.includes('\n');
   const more = long ? `<button type="button" class="act-more" data-more="${m.id}">${open ? 'Свернуть ▴' : 'Подробнее ▾'}</button>` : '';
@@ -111,7 +111,8 @@ function renderLive(s) {
   const agents = s.agents || [];
   const work = agents.filter((a) => a.status === 'working'), err = agents.filter((a) => a.status === 'error');
   $('liveCount').textContent = work.length ? `работают: ${work.length}` : '';
-  $('liveNow').innerHTML = (work.map((a) => liveCard(a, '')).concat(err.map((a) => liveCard(a, 'err'))).join('')) || '<div class="live-empty">Сейчас никто не работает: все свободны.</div>';
+  const pr = s.priority && s.priority.active ? `<div class="live-prio">⚡ Приоритет: ${esc(s.priority.label || 'правки ролика')}. Остальные этапы подождут.</div>` : '';
+  $('liveNow').innerHTML = pr + (work.map((a) => liveCard(a, '')).concat(err.map((a) => liveCard(a, 'err'))).join('')) || '<div class="live-empty">Сейчас никто не работает: все свободны.</div>';
   const now = Date.now();
   $('liveFeed').innerHTML = (s.events || []).slice(0, 16).map((e) => `<li class="${e.level === 'error' ? 'err' : ''} ${now - e.ts < 90000 ? 'new' : ''}"><time>${hhmmss(e.ts)}</time><span><b>${esc((e.agent_name || '').split(' ')[0])}</b> ${esc(e.message)}</span></li>`).join('') || '<li><span>Пока пусто</span></li>';
 }
@@ -146,7 +147,7 @@ $('chatPinned').addEventListener('click', (e) => {
   if (e.target.closest('[data-revsend]')) { const t = ($('revText').value || '').trim(); if (!t) return $('revText').focus(); return answerAction(revise.mid, revise.choice, t); }
   const more = e.target.closest('[data-more]'); if (more) { const id = Number(more.dataset.more); expanded.has(id) ? expanded.delete(id) : expanded.add(id); pinKey = ''; return renderPinned(); }
   const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
-  if (b.dataset.act.startsWith('revise:')) { revise = { mid: Number(b.dataset.mid), choice: b.dataset.act, text: '' }; pinKey = ''; return renderPinned(); }
+  if (b.dataset.act.startsWith('revise:') || b.dataset.act.startsWith('rework:')) { revise = { mid: Number(b.dataset.mid), choice: b.dataset.act, text: '' }; pinKey = ''; return renderPinned(); }
   b.disabled = true; answerAction(b.dataset.mid, b.dataset.act);
 });
 document.addEventListener('dblclick', (e) => { const el = e.target.closest('[data-id]'); if (el && agentById(el.dataset.id)) openThread(el.dataset.id); });

@@ -247,3 +247,5 @@ details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-weight:700;f
 
 .work-badge.side{transform:translate(-50%,0);max-width:150px;z-index:9}
 .work-badge.side::after{top:-8px;bottom:auto;border-top:0;border-bottom:6px solid #2F6FE4}
+
+.live-prio{padding:6px 10px;border:1px solid #EBCB7A;background:#FFF8E6;border-radius:10px;font:700 12px 'Manrope',sans-serif;color:var(--accent-ink)}

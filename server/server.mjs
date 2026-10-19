@@ -198,7 +198,7 @@ http.createServer(async (req, res) => {
     const vstages = {};
     for (const v of videos) vstages[v.stage] = (vstages[v.stage] || 0) + 1;
     return json(res, 200, {
-      ts: now(), office, offices: OFFICES, agents, pending: chat.pending(office),
+      ts: now(), office, offices: OFFICES, agents, pending: chat.pending(office), priority: chat.priority(),
       tasks: q("SELECT t.*, a.name agent_name FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE a.office=? AND t.status IN ('running','planned') ORDER BY t.status DESC, t.scheduled_at LIMIT 50", office),
       events: q("SELECT e.*, a.name agent_name FROM events e LEFT JOIN agents a ON a.id=e.agent_id WHERE a.office=? OR (a.id IS NULL AND ?='jobs') ORDER BY e.id DESC LIMIT 60", office, office),
       jobs, funnel: stages, videos, vfunnel: vstages,

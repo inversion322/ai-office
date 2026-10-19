@@ -7,7 +7,7 @@
 // Публикует всегда только Ник. Состояние видно на дашборде (вкладка Nick G SMM).
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, api, agent, scene, promptOf, videos, getVideo, setVideo, runAgent, readJson, notify, sendVideoFile, topicsMessage, say } from './smm_lib.mjs';
+import { ROOT, api, agent, scene, promptOf, videos, getVideo, setVideo, runAgent, readJson, notify, sendVideoFile, topicsMessage, say, yieldToPriority, setPriority, hermesSpawn } from './smm_lib.mjs';
 
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 const safeNotify = async (text, buttons) => { try { await notify(text, buttons); } catch (e) { console.error('УВЕДОМЛЕНИЕ НЕ ДОСТАВЛЕНО:', e.message); fs.appendFileSync(path.join(ROOT, 'smm', 'undelivered.txt'), `\n--- ${new Date().toISOString()}\n${text}\n`); } };
@@ -23,7 +23,8 @@ function ensureCtaFile(file) {
   return !had;
 }
 import { speechSeconds as measureSpeech } from './smm_tts.mjs';
-const speechSeconds = (segments) => measureSpeech(segments, { root: ROOT });   // { sec, estimated, perSeg }
+import { cleanReport } from '../server/lib_text.mjs';
+const speechSeconds = async (segments) => { await yieldToPriority('scriptwriter'); return measureSpeech(segments, { root: ROOT }); };   // { sec, estimated, perSeg }
 const NOTE = (v) => { try { return JSON.parse(v.notes || '{}'); } catch { return {}; } };
 
 /* ---------------- 1. Темы ---------------- */
@@ -168,6 +169,7 @@ async function produce(id, comment) {
 
   await agent('captain_smm', 'working', `Монтаж: «${v.title}»`, 60, 'Сценарий утверждён, передал Кириллу');
   await scene('captain_smm', 'video', `Кирилл, сценарий утверждён: «${v.title}». Озвучка, субтитры, монтаж.`);
+  await yieldToPriority('video');          // идут правки другого ролика: один монтажёр, у правок приоритет
   await agent('video', 'working', 'Озвучка, субтитры, монтаж (Opus 5.5)', 20, 'Начал сборку ролика');
   const { spawn } = await import('node:child_process');
   const code = await new Promise((resolve) => {
@@ -185,9 +187,99 @@ async function produce(id, comment) {
   await agent('video', 'idle', 'Ролик готов, ждёт вашего просмотра', 100, 'Ролик собран');
   await say('video', `Ролик собран: ${path.relative(ROOT, mp4)}. Отчёт: ${path.relative(ROOT, path.join(proj, 'RESULT.md'))}.`);
   await agent('captain_smm', 'waiting', 'Ждёт вашего решения по ролику', 0, `Ролик «${v.title}» готов`);
-  let res = ''; try { res = fs.readFileSync(path.join(proj, 'RESULT.md'), 'utf8').slice(0, 700); } catch {}
-  try { await sendVideoFile(mp4, `🎬 «${v.title}». Проверьте и скажите, принимаем ли.\n${res}`, [[['Принять', `accept:${id}`]]]); }
-  catch (e) { await safeNotify(`🎬 Ролик готов: ${mp4}\n(не удалось отправить файл: ${e.message})\n${res}`, [[['Принять', `accept:${id}`]]]); }
+  let res = ''; try { res = cleanReport(fs.readFileSync(path.join(proj, 'RESULT.md'), 'utf8')); } catch {}
+  const btn = [[['Принять ролик', `accept:${id}`], ['Внести правки', `rework:${id}`]]];
+  try { await sendVideoFile(mp4, `🎬 «${v.title}» готов.\n${res}\n\nПринять или внести правки?`, btn); }
+  catch (e) { await safeNotify(`🎬 Ролик готов: ${mp4}\n(не удалось отправить файл: ${e.message})\n${res}`, btn); }
+  console.log('готово:', mp4);
+}
+
+
+/* ---------------- 4. Правки готового ролика (Кирилл, Opus 5.5, high; у ролика приоритет) ---------------- */
+const projectDir = (id) => (Number(id) === 1 ? path.join(ROOT, 'video', 'med_detective', 'dosie01') : path.join(ROOT, 'video', `dosie${String(id).padStart(2, '0')}`));   // ролик №1 собран вручную в проекте med_detective
+function reworkBrief({ id, n, ver, cur, title, comment, proj }) {
+  const P = proj.replaceAll('\\', '/'), V = ROOT.replaceAll('\\', '/') + '/video';
+  return `# Правки ролика №${id} → ${ver}: ${comment.replace(/\s+/g, ' ').slice(0, 70)}
+
+Ты Кирилл Кадров, Video Editor AI-офиса Ника (Claude Opus 5.5, высокие усилия). Отвечай и пиши отчёт по-русски. Публиковать ничего нельзя: результат уходит Нику на приёмку. **У этой работы приоритет над всем остальным: остальные этапы конвейера ждут, поэтому делай сразу и без пауз.**
+
+## Что просит Ник (дословно; это закон)
+«${comment}»
+
+## База
+- Ролик «${title}», проект \`${P}\`. Текущая версия: \`final/dosie${n}_v${cur}.mp4\`. Её исходники лежат в проекте и в \`v${cur}_archive/\`: самый свежий \`build_dosie*.py\`, \`make_frames*.py\`, \`script_ru.txt\`, \`words.json\`, \`narration.mp3\`, отчёт \`RESULT*.md\`. Прочитай отчёт и скрипт сборки первыми.
+- **Не перезаписывай и не удаляй прежние версии** (\`final/dosie${n}_v*.mp4\` и их отчёты). Сделай копии скриптов сборки под ${ver} (\`build_dosie${n}_${ver}.py\`, \`make_frames_${ver}.py\`) и правь их.
+- Стандарт ролика (DESIGN.md, \`${V}/med_detective/DESIGN.md\`): ≤ 59,0 с; безопасная зона x 60-940, y 250-1440 для всего читаемого; громкость −14 LUFS, true peak ≤ −1,5 dBTP; призыв подписаться в конце (\`${V}/cta.json\`); динамика (новая картинка каждые 1-1,5 с, статики дольше 1,5 с нет); лупа отдельным элементом; экспорт 1080×1920, 30 к/с, H.264 High yuv420p, AAC 48 кГц, faststart, файл ≤ 40 МБ.
+
+## Как вносить правки
+1. Меняй **только то, что просит Ник**. Всё остальное остаётся как в v${cur}: не ломай принятое (тайминги, лупу, зону, призыв, громкость).
+2. Если правка касается **текста озвучки или фактов** (слова диктора, числа, названия источников): текст сценария сам НЕ МЕНЯЙ (он проверен фактчекером). Сделай всё остальное из просьбы, а по тексту опиши в отчёте раздел «Нужна правка сценария» с точной формулировкой просьбы: её передадут сценаристу и фактчекеру.
+3. Озвучку генерируй заново только если она действительно меняется (скорость, пауза и т. п.): \`C:/hf_tts/venv/Scripts/python.exe ${V}/narrate.py --lang ru --text <script_ru.txt> --out <narration.mp3> --srt <captions.srt> --words <words.json> --patience 1200\`. Код выхода 4 (сервис недоступен) значит «подожди 10 минут и повтори»; голос и движок не менять.
+4. Проверки после правки (затронутые правкой обязательно; длительность и безопасную зону проверяй всегда): \`npx --yes hyperframes@0.8.174 check\` без замечаний, рендер \`--quality standard\`, \`ffprobe\` ≤ 59,0 с, кадры затронутых мест смотри через \`vision_analyze\` (наложения, обрезания, выход за зону, мелкий шрифт), громкость \`ebur128\`, призыв подписаться в последней сцене.
+
+## Результат (имена ТОЧНО такие)
+\`final/dosie${n}_${ver}.mp4\`, \`RESULT_${ver}.md\` в корне проекта (по каждому пункту просьбы: что сделано и как проверено, что не удалось, раздел «Нужна правка сценария», если он нужен; первой строкой одно предложение-итог без разметки: оно уйдёт Нику в Telegram), \`final/poster_${ver}.png\`, \`final/contact_sheet_${ver}.png\`, субтитры \`final/captions_${ver}.srt\`.
+
+## Жёсткие рамки
+- Работай только в \`${V}/\` и в проекте \`${P}\`. Не трогай \`server/\`, \`web/\`, \`smm/\`, \`scripts/\`, git, профили и конфиги Hermes, cron; ничего не устанавливай глобально; сервисы не перезапускай; никому не пиши и не публикуй.
+- В режиме без человека блокируются \`execute_code\` и команды-heredoc: создавай файлы \`write_file\`/\`patch\`, запускай скрипты простыми командами \`terminal\` (\`C:/hf_tts/venv/Scripts/python.exe путь.py\`).
+- Пиши прогресс в \`${P}/PROGRESS.md\` короткими строками («ЧЧ:ММ: что сделано, что дальше») после каждого шага: по нему офис показывает Нику ход работы.
+- Факты только из FACTS.md. Никаких советов по лечению, дозировок, брендов, «врачей» и ИИ-аватаров. Музыку не добавлять.
+- Не заканчивай, пока проверки не пройдены. Если что-то невозможно, честно запиши в RESULT_${ver}.md, ничего не подделывай.
+- Команды дольше 600 с запускай фоном; временные файлы в \`~/AppData/Local/hermes/cache/scratch\`.
+`;
+}
+async function rework(id, comment) {
+  comment = String(comment || '').trim(); if (!comment) throw new Error('нет текста правок');
+  const v = await getVideo(id); if (!v) throw new Error('нет ролика #' + id);
+  const n = String(id).padStart(2, '0'), proj = projectDir(id), fin = path.join(proj, 'final');
+  const have = fs.existsSync(fin) ? fs.readdirSync(fin).map((f) => new RegExp(`^dosie${n}_v(\\d+)\\.mp4$`).exec(f)).filter(Boolean).map((m) => Number(m[1])) : [];
+  if (!have.length) throw new Error(`нет готового ролика в ${fin}`);
+  const cur = Math.max(...have), next = cur + 1, ver = `v${next}`, started = Date.now();
+  const short = comment.replace(/\s+/g, ' ').slice(0, 80);
+  // прежняя версия: исходники и отчёт в архив (mp4 остаётся в final/)
+  const arch = path.join(proj, `v${cur}_archive`); fs.mkdirSync(arch, { recursive: true });
+  for (const f of fs.readdirSync(proj)) if (/^(script_ru\.txt|narration\.mp3|words\.json|captions\.srt|build_meta\.json|RESULT[\w]*\.md|build_dosie[\w]*\.py|make_frames[\w]*\.py)$/.test(f) && !fs.existsSync(path.join(arch, f))) fs.copyFileSync(path.join(proj, f), path.join(arch, f));
+  if (ensureCtaFile(path.join(proj, 'script_ru.txt'))) console.log('в сценарий добавлен призыв подписаться');
+  const bf = path.join(proj, `REWORK_${ver}.md`); fs.writeFileSync(bf, reworkBrief({ id, n, ver, cur, title: v.title, comment, proj }), 'utf8');
+  const progress = path.join(proj, 'PROGRESS.md'), lastLine = () => { try { return fs.readFileSync(progress, 'utf8').split(/\r?\n/).map((s) => s.trim()).filter(Boolean).pop() || ''; } catch { return ''; } };
+
+  await setPriority(true, Number(id), `правки ролика №${id}`);
+  await agent('captain_smm', 'working', `Правки ролика №${id} (приоритет): ${short}`, 60, `Ник просит правки ролика №${id}: ${short}`);
+  await scene('captain_smm', 'video', `Кирилл, правки Ника по ролику №${id}: ${short}`);
+  await agent('video', 'working', `Правки ролика №${id} → ${ver}: ${short}`, 10, `Начал правки (${ver}): ${short}`);
+  let code = null, last = lastLine();
+  try {
+    code = await new Promise((resolve) => {
+      const out = fs.openSync(path.join(proj, `_run_${ver}_log.txt`), 'a');
+      const p = hermesSpawn(['-p', 'video', 'chat', '--query-file', bf, '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: ROOT, windowsHide: true, stdio: ['ignore', out, out] });
+      const timer = setInterval(async () => {                // живой ход: минуты и последняя строка его PROGRESS.md
+        const mins = Math.round((Date.now() - started) / 60000), ll = lastLine();
+        await agent('video', 'working', `Правки ролика №${id} → ${ver}: ${short} · ${mins} мин`, Math.min(90, 10 + mins * 2), ll && ll !== last ? ll.slice(0, 200) : undefined).catch(() => {});
+        last = ll;
+      }, Number(process.env.REWORK_POLL_MS) || 20000);
+      p.on('exit', (c) => { clearInterval(timer); resolve(c); });
+    });
+  } finally { await setPriority(false); }
+
+  const mp4 = path.join(fin, `dosie${n}_${ver}.mp4`), report = path.join(proj, `RESULT_${ver}.md`);
+  const fresh = (f) => { try { return fs.statSync(f).mtimeMs >= started; } catch { return false; } };
+  if (!fresh(mp4) || !fresh(report)) {
+    await agent('video', 'error', fresh(mp4) ? 'Правки: черновой рендер без финальной проверки' : 'Правки не готовы', 0, `Правки ролика №${id}: ${ver} не собран (код ${code})`, 'error');
+    await agent('captain_smm', 'waiting', 'Правки не вышли, ждёт вашего решения', 0, `Правки ролика №${id} не собраны`, 'error');
+    await setVideo(id, { stage: 'produced' });
+    await safeNotify(`⚠️ Правки ролика №${id} не готовы: Кирилл остановился${fresh(mp4) ? ' (есть черновой рендер, но без финальной проверки)' : ''}. Прежняя версия v${cur} цела. Это сбой на нашей стороне, не ваш. Можно внести правки ещё раз или принять v${cur}.`, [[[`Внести правки ещё раз`, `rework:${id}`], [`Принять v${cur}`, `accept:${id}`]]]);
+    return;
+  }
+  const md = fs.readFileSync(report, 'utf8');
+  await setVideo(id, { stage: 'produced', video_path: path.relative(ROOT, mp4) });
+  await agent('video', 'idle', `Правки внесены, ${ver} ждёт вашего просмотра`, 100, `Ролик №${id} ${ver} собран`);
+  await say('video', `Правки внесены: ${path.relative(ROOT, mp4)}.`);
+  await agent('captain_smm', 'waiting', `Ждёт вашего решения по ролику №${id} ${ver}`, 0, `Ролик №${id} ${ver} готов`);
+  const needScript = /нужна правка сценария/i.test(md) ? '\n⚠️ Часть просьбы касается текста озвучки: нужны сценарист и фактчекер, подробности в отчёте Кирилла.' : '';
+  const btn = [[['Принять ролик', `accept:${id}`], ['Внести правки', `rework:${id}`]]];
+  const caption = `🎬 Ролик №${id} ${ver}: правки внесены.\n${cleanReport(md)}${needScript}\n\nПринять или внести ещё правки?`;
+  try { await sendVideoFile(mp4, caption, btn); } catch (e) { await safeNotify(`${caption}\n(файл не отправился: ${e.message}; он лежит на ПК: ${mp4})`, btn); }
   console.log('готово:', mp4);
 }
 
@@ -197,13 +289,14 @@ const all = [a1, ...rest];
 const runOnce = () => cmd === 'topics' ? topics(opt('--hint', all))
   : cmd === 'script' ? script(a1, opt('--comment', rest))
   : cmd === 'produce' ? produce(a1, opt('--comment', rest))
-  : Promise.resolve(console.log('Команды: topics [--hint …] | script <id> [--comment …] | produce <id> [--comment …]'));
+  : cmd === 'rework' ? rework(a1, opt('--comment', rest))
+  : Promise.resolve(console.log('Команды: topics [--hint …] | script <id> [--comment …] | produce <id> [--comment …] | rework <id> --comment …'));
 // Временные сбои (сервис озвучки, сеть, API): один автоповтор через 2 минуты, и только потом тревога Нику
 const TRANSIENT = /NoAudioReceived|WSServerHandshake|TTS_UNAVAILABLE|ECONNRESET|ECONNREFUSED|fetch failed|ETIMEDOUT|timed out|не удалось ни измерить/i;
 const run = (async () => {
   try { await runOnce(); }
   catch (e) {
-    if (!TRANSIENT.test(String((e && e.message) || e))) throw e;
+    if (cmd === 'rework' || !TRANSIENT.test(String((e && e.message) || e))) throw e;     // правки ролика не перезапускаем сами: это долгий запуск монтажёра
     const who = cmd === 'script' ? 'scriptwriter' : cmd === 'produce' ? 'video' : 'research';
     console.error('временный сбой, повтор через 2 минуты:', String(e.message).split('\n')[0]);
     await agent(who, 'working', 'Временный сбой сервиса, повторю через 2 минуты', 5, `Временный сбой: ${String(e.message).split('\n')[0].slice(0, 160)}`, 'warn');
@@ -215,13 +308,14 @@ run.catch(async (e) => {
   const msg = String((e && e.message) || e).split('\n')[0].slice(0, 220);
   console.error('ОШИБКА:', msg);
   try {   // статусы не должны зависать «в работе», а Ник должен узнать о сбое и получить кнопку «Повторить»
-    const who = cmd === 'script' ? 'scriptwriter' : cmd === 'produce' ? 'video' : 'research';
-    const stage = { script: 'сценария', produce: 'монтажа', topics: 'поиска тем' }[cmd] || cmd;
+    const who = cmd === 'script' ? 'scriptwriter' : (cmd === 'produce' || cmd === 'rework') ? 'video' : 'research';
+    const stage = { script: 'сценария', produce: 'монтажа', rework: 'правок ролика', topics: 'поиска тем' }[cmd] || cmd;
+    if (cmd === 'rework') await setPriority(false);
     await agent(who, 'error', 'Сбой: ' + msg, 0, `Сбой этапа ${stage}: ${msg}`, 'error');
     if (cmd === 'script') { await agent('factcheck', 'idle', 'Ждёт сценарий на проверку', 0); }
     if (cmd === 'topics') { await agent('virality', 'idle', 'Ждёт темы для оценки', 0); }
     await agent('captain_smm', 'waiting', `Сбой этапа ${stage}, ждёт вашего решения`, 0, `Этап ${stage} остановился с ошибкой`, 'error');
-    await safeNotify(`⚠️ Этап ${stage} остановился с ошибкой (после автоповтора): ${msg}\n\nЭто сбой на нашей стороне, не ваш. Нажмите «Повторить», когда удобно, и я запущу этап заново.`, [[['Повторить', cmd === 'topics' ? 'more:0' : `retry:${a1}`]]]);
+    await safeNotify(`⚠️ Этап ${stage} остановился с ошибкой (после автоповтора): ${msg}\n\nЭто сбой на нашей стороне, не ваш. Нажмите «Повторить», когда удобно, и я запущу этап заново.`, [[[cmd === 'rework' ? 'Внести правки ещё раз' : 'Повторить', cmd === 'topics' ? 'more:0' : cmd === 'rework' ? `rework:${a1}` : `retry:${a1}`]]]);
   } catch (e2) { console.error('не удалось отметить сбой:', e2.message); }
   process.exit(1);
 });

@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { cleanReport } from './lib_text.mjs';
 
 const OWNER = 323028999;
 const NAMES = { капитан: 'captain_smm', кряк: 'captain_smm', виктор: 'research', ксения: 'scriptwriter', лев: 'virality', вера: 'factcheck', кирилл: 'video' };
@@ -34,6 +35,17 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
   const kvDel = (k) => run('DELETE FROM kv WHERE k=?', k);
   const nameOf = (id) => (q('SELECT name FROM agents WHERE id=?', id)[0] || {}).name || id;
   const typing = new Map();                 // agent_id -> число активных ответов
+
+  /* ---------- приоритет правок ролика ----------
+     Пока Кирилл вносит правки Ника в ролик, остальные этапы конвейера (темы, сценарии, проверки, первичный монтаж) не стартуют новую тяжёлую работу
+     (озвучка, рендер и запросы моделей не конкурируют с правками). Метка с временем жизни: зависший этап не блокирует офис дольше 100 минут. */
+  const PRIORITY_TTL = 100 * 60e3;
+  const priorityRaw = () => { try { const p = JSON.parse(kvGet('priority')); if (p && now() - p.since < PRIORITY_TTL) return p; } catch {} return null; };
+  const priority = () => { const p = priorityRaw(); return p ? { active: true, video_id: p.video_id, label: p.label || '', since: p.since } : { active: false }; };
+  function setPriority({ active, video_id, label }) {
+    if (active) kvSet('priority', JSON.stringify({ video_id: Number(video_id) || null, label: String(label || '').slice(0, 120), since: now() })); else kvDel('priority');
+    return priority();
+  }
 
   /* ---------- Telegram ---------- */
   async function tg(method, body) {
@@ -116,8 +128,18 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       spawnPipeline(['produce', String(id)]);
     } else if (act === 'revise' && v) {
       if (comment && comment.trim()) { supersede(`approve:${id}`); supersede(`revise:${id}`); cap('Передала Ксении: исправит, Вера проверит заново.'); spawnPipeline(['script', String(id), '--comment', comment.trim()]); }
-      else { kvSet('awaiting', JSON.stringify({ kind: 'script', id })); cap('Напишите одним сообщением, что поправить в сценарии (здесь или в Telegram). Ксения исправит и Вера проверит заново.'); }
+      else { kvSet('awaiting', JSON.stringify({ kind: 'script', id, mid: srcMsg && srcMsg.id, ts: now() })); cap('Напишите одним сообщением, что поправить в сценарии (здесь или в Telegram). Ксения исправит и Вера проверит заново.'); }
+    } else if (act === 'rework' && v) {
+      if (comment && comment.trim()) {
+        const short = comment.trim().replace(/\s+/g, ' ').slice(0, 90);
+        supersede(`accept:${id}`); supersede(`rework:${id}`);
+        setStage(id, 'editing'); setPriority({ active: true, video_id: id, label: `правки ролика №${id}` });
+        setAgent('video', 'working', `Правки ролика №${id}: ${short}`, `Ник просит правки ролика «${v.title}»: ${short}`);
+        cap(`Правки приняты, Кирилл начинает сразу. У этого ролика приоритет: новые этапы других роликов подождут, пока он не закончит.\nЧто делает: «${short}${comment.trim().length > 90 ? '…' : ''}».\nГотовую версию пришлю сюда с кнопками «Принять» и «Внести правки».`);
+        spawnPipeline(['rework', String(id), '--comment', comment.trim()]);
+      } else { kvSet('awaiting', JSON.stringify({ kind: 'rework', id, mid: srcMsg && srcMsg.id, ts: now() })); cap('Напишите одним сообщением, что поправить в ролике (здесь или в Telegram). Кирилл начнёт сразу, у этого ролика будет приоритет.'); }
     } else if (act === 'accept' && v) {
+      supersede(`accept:${id}`); supersede(`rework:${id}`);
       setStage(id, 'approved'); setAgent('captain_smm', 'idle', 'Ролик принят, ждёт вашей публикации', `Ник принял ролик «${v.title}»`);
       cap('Ролик принят. Публикуете вы сами, когда готовы.');
     } else if (act === 'resume') {
@@ -141,6 +163,11 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     if (m.status !== 'open') return { ok: false, error: 'на этот вопрос уже ответили' };
     const btn = JSON.parse(m.buttons || '[]').flat().find((b) => b.d === choice);
     if (!btn) return { ok: false, error: 'нет такой кнопки' };
+    // «Внести правки» / «Вернуть на правки» без текста (кнопка в Telegram): карточка остаётся открытой, пока не придёт комментарий, иначе кнопка «Принять» пропала бы зря
+    if (/^(rework|revise):/.test(choice) && !(comment && comment.trim())) {
+      try { await execAction(choice, undefined, via, m); } catch (e) { return { ok: false, error: e.message }; }
+      return { ok: true, pending: 'comment' };
+    }
     run("UPDATE messages SET status='answered', choice=?, answered_ts=?, answered_via=? WHERE id=?", choice, now(), via, m.id);
     if (m.tg_msg && !NO_TG) {
       tg('editMessageReplyMarkup', { chat_id: chatId(), message_id: m.tg_msg, reply_markup: { inline_keyboard: [] } }).catch(() => {});
@@ -186,7 +213,7 @@ ${c.hist}
 
 Новое сообщение Ника: ${text}
 
-Если Ник просит выполнить шаг конвейера (выбрать тему, утвердить сценарий, вернуть его на правки, принять или отклонить ролик, найти другие темы), НЕ говори, что уже сделала: предложи действие в поле action, Ник подтвердит кнопкой. Типы: pick (video_id), more, approve (video_id), revise (video_id, comment), accept (video_id), reject (video_id).
+Если Ник просит выполнить шаг конвейера (выбрать тему, утвердить сценарий, вернуть его на правки, принять или отклонить ролик, внести правки в готовый ролик, найти другие темы), НЕ говори, что уже сделала: предложи действие в поле action, Ник подтвердит кнопкой. Типы: pick (video_id), more, approve (video_id), revise (video_id, comment), rework (video_id, comment: что именно поправить в готовом ролике, дословно по просьбе Ника), accept (video_id), reject (video_id).
 Итог запиши в файл ${outFile} строго как JSON: {"reply":"текст ответа Нику","action":null или {"type":"pick","video_id":3,"comment":""}}. После записи файла ничего больше не делай.`, 'utf8');
         await new Promise((resolve) => {
           const p = spawn(HERMES, ['-p', office === 'smm' ? (REPLY_PROFILE[thread] || 'smm') : 'jobs', 'chat', '--query-file', qFile, '-Q', '--oneshot', '--max-turns', '30', '--run-budget', '420'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -196,12 +223,12 @@ ${c.hist}
       }
       if (!rep) rep = 'Не получилось ответить сейчас, повторите вопрос чуть позже.';
       post({ office, thread, sender: thread, text: rep, source: 'agent', mirrorTg: true });
-      const ACTS = new Set(['pick', 'more', 'approve', 'revise', 'accept', 'reject']);
+      const ACTS = new Set(['pick', 'more', 'approve', 'revise', 'rework', 'accept', 'reject']);
       if (action && ACTS.has(action.type)) {
         const v = action.video_id ? q('SELECT title FROM videos WHERE id=?', Number(action.video_id))[0] : null;
         if (action.type === 'more' || v) {
           const data = `${action.type}:${action.type === 'more' ? 0 : Number(action.video_id)}`;
-          const label = { pick: 'Выбрать тему', more: 'Искать другие темы', approve: 'Утвердить сценарий', revise: 'Вернуть на правки', accept: 'Принять ролик', reject: 'Отклонить' }[action.type];
+          const label = { pick: 'Выбрать тему', more: 'Искать другие темы', approve: 'Утвердить сценарий', revise: 'Вернуть на правки', rework: 'Внести правки в ролик', accept: 'Принять ролик', reject: 'Отклонить' }[action.type];
           const mid = post({ office, thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: `Правильно ли я поняла: ${label.toLowerCase()}${v ? ` «${v.title}»` : ''}${action.comment ? ` (${action.comment})` : ''}?`, ref: { data, comment: action.comment || '' }, buttons: [[['Да, сделать', 'confirm:0'], ['Нет', 'cancel:0']]], mirrorTg: false });
           run('UPDATE messages SET buttons=? WHERE id=?', JSON.stringify([[{ t: 'Да, сделать', d: `confirm:${mid}` }, { t: 'Нет', d: `cancel:${mid}` }]]), mid);
           mirror(mid).catch(() => {});
@@ -218,12 +245,17 @@ ${c.hist}
     if (!t) { const r = resolveThread(text); t = r.thread; body = r.text; }
     const id = post({ office, thread: t, sender: 'nick', text: source === 'telegram' ? text : body, source, mirrorTg: false });
     if (source === 'dashboard') mirror(id, true).catch(() => {});
-    // ожидается комментарий к сценарию: следующий текст в чате Капитана
-    const aw = kvGet('awaiting');
-    if (aw && t === 'captain_smm') {
-      const { id: vid } = JSON.parse(aw); kvDel('awaiting');
-      post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Передала Ксении: исправит, Вера проверит заново.', mirrorTg: true });
-      spawnPipeline(['script', String(vid), '--comment', body]);
+    // ожидается комментарий к правкам (сценария или ролика): следующий текст Ника в чате Капитана (для правок ролика ещё и в чате Кирилла); ожидание живёт 30 минут
+    let aw = null; try { aw = JSON.parse(kvGet('awaiting') || 'null'); } catch {}
+    if (aw && aw.ts && now() - aw.ts > 30 * 60e3) { kvDel('awaiting'); aw = null; }
+    if (aw && (t === 'captain_smm' || (aw.kind === 'rework' && t === 'video'))) {
+      kvDel('awaiting');
+      if (aw.mid) {                       // карточка, у которой нажали кнопку, закрывается как отвеченная с комментарием
+        const card = q("SELECT id, tg_msg FROM messages WHERE id=? AND status='open'", aw.mid)[0];
+        if (card) { run("UPDATE messages SET status='answered', choice=?, answered_ts=?, answered_via=? WHERE id=?", `${aw.kind === 'rework' ? 'rework' : 'revise'}:${aw.id}`, now(), source, card.id);
+          if (card.tg_msg && !NO_TG) tg('editMessageReplyMarkup', { chat_id: chatId(), message_id: card.tg_msg, reply_markup: { inline_keyboard: [] } }).catch(() => {}); }
+      }
+      execAction(`${aw.kind === 'rework' ? 'rework' : 'revise'}:${aw.id}`, body, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true }));
       return { ok: true, id, note: 'comment' };
     }
     reply(office, t, id, body).catch((e) => console.error('reply', e.message));
@@ -239,7 +271,7 @@ ${c.hist}
   // Какая версия ролика собирается сейчас: из имени BRIEF_vN.md в командной строке процесса; хранится в kv, чтобы пережить перезапуск API
   const jobInfo = () => { try { return JSON.parse(kvGet('video_job')); } catch { return null; } };
   const jobFiles = (ver) => ({ mp4: path.join(VIDEO_JOB.dir, 'final', `dosie01_${ver}.mp4`), report: path.join(VIDEO_JOB.dir, `RESULT_${ver}.md`) });
-  const PROC_RE = /hermes\.exe"?\s+-p\s+video\b.*?(BRIEF[\w.-]*\.md)/i;
+  const PROC_RE = /hermes\.exe"?\s+-p\s+video\b.*?query-file\s+"?dosie01[\\\/](BRIEF_v\w+\.md)/i;   // только ручные запуски проекта ролика №1; конвейер (produce/rework) сам ведёт статусы
   const AGENT_LOG = path.join(process.env.LOCALAPPDATA || '', 'hermes', 'profiles', 'video', 'logs', 'agent.log');
   const W = { pid: null, started: 0, lastScan: 0, lastProgress: '', steps: 0 };
   const evt = (agent, msg, level = 'info') => { if (q('SELECT 1 FROM events WHERE agent_id=? AND message=? AND ts>?', agent, msg, now() - 15 * 60e3).length) return; run('INSERT INTO events (ts,agent_id,level,message) VALUES (?,?,?,?)', now(), agent, level, msg); };   // без дублей после перезапуска API
@@ -287,11 +319,12 @@ ${c.hist}
     }
     run('UPDATE agents SET status=?, task=?, progress=?, updated_at=? WHERE id=?', 'idle', `Ролик ${job.ver} готов, ждёт вашего просмотра`, 100, now(), VIDEO_JOB.agent);
     evt(VIDEO_JOB.agent, `Ролик ${job.ver} собран: final/dosie01_${job.ver}.mp4`);
-    let len = ''; try { len = fs.readFileSync(report, 'utf8').slice(0, 600); } catch {}
-    const caption = `🎬 Ролик №${VIDEO_JOB.videoId} ${job.ver} готов. Посмотрите и скажите, принимаем ли.\n${len}`;
-    const buttons = [[['Принять ролик', `accept:${VIDEO_JOB.videoId}`]]];
+    let len = ''; try { len = cleanReport(fs.readFileSync(report, 'utf8')); } catch {}
+    const caption = `🎬 Ролик №${VIDEO_JOB.videoId} ${job.ver} готов.\n${len}\n\nПринять или внести правки?`;
+    const buttons = [[['Принять ролик', `accept:${VIDEO_JOB.videoId}`], ['Внести правки', `rework:${VIDEO_JOB.videoId}`]]];
     let mid = null; try { mid = await sendVideo(mp4, caption, buttons); } catch (e) { console.error('sendVideo', e.message); }
-    post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: `🎬 Ролик №${VIDEO_JOB.videoId} ${job.ver} готов: ${path.relative(ROOT, mp4)}${mid ? '\n(файл отправлен вам в Telegram)' : '\n(файл лежит на ПК, в Telegram отправить не удалось)'}\n${len}\nЕсли нужны правки, напишите Кириллу в чате.`, buttons: buttons.map((r) => r.map((x) => ({ t: x[0], d: x[1] }))), tgMsg: mid, mirrorTg: !mid });
+    run('UPDATE videos SET stage=?, video_path=?, updated_at=? WHERE id=?', 'produced', path.relative(ROOT, mp4), now(), VIDEO_JOB.videoId);
+    post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: `🎬 Ролик №${VIDEO_JOB.videoId} ${job.ver} готов: ${path.relative(ROOT, mp4)}${mid ? '\n(файл отправлен вам в Telegram)' : '\n(файл лежит на ПК, в Telegram отправить не удалось)'}\n${len}`, buttons: buttons.map((r) => r.map((x) => ({ t: x[0], d: x[1] }))), tgMsg: mid, mirrorTg: !mid });
     run('UPDATE agents SET status=?, task=?, updated_at=? WHERE id=?', 'waiting', `Ждёт вашего решения по ролику №${VIDEO_JOB.videoId} ${job.ver}`, now(), 'captain_smm');
   }
   async function watchTick() {
@@ -334,6 +367,8 @@ ${c.hist}
     }
     if (req.method === 'POST' && p === '/api/chat/incoming') { const b = await body(req); json(res, 200, incoming({ text: b.text, source: b.source || 'telegram' })); return true; }
     if (req.method === 'POST' && p === '/api/chat/answer') { const b = await body(req); json(res, 200, await answer({ id: b.id, tgMsg: b.tg_msg, choice: b.choice, comment: b.comment, via: b.via || 'dashboard' })); return true; }
+    if (req.method === 'GET' && p === '/api/priority') { json(res, 200, priority()); return true; }
+    if (req.method === 'POST' && p === '/api/priority') { const b = await body(req); json(res, 200, setPriority({ active: !!b.active, video_id: b.video_id, label: b.label })); return true; }
     if (req.method === 'POST' && p === '/api/chat/post') {
       const b = await body(req);
       const id = post({ office: b.office || 'smm', thread: b.thread, sender: b.sender || b.thread, kind: b.buttons ? 'action' : (b.kind || 'text'), text: b.text, buttons: b.buttons, source: b.source || 'pipeline', tgMsg: b.tg_msg || null, mirrorTg: b.mirror !== false && !b.tg_msg && (b.mirror === true || !!b.buttons) });
@@ -342,5 +377,5 @@ ${c.hist}
     return false;
   }
   const pending = (office) => q("SELECT COUNT(*) c FROM messages WHERE office=? AND status='open'", office)[0].c;
-  return { handle, pending, post, say, answer, incoming };
+  return { handle, pending, post, say, answer, incoming, priority };
 }
