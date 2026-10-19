@@ -121,8 +121,9 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       setStage(id, 'approved'); setAgent('captain_smm', 'idle', 'Ролик принят, ждёт вашей публикации', `Ник принял ролик «${v.title}»`);
       cap('Ролик принят. Публикуете вы сами, когда готовы.');
     } else if (act === 'resume') {
-      const dir = path.join(ROOT, 'video', 'med_detective'); const out = fs.openSync(path.join(dir, 'dosie01', '_run_v2b_log.txt'), 'a');
-      spawn(HERMES, ['-p', 'video', 'chat', '--query-file', 'dosie01/BRIEF_v2b.md', '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: dir, detached: true, stdio: ['ignore', out, out], windowsHide: true }).unref();
+      const job = jobInfo() || { ver: 'v2', brief: 'dosie01/BRIEF_v2b.md' };
+      const dir = path.join(ROOT, 'video', 'med_detective'); const out = fs.openSync(path.join(dir, 'dosie01', `_run_${job.ver}_resume_log.txt`), 'a');
+      spawn(HERMES, ['-p', 'video', 'chat', '--query-file', job.brief, '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: dir, detached: true, stdio: ['ignore', out, out], windowsHide: true }).unref();
       cap('Запустила Кирилла заново: он продолжит по сохранённым файлам. Ход работы виден справа в «Сейчас в работе».');
     } else if (act === 'retry' && v) {
       if (v.stage === 'editing') { cap(`Запускаю монтаж заново: «${v.title}».`); spawnPipeline(['produce', String(id)]); }
@@ -234,7 +235,10 @@ ${c.hist}
      Пока на ПК жив процесс `hermes … -p video … BRIEF*.md` (Кирилл, запущенный не через конвейер), он показывается рабочим.
      Живой лог: шаги модели из лога профиля, новые/изменённые файлы проекта, строки PROGRESS.md.
      Завершение: есть итоговый mp4 → ролик уходит Нику в Telegram с кнопкой «Принять»; нет mp4 → статус «ошибка» и сообщение. */
-  const VIDEO_JOB = { agent: 'video', videoId: 1, dir: path.join(ROOT, 'video', 'med_detective', 'dosie01'), out: 'final/dosie01_v2.mp4' };
+  const VIDEO_JOB = { agent: 'video', videoId: 1, dir: path.join(ROOT, 'video', 'med_detective', 'dosie01') };
+  // Какая версия ролика собирается сейчас: из имени BRIEF_vN.md в командной строке процесса; хранится в kv, чтобы пережить перезапуск API
+  const jobInfo = () => { try { return JSON.parse(kvGet('video_job')); } catch { return null; } };
+  const jobFiles = (ver) => ({ mp4: path.join(VIDEO_JOB.dir, 'final', `dosie01_${ver}.mp4`), report: path.join(VIDEO_JOB.dir, `RESULT_${ver}.md`) });
   const PROC_RE = /hermes\.exe"?\s+-p\s+video\b.*?(BRIEF[\w.-]*\.md)/i;
   const AGENT_LOG = path.join(process.env.LOCALAPPDATA || '', 'hermes', 'profiles', 'video', 'logs', 'agent.log');
   const W = { pid: null, started: 0, lastScan: 0, lastProgress: '', steps: 0 };
@@ -265,30 +269,30 @@ ${c.hist}
   }
   async function sendVideo(file, caption, buttons) {
     const t = cfg().smmBotToken; if (!t || NO_TG) return null;
-    const fd = new FormData(); fd.append('chat_id', String(chatId())); fd.append('caption', caption.slice(0, 1000)); fd.append('supports_streaming', 'true');
+    const fd = new FormData(); fd.append('chat_id', String(chatId())); fd.append('caption', caption.slice(0, 1000)); fd.append('supports_streaming', 'true'); fd.append('width', '1080'); fd.append('height', '1920');
     const kb = kbOf(JSON.stringify(buttons.map((row) => row.map((x) => ({ t: x[0], d: x[1] }))))); if (kb) fd.append('reply_markup', JSON.stringify(kb));
     fd.append('video', new Blob([fs.readFileSync(file)], { type: 'video/mp4' }), path.basename(file));
     const r = await (await fetch(`https://api.telegram.org/bot${t}/sendVideo`, { method: 'POST', body: fd })).json();
     return r.ok ? r.result.message_id : null;
   }
   async function finishVideoJob(ag) {
-    const mp4 = path.join(VIDEO_JOB.dir, VIDEO_JOB.out);
-    let ok = false, draft = false; try { ok = fs.statSync(mp4).mtimeMs > Date.now() - 3 * 3600e3; } catch {}
-    if (ok) { try { ok = fs.statSync(path.join(VIDEO_JOB.dir, 'RESULT_v2.md')).mtimeMs > Date.now() - 3 * 3600e3; } catch { ok = false; draft = true; } }
+    const job = jobInfo() || { ver: 'v2', started: 0, brief: 'dosie01/BRIEF_v2b.md' };
+    const { mp4, report } = jobFiles(job.ver), fresh = (f) => { try { return fs.statSync(f).mtimeMs >= job.started - 5000; } catch { return false; } };   // файл должен быть создан ЭТИМ запуском, а не остаться от прошлой версии
+    const mp4ok = fresh(mp4), ok = mp4ok && fresh(report), draft = mp4ok && !ok;
     if (!ok) {
-      run('UPDATE agents SET status=?, task=?, progress=?, updated_at=? WHERE id=?', 'error', draft ? 'Остановился: есть черновой рендер, но без финальной проверки' : 'Остановился без результата: ролика v2 нет', 0, now(), VIDEO_JOB.agent);
+      run('UPDATE agents SET status=?, task=?, progress=?, updated_at=? WHERE id=?', 'error', draft ? `Остановился: есть черновой рендер ${job.ver}, но без финальной проверки` : `Остановился без результата: ролика ${job.ver} нет`, 0, now(), VIDEO_JOB.agent);
       evt(VIDEO_JOB.agent, draft ? 'Процесс остановился: есть черновой рендер, отчёта и финальной проверки нет' : 'Процесс монтажа остановился, итогового ролика нет', 'error');
-      post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: draft ? '⚠️ Кирилл остановился: черновой рендер v2 есть, но финальной проверки и отчёта нет, отдавать его на приёмку рано. Рабочие файлы сохранены, он продолжит с того места. Запустить заново?' : '⚠️ Кирилл остановился, и ролика v2 нет. Его рабочие файлы сохранены, он продолжит с того места. Запустить заново?', buttons: [[{ t: 'Запустить Кирилла заново', d: `resume:${VIDEO_JOB.videoId}` }]], mirrorTg: true });
+      post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: draft ? `⚠️ Кирилл остановился: черновой рендер ${job.ver} есть, но финальной проверки и отчёта нет, отдавать его на приёмку рано. Рабочие файлы сохранены, он продолжит с того места. Запустить заново?` : `⚠️ Кирилл остановился, и ролика ${job.ver} нет. Его рабочие файлы сохранены, он продолжит с того места. Запустить заново?`, buttons: [[{ t: 'Запустить Кирилла заново', d: `resume:${VIDEO_JOB.videoId}` }]], mirrorTg: true });
       return;
     }
-    run('UPDATE agents SET status=?, task=?, progress=?, updated_at=? WHERE id=?', 'idle', 'Ролик v2 готов, ждёт вашего просмотра', 100, now(), VIDEO_JOB.agent);
-    evt(VIDEO_JOB.agent, 'Ролик v2 собран: ' + VIDEO_JOB.out);
-    let len = ''; try { len = fs.readFileSync(path.join(VIDEO_JOB.dir, 'RESULT_v2.md'), 'utf8').slice(0, 600); } catch {}
-    const caption = `🎬 Ролик №1 v2 готов (до 59 с, динамичнее). Посмотрите и скажите, принимаем ли.\n${len}`;
+    run('UPDATE agents SET status=?, task=?, progress=?, updated_at=? WHERE id=?', 'idle', `Ролик ${job.ver} готов, ждёт вашего просмотра`, 100, now(), VIDEO_JOB.agent);
+    evt(VIDEO_JOB.agent, `Ролик ${job.ver} собран: final/dosie01_${job.ver}.mp4`);
+    let len = ''; try { len = fs.readFileSync(report, 'utf8').slice(0, 600); } catch {}
+    const caption = `🎬 Ролик №${VIDEO_JOB.videoId} ${job.ver} готов. Посмотрите и скажите, принимаем ли.\n${len}`;
     const buttons = [[['Принять ролик', `accept:${VIDEO_JOB.videoId}`]]];
     let mid = null; try { mid = await sendVideo(mp4, caption, buttons); } catch (e) { console.error('sendVideo', e.message); }
-    post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: `🎬 Ролик №1 v2 готов: ${path.relative(ROOT, mp4)}${mid ? '\n(файл отправлен вам в Telegram)' : '\n(файл лежит на ПК, в Telegram отправить не удалось)'}\n${len}\nЕсли нужны правки, напишите Кириллу в чате.`, buttons: buttons.map((r) => r.map((x) => ({ t: x[0], d: x[1] }))), tgMsg: mid, mirrorTg: !mid });
-    run('UPDATE agents SET status=?, task=?, updated_at=? WHERE id=?', 'waiting', 'Ждёт вашего решения по ролику №1 v2', now(), 'captain_smm');
+    post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: `🎬 Ролик №${VIDEO_JOB.videoId} ${job.ver} готов: ${path.relative(ROOT, mp4)}${mid ? '\n(файл отправлен вам в Telegram)' : '\n(файл лежит на ПК, в Telegram отправить не удалось)'}\n${len}\nЕсли нужны правки, напишите Кириллу в чате.`, buttons: buttons.map((r) => r.map((x) => ({ t: x[0], d: x[1] }))), tgMsg: mid, mirrorTg: !mid });
+    run('UPDATE agents SET status=?, task=?, updated_at=? WHERE id=?', 'waiting', `Ждёт вашего решения по ролику №${VIDEO_JOB.videoId} ${job.ver}`, now(), 'captain_smm');
   }
   async function watchTick() {
     const procs = (await listProcs()).map((l) => { const [pid, cd, ...cmd] = l.split('|'); return { pid, started: Date.parse(cd) || now(), cmd: cmd.join('|') }; });
@@ -298,7 +302,11 @@ ${c.hist}
       const file = path.join(VIDEO_JOB.dir, PROC_RE.exec(hit.cmd)[1]);
       const task = briefTask(file) || 'Монтаж ролика';
       const mins = Math.round((now() - hit.started) / 60000);
-      if (W.pid !== hit.pid) { Object.assign(W, { pid: hit.pid, started: hit.started, lastScan: hit.started, lastProgress: '', steps: 0 }); evt(VIDEO_JOB.agent, `Начал работу: ${task}`); }
+      if (W.pid !== hit.pid) {
+        Object.assign(W, { pid: hit.pid, started: hit.started, lastScan: hit.started, lastProgress: '', steps: 0 }); evt(VIDEO_JOB.agent, `Начал работу: ${task}`);
+        const bn = PROC_RE.exec(hit.cmd)[1], ver = (/BRIEF_(v\d+)/i.exec(bn) || [, 'v1'])[1];
+        const prev = jobInfo(); if (!prev || prev.started !== hit.started) kvSet('video_job', JSON.stringify({ ver, started: hit.started, brief: 'dosie01/' + bn }));
+      }
       const { steps, lastTool } = modelSteps(hit.started);
       if (steps && steps !== W.steps) W.steps = steps;
       const files = scanFiles(W.lastScan); W.lastScan = now() - 1000;
