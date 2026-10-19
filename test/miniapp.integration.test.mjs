@@ -73,6 +73,21 @@ test('страховка: тестовый сервер без подмены м
   assert.equal(logAfter, logBefore, 'в рабочий журнал pipeline.log что-то записано');
 });
 
+test('страховка: перезапуск Кирилла (resume) и правки ролика (rework) в тестовом режиме тоже не запускают настоящую модель', { skip: !can }, async () => {
+  const tok = (await call('/api/tg-login', { method: 'POST', body: { initData: initData() } })).j.token;
+  const procs = () => new Promise((resolve) => { const p = spawn('powershell.exe', ['-NoProfile', '-Command', "(Get-CimInstance Win32_Process -Filter \"Name='hermes.exe'\" | Where-Object { $_.CommandLine -match ' -p video ' }).Count"], { stdio: ['ignore', 'pipe', 'ignore'] }); let o = ''; p.stdout.on('data', (b) => (o += b)); p.on('exit', () => resolve(Number(o.trim()) || 0)); });
+  const before = await procs();
+  for (const [choice, text] of [['resume:1', 'Запустить Кирилла заново'], ['rework:1', 'Внести правки']]) {
+    const id = (await call('/api/chat/post', { method: 'POST', token: FULL, body: { office: 'smm', thread: 'captain_smm', sender: 'captain_smm', text: 'тест ' + choice, buttons: [[[text, choice]]], mirror: false } })).j.id;
+    const r = await call('/api/chat/answer', { method: 'POST', token: tok, body: { id, choice, comment: 'Сделай ролик короче на 5 секунд', via: 'dashboard' } }); assert.equal(r.status, 200, choice);
+  }
+  await sleep(2500);
+  assert.equal(await procs(), before, 'в тестовом режиме запущен настоящий Кирилл (hermes -p video)');
+  const said = (await call('/api/chat?office=smm', { token: FULL })).j.messages.map((m) => m.text).join('\n');
+  assert.match(said, /Кирилл не запущен: в тестовом режиме/); assert.match(said, /этап «rework 1 --comment .*не запущен/);
+  const kv = await call('/api/priority', { token: FULL }); assert.equal(kv.j.active, true, 'эта проверка не должна оставлять приоритет в рабочей БД, но тестовая БД копия');
+});
+
 // ВАЖНО: этот тест закрывает вход на минуту, поэтому он обязан идти последним.
 test('перебор подписей ограничен: после 20 неудач за минуту вход временно закрыт даже для настоящей подписи', { skip: !can }, async () => {
   for (let i = 0; i < 22; i++) await call('/api/tg-login', { method: 'POST', body: { initData: 'hash=' + '0'.repeat(64) } });

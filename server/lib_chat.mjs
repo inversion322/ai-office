@@ -147,6 +147,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       setStage(id, 'approved'); setAgent('captain_smm', 'idle', 'Ролик принят, ждёт вашей публикации', `Ник принял ролик «${v.title}»`);
       cap('Ролик принят. Тимофей уже придумывает название и хэштеги, пришлю одним сообщением. Публикуете вы сами, когда готовы.');
       spawnPipeline(['package', String(id)]);
+    } else if (act === 'resume' && STUB && !process.env.HERMES_BIN) {
+      cap('(тест) Кирилл не запущен: в тестовом режиме нет подмены модели.');          // тот же запрет, что в spawnPipeline: тест не должен будить настоящего Кирилла (Opus)
     } else if (act === 'resume') {
       const job = jobInfo() || { ver: 'v2', brief: 'dosie01/BRIEF_v2b.md' };
       const dir = path.join(ROOT, 'video', 'med_detective'); const out = fs.openSync(path.join(dir, 'dosie01', `_run_${job.ver}_resume_log.txt`), 'a');
