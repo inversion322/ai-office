@@ -2,23 +2,31 @@
 // cvBack: стена, пол, полы кабинетов, столешницы, мониторы. cvFront: передние панели столов + стеклянные стены поверх уток.
 const OW = 320, OH = 180, INK = '#3A2A1F';
 // Кабинеты (px на canvas). Стекло рисуется поверх уток, поэтому те, кто внутри, видны «за стеклом».
-const ROOMS = {
-  jobs: { x: 6, y: 43, w: 120, h: 130, door: { in: [114, 126], out: [134, 126] } },    // отдел поиска работы (дверь справа)
-  cap:  { x: 138, y: 52, w: 74, h: 98,  door: { in: [175, 138], out: [175, 160] } },   // кабинет Капитана (дверь снизу)
-};
+let ROOMS;   // геометрия комнат задаётся раскладкой офиса (см. OFFICE_LAYOUTS)
 // Раскладки офисов: jobs (поиск работы) и smm (Nick G SMM). Стеклянный отдел с ключом 'jobs' общий по геометрии, подпись разная.
 const OFFICE_LAYOUTS = {
   // Отдел откликов U-образно по цепочке (scout -> analyst -> writer -> sender): scout и sender рядом.
   jobs: { dept: 'Отдел поиска работы', cap: 'Кабинет руководителя',
+    rooms: { jobs: { x: 6, y: 43, w: 120, h: 130, door: { in: [114, 126], out: [134, 126] } },      // отдел поиска работы (дверь справа)
+             cap:  { x: 138, y: 52, w: 74, h: 98, door: { in: [175, 138], out: [175, 160] } } },     // кабинет Капитана (дверь снизу)
+    plants: [[222, 150], [302, 150], [128, 158]],
     desks: { captain: [54.7, 56.7], scout: [14, 47], sender: [31, 47], analyst: [14, 80.6], writer: [31, 80.6] },
-    rooms: { captain: 'cap', scout: 'jobs', sender: 'jobs', analyst: 'jobs', writer: 'jobs' } },
-  // Студия SMM по цепочке: scriptwriter -> virality -> factcheck -> video, Капитан в своём кабинете.
+    agentRoom: { captain: 'cap', scout: 'jobs', sender: 'jobs', analyst: 'jobs', writer: 'jobs' } },
+  // Студия SMM шире (3 колонки), кабинет Капитана справа. Цепочка: research -> virality -> scriptwriter -> factcheck -> video.
   smm: { dept: 'Студия SMM', cap: 'Кабинет руководителя',
-    desks: { captain_smm: [54.7, 56.7], scriptwriter: [14, 47], virality: [31, 47], factcheck: [31, 80.6], video: [14, 80.6] },
-    rooms: { captain_smm: 'cap', scriptwriter: 'jobs', virality: 'jobs', factcheck: 'jobs', video: 'jobs' } },
+    rooms: { jobs: { x: 6, y: 43, w: 196, h: 130, door: { in: [190, 126], out: [208, 126] } },
+             cap:  { x: 214, y: 52, w: 74, h: 98, door: { in: [251, 138], out: [251, 160] } } },
+    plants: [[300, 150], [300, 100], [4, 176]],
+    desks: { captain_smm: [78.4, 56.7], research: [14, 47], virality: [31, 47], scriptwriter: [48, 47], factcheck: [48, 80.6], video: [31, 80.6] },
+    agentRoom: { captain_smm: 'cap', research: 'jobs', virality: 'jobs', scriptwriter: 'jobs', factcheck: 'jobs', video: 'jobs' } },
 };
-let OFFICE_DESKS = OFFICE_LAYOUTS.jobs.desks, AGENT_ROOM = OFFICE_LAYOUTS.jobs.rooms;
-function applyOffice(id) { const L = OFFICE_LAYOUTS[id] || OFFICE_LAYOUTS.jobs; OFFICE_DESKS = L.desks; AGENT_ROOM = L.rooms; return L; }
+let OFFICE_DESKS, AGENT_ROOM, PLANTS;
+function applyOffice(id) {
+  const L = OFFICE_LAYOUTS[id] || OFFICE_LAYOUTS.jobs;
+  OFFICE_DESKS = L.desks; AGENT_ROOM = L.agentRoom; ROOMS = L.rooms; PLANTS = L.plants;
+  return L;
+}
+applyOffice('jobs');
 
 function deskGeom(id) {
   const d = OFFICE_DESKS[id] || [50, 50];
@@ -123,7 +131,7 @@ function drawOffice(agents, tick) {
   if (!cb || !cf) return;
   const b = cb.getContext('2d'), f = cf.getContext('2d');
   b.imageSmoothingEnabled = false; f.imageSmoothingEnabled = false;
-  drawWall(b); drawFloor(b); plant(b, 222, 150); plant(b, 302, 150); plant(b, 128, 158);
+  drawWall(b); drawFloor(b); PLANTS.forEach(([px, py]) => plant(b, px, py));
   f.clearRect(0, 0, OW, OH);
   const stOf = (id) => ((agents || []).find((a) => a.id === id) || {}).status || 'offline';
   Object.keys(OFFICE_DESKS).forEach((id) => { const g = deskGeom(id); deskBack(b, g.cx, g.y0, stOf(id), tick || 0); deskFront(f, g.cx, g.y0); });

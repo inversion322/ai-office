@@ -3,7 +3,7 @@ const POLL_MS = 15000;
 const STATUS = { working: 'работает', waiting: 'ждёт', idle: 'свободен', error: 'ошибка', offline: 'отключён' };
 const STAGES = [['found', 'Найдено'], ['review', 'Review'], ['approved', 'Одобрено'], ['letter', 'Письмо'], ['applied', 'Отправлено'], ['reply', 'Ответ']];
 // Конвейер роликов (офис Nick G SMM)
-const VSTAGES = [['idea', 'Идеи'], ['scored', 'Оценены'], ['script', 'Сценарий'], ['checked', 'Проверен'], ['produced', 'Видео'], ['approved', 'Принято']];
+const VSTAGES = [['idea', 'Идеи'], ['scored', 'Оценены'], ['script', 'Сценарий'], ['checked', 'Проверен'], ['editing', 'Монтаж'], ['produced', 'Видео'], ['approved', 'Принято']];
 const VSTAGE_NAME = Object.fromEntries(VSTAGES.concat([['published', 'Опубликован'], ['rejected', 'Отклонён']]));
 const NEED_NICK = ['scored', 'checked', 'produced'];            // стадии, где ход за Ником
 let officeId = localStorage.getItem('office_id') || 'jobs';
@@ -161,6 +161,8 @@ function render(s) {
   renderTabs(s);
   const L = applyOffice(s.office || officeId);
   $('lblDept').textContent = L.dept; $('lblCap').textContent = L.cap;
+  $('lblDept').style.left = ((ROOMS.jobs.x + 5.5) / OW * 100) + '%'; $('lblDept').style.top = ((ROOMS.jobs.y + 2) / OH * 100) + '%';
+  $('lblCap').style.left = ((ROOMS.cap.x + 4.7) / OW * 100) + '%'; $('lblCap').style.top = ((ROOMS.cap.y + 4.7) / OH * 100) + '%';
   $('listTitle').textContent = isSmm ? 'Ролики' : 'Вакансии';
 
   const ST = isSmm ? VSTAGES : STAGES, FN = isSmm ? (s.vfunnel || {}) : s.funnel;

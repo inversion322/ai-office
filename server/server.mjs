@@ -152,7 +152,7 @@ seedPrompts();
 ensureExtraAgents(db);
 // Разовое разделение офисов: Виктор и Алиса (не подключены) уходят в резерв, в офис поиска работы и в SMM они не входят.
 if (!q("SELECT 1 x FROM kv WHERE k='office_split_v1'")[0]) {
-  run("UPDATE agents SET office='reserve' WHERE id IN ('content','research')");
+  run("UPDATE agents SET office='reserve' WHERE id IN ('content')");
   run("INSERT INTO kv (k,v) VALUES ('office_split_v1', ?)", String(now()));
 }
 
