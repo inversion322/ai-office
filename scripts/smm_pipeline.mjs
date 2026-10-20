@@ -29,6 +29,7 @@ import { gate, markFormatA } from './video_gate.mjs';
 import { novelty, regenBlock, archiveScript, loadHistory, hookCatalog, LIMITS } from './script_novelty.mjs';
 import { styleIssues, styleFeedback, bridgeIssues } from './script_style.mjs';
 import { craftIssues, craftFeedback, craftSummary } from './script_craft.mjs';
+import { evidenceIssues, evidenceFeedback, ledgerPath } from './agent_skills.mjs';
 import { skillUsageNote } from './skill_usage.mjs';
 import { fireReminders } from './reminders.mjs';
 const speechSeconds = async (segments) => { await yieldToPriority('scriptwriter'); return measureSpeech(segments, { root: ROOT }); };   // { sec, estimated, perSeg }
@@ -109,6 +110,7 @@ async function script(id, comment, regen = false, finish = false) {
   let skipWrite = finish && !!readJson(sj);                       // «довести до конца»: текущий текст не переписывается вслепую, сначала замер длины и проверка
   let fresh = regen && history.length > 0;                       // писать с нуля, а не править прежний текст
   const banned = [];                                              // черновики этой же перегенерации, отброшенные автопроверкой
+  const skillState = {}; let evWarn = null, quoteCount = 0;               // какие обязательные скиллы сотрудники так и не открыли, и цитаты Веры не из реестра
   let prev = fresh ? null : readJson(sj), changes = comment && !fresh ? [`${prev ? 'Правки' : 'Пожелания'} Ника: ${comment}`] : [], check = null, ok = false, nv = null, nvWarn = false, craftWarn = null;
   if (regen && !fresh) console.log('перегенерация без истории: прежних версий нет, пишу обычным порядком');
   if (fresh) fs.rmSync(sj, { force: true });                       // прежний текст сохранён в history/; упавший запуск модели не должен принять его за новый
@@ -130,6 +132,7 @@ async function script(id, comment, regen = false, finish = false) {
       });
     }
     skipWrite = false;
+    if (t1 && t1.skills && t1.skills.checked) skillState.scriptwriter = t1.skills.missing;
     prev = readJson(sj);
     if (!prev || !Array.isArray(prev.segments)) { await agent('scriptwriter', 'error', 'Сценарий не получился', 0, `Нет script.json (код ${t1 && t1.code})`, 'error'); await safeNotify(`⚠️ Сценарий «${v.title}» не получился, см. ${dir}`); throw new Error('нет script.json'); }
     const stl = [...styleIssues(prev.segments), ...bridgeIssues(prev.segments)];   // служебные слова каркаса и «пункты списка» вместо связной мысли
@@ -180,13 +183,28 @@ async function script(id, comment, regen = false, finish = false) {
     await say('scriptwriter', `Сценарий готов (круг ${round}): ${words} слов, озвучка ${dur.toFixed(0)} с${sp.estimated ? ' (оценка)' : ''}. Передала Вере на проверку фактов.`);
     await scene('scriptwriter', 'factcheck', 'Вера, проверь, пожалуйста, каждую фразу с фактом.', 'chat');
     await agent('factcheck', 'working', 'Проверяю факты по первоисточникам', 30, 'Начала проверку фактов');
+    const checkTask = `Проверь сценарий из файла ${sj} (читай его). Для КАЖДОГО объекта claims открой первоисточник (url/PMID), найди подтверждающее место и сравни со словами сценария (segments): число, тип исследования, популяция, оговорки. Проверь также, что в сценарии нет советов по лечению, дозировок, брендов и обещаний результата, а числа в озвучке записаны словами.
+Формат файла: {"verdict":"pass"|"fix","claims":[{"text","source_checked":true/false,"quote_found":"что именно сказано в источнике","status":"верно|упрощено|не подтверждено|отклонить","note":""}],"required_changes":["конкретная правка…"],"summary":"1-2 предложения"}. verdict "pass" только если все claims «верно» или безвредно «упрощено» с оговоркой в тексте.`;
+    const runCheck = async (label, extra) => runAgent({ label, agentId: 'factcheck', outFile: cj, profile: 'smm', persona: await promptOf('factcheck'), maxTurns: 90, budgetSec: 1500, task: checkTask + (extra ? `\n\n${extra}` : '') });
     const t2 = await runAgent({
-      label: `check${round}`, outFile: cj, profile: 'smm', persona: await promptOf('factcheck'), maxTurns: 90, budgetSec: 1500,
-      task: `Проверь сценарий из файла ${sj} (читай его). Для КАЖДОГО объекта claims открой первоисточник (url/PMID), найди подтверждающее место и сравни со словами сценария (segments): число, тип исследования, популяция, оговорки. Проверь также, что в сценарии нет советов по лечению, дозировок, брендов и обещаний результата, а числа в озвучке записаны словами.
-Формат файла: {"verdict":"pass"|"fix","claims":[{"text","source_checked":true/false,"quote_found":"что именно сказано в источнике","status":"верно|упрощено|не подтверждено|отклонить","note":""}],"required_changes":["конкретная правка…"],"summary":"1-2 предложения"}. verdict "pass" только если все claims «верно» или безвредно «упрощено» с оговоркой в тексте.`,
+      label: `check${round}`, outFile: cj, profile: 'smm', persona: await promptOf('factcheck'), maxTurns: 90, budgetSec: 1500, task: checkTask,
     });
     check = readJson(cj);
     if (!check) { await agent('factcheck', 'error', 'Проверка не удалась', 0, `Нет check.json (код ${t2.code})`, 'error'); await safeNotify(`⚠️ Проверка фактов «${v.title}» не удалась, см. ${dir}`); throw new Error('нет check.json'); }
+    if (t2.skills && t2.skills.checked) skillState.factcheck = t2.skills.missing;
+    // Доказательства: каждое признанное верным утверждение подкреплено дословной цитатой, которую принял реестр grounded-citations.
+    if (process.env.EVIDENCE_GATE !== 'off') {
+      const ledger = () => readJson(ledgerPath(dir));
+      let ev = evidenceIssues(check, ledger());
+      if (!ev.ok) {
+        console.log('доказательства: ' + ev.issues.join('; '));
+        await agent('factcheck', 'working', 'Добавляю в реестр дословные цитаты', 60, `Автопроверка: у ${ev.issues.length} утверждений нет цитаты из реестра, возвращаю Вере`, 'warn');
+        const keep = check, t3 = await runCheck(`check${round}ev`, evidenceFeedback(ev.issues));
+        if (t3.skills && t3.skills.checked && t3.skills.missing.length) skillState.factcheck = t3.skills.missing;
+        check = readJson(cj) || keep; ev = evidenceIssues(check, ledger());
+      }
+      evWarn = ev.ok ? null : ev.issues; quoteCount = (ledger() && ledger().sources || []).reduce((s, x) => s + (x.quotes || []).length, 0);
+    }
     ok = check.verdict === 'pass';
     await say('factcheck', ok ? `Проверила: ${check.summary || 'факты подтверждены'}` : `Не пропускаю, нужны правки: ${(check.required_changes || []).join('; ')}`);
     await agent('factcheck', 'idle', ok ? 'Сценарий проверен' : 'Вернула сценарий на правки', 100, ok ? 'Факты подтверждены' : `Нужны правки: ${(check.required_changes || []).length}`, ok ? 'info' : 'warn');
@@ -208,7 +226,7 @@ async function script(id, comment, regen = false, finish = false) {
   const text = withCta(prev.segments).join('\n\n') + '\n';   // последний абзац: призыв подписаться (video/cta.json)
   fs.writeFileSync(path.join(dir, 'script_ru.txt'), text, 'utf8');
   const facts = [`# ${prev.title || v.title}: проверка фактов (Вера Доказова)`, '', `Вердикт: ${check.verdict}. ${check.summary || ''}`, '', '| Утверждение | Источник | Что в источнике | Статус |', '|---|---|---|---|',
-    ...(check.claims || []).map((c) => `| ${c.text} | ${(prev.claims.find((x) => x.text === c.text) || {}).source || ''} | ${c.quote_found || ''} | ${c.status}${c.note ? ': ' + c.note : ''} |`), '', '## Источники для карточки', ...(prev.sources_card || []).map((s) => '- ' + s), '', prev.disclaimer || ''].join('\n');
+    ...(check.claims || []).map((c) => `| ${c.text} | ${(prev.claims.find((x) => x.text === c.text) || {}).source || c.source || ''} | ${c.quote_found || ''} | ${c.status}${c.note ? ': ' + c.note : ''} |`), '', '## Источники для карточки', ...(prev.sources_card || []).map((s) => '- ' + s), '', prev.disclaimer || ''].join('\n');
   fs.writeFileSync(path.join(dir, 'FACTS.md'), facts, 'utf8');
   await setVideo(id, { stage: ok ? 'checked' : 'script', script_path: path.join('smm', 'runs', `video_${id}`, 'script_ru.txt'), notes: JSON.stringify({ ...n, check: { verdict: check.verdict, summary: check.summary, required_changes: check.required_changes } }) });
   await agent('captain_smm', 'waiting', ok ? 'Ждёт утверждения сценария Ником' : 'Вера не пропустила сценарий', 0, ok ? `Сценарий «${v.title}» проверен, нужен ответ Ника` : 'Сценарий не прошёл проверку');
@@ -220,8 +238,12 @@ async function script(id, comment, regen = false, finish = false) {
   const hookLine = prev.hook_type ? `\nКрючок: «${String(prev.segments[0]).split(/(?<=[.!?…])\s/)[0]}» (тип: ${prev.hook_type})` : '';
   const regenLine = regen && history.length ? `\n${nvWarn ? '⚠️' : '🔄'} Перегенерация, написано заново (прежних версий: ${history.length}). ${nv ? (nvWarn ? 'Совпадение с прежними выше порога: ' + nv.reasons.join('; ') + '. Можно нажать «Перегенерировать» ещё раз.' : `Совпадение с прежними ${Math.round(nv.worst.containment * 100)}%, порог ${Math.round(LIMITS.containment * 100)}%.`) : ''}` : '';
   const craftLine = (craftSummary(prev) ? `\n${craftSummary(prev)}` : '') + (craftWarn ? `\n⚠️ Драматургию автопроверка не приняла за ${MAXR} кругов: ${craftWarn.join('; ')}. Можно нажать «Нужны правки» или «Перегенерировать».` : '');
+  const WHO_RU = { scriptwriter: 'Ксения', factcheck: 'Вера' }, REQ_RU = { scriptwriter: 'short-video-script-craft, humanizer', factcheck: 'grounded-citations' };
+  const skMiss = Object.entries(skillState).filter(([, m]) => m && m.length).map(([a, m]) => `${WHO_RU[a]} не открыла скиллы: ${m.join(', ')}`);
+  const skOk = Object.keys(skillState).filter((a) => !skillState[a].length).map((a) => `${WHO_RU[a]} (${REQ_RU[a]})`);
+  const skillLine = (skMiss.length ? `\n⚠️ ${skMiss.join('; ')}, даже после повтора: этот текст проверьте внимательнее.` : '') + (skOk.length ? `\n📚 Скиллы открыты: ${skOk.join('; ')}${quoteCount && skillState.factcheck && !skillState.factcheck.length ? `; цитат в реестре источников: ${quoteCount}` : ''}.` : '') + (evWarn ? `\n⚠️ У Веры не у всех фактов цитата из реестра: ${evWarn.slice(0, 3).join('; ')}.` : '');
   const preApproved = fs.existsSync(PRE);
-  const cardId = await safeNotify(`📝 Сценарий: «${prev.title || v.title}»${regenLine}${hookLine}${craftLine}\n\n${text}\n${verdictLine}\n\nИсточники:\n${sources}\n\nФайлы: smm/runs/video_${id}/ (script_ru.txt, FACTS.md)`,
+  const cardId = await safeNotify(`📝 Сценарий: «${prev.title || v.title}»${regenLine}${hookLine}${craftLine}${skillLine}\n\n${text}\n${verdictLine}\n\nИсточники:\n${sources}\n\nФайлы: smm/runs/video_${id}/ (script_ru.txt, FACTS.md)`,
     ok ? [[['Утвердить сценарий', `approve:${id}`], ['Нужны правки', `revise:${id}`]], [['🔄 Перегенерировать', `regen:${id}`], ['Отклонить тему', `reject:${id}`]]]
        : [[['Утвердить после проверки', `approve:${id}`], ['Нужны правки', `revise:${id}`]], [['🔄 Перегенерировать', `regen:${id}`], ['Отклонить тему', `reject:${id}`]]]);
   console.log(ok ? 'сценарий проверен' : 'сценарий НЕ прошёл проверку');

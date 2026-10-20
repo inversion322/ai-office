@@ -1,5 +1,6 @@
 // Имитация модели-сотрудника для тестов пакета публикации: читает файл запроса, пишет JSON в путь из строки «Итог запиши в файл … как JSON».
 import fs from 'node:fs';
+import path from 'node:path';
 const i = process.argv.indexOf('--query-file');
 const q = fs.readFileSync(process.argv[i + 1], 'utf8');
 if (/Тимофей Заголовков/.test(q) && /пакет публикации/.test(q)) {
@@ -47,6 +48,14 @@ if (/Проверь сценарий из файла/.test(q)) {
   const out = /Итог запиши строго в файл (.+?) \(валидный JSON/.exec(q)[1].trim();
   if (process.env.FAKE_DELAY_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_DELAY_MS)));
   const bad = process.env.FAKE_CHECK_MODE === 'fail';
+  // evidence_retry: первый ответ без реестра (пересказ), после замечания кода пишет реестр с цитатой; evidence_never: реестр так и не появляется
+  if (/^evidence_/.test(process.env.FAKE_CHECK_MODE || '')) {
+    const QUOTE = 'Taking 8000 steps per day was associated with a 51% lower risk', retry = /Проверка Веры не принята/.test(q);
+    fs.appendFileSync(out + '.checks', (retry ? 'retry' : 'first') + '\n');
+    if (process.env.FAKE_CHECK_MODE === 'evidence_retry' && retry) fs.writeFileSync(path.join(path.dirname(out), 'ledger.json'), JSON.stringify({ version: 1, sources: [{ id: 1, url: 'https://pubmed.ncbi.nlm.nih.gov/35247352', quotes: [{ text: QUOTE }] }] }));
+    fs.writeFileSync(out, JSON.stringify({ verdict: 'pass', summary: 'факты подтверждены (имитация)', claims: [{ text: 'При 8000 шагов риск ниже примерно вдвое', source_checked: true, source: 'https://pubmed.ncbi.nlm.nih.gov/35247352', ledger_id: 1, quote_found: retry && process.env.FAKE_CHECK_MODE === 'evidence_retry' ? QUOTE : 'риск ниже почти вдвое (пересказ)', status: 'верно' }], required_changes: [] }));
+    process.exit(0);
+  }
   fs.writeFileSync(out, JSON.stringify({ verdict: bad ? 'fix' : 'pass', summary: bad ? 'формулировка шире данных (имитация)' : 'факты подтверждены (имитация)', claims: [], required_changes: bad ? ['Сегмент 2: уточнить формулировку'] : [] }));
 }
 
