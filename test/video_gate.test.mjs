@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { gate, isFormatA, markFormatA } from '../scripts/video_gate.mjs';
 import { makeClip } from './fixtures/make_clip.mjs';
 import { ffprobePath } from '../scripts/video_format.mjs';
@@ -36,4 +37,18 @@ test('ручной обход DYNAMICS_GATE=off работает и больше
 test('шляпа и формат проверяются всегда', { skip: !have }, () => {
   const hor = makeClip(FF, path.join(tmp, 'hor.mp4'), 'horizontal'); const g = gate(hor, proj, { dynamics: false });
   assert.equal(g.ok, false); assert.match(g.problems.join(), /нужен 1080x1920/);
+});
+
+test('ворота: призыв не тем шрифтом и не по буквам блокирует отправку Нику; эталонная сцена пропускает; CTA_GATE=off обходит только эту проверку', { skip: !have }, () => {
+  const REF = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'video', 'med_detective', 'CTA_REFERENCE.html'), 'utf8');
+  const file = path.join(proj, 'compositions', 's18.html');
+  try {
+    fs.writeFileSync(file, '<div class="v18-mono" style="font-family:\'JetBrains Mono\'">Подписывайтесь</div>');
+    const bad = gate(good, proj, { dynamics: true }); assert.equal(bad.ok, false); assert.ok(bad.problems.some((x) => /^призыв: .*моноширинный/.test(x)), bad.problems.join('; ')); assert.ok(bad.problems.some((x) => /^призыв: .*по буквам/.test(x)));
+    fs.writeFileSync(file, REF);
+    const ok = gate(good, proj, { dynamics: true }); assert.equal(ok.ok, true, ok.problems.join('; '));
+    fs.writeFileSync(file, '<div>Подписывайтесь</div>'); process.env.CTA_GATE = 'off';
+    assert.equal(gate(good, proj, { dynamics: true }).ok, true, 'обход CTA_GATE=off');
+    delete process.env.CTA_GATE; assert.equal(gate(good, proj, { dynamics: false }).ok, true, 'без динамики и без формата A призыв старых роликов не проверяется');
+  } finally { delete process.env.CTA_GATE; fs.rmSync(file, { force: true }); }
 });

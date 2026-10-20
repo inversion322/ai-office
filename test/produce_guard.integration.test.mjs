@@ -62,3 +62,8 @@ test('хороший ролик: в карточке для Ника строк�
   const r = await produce('good'); assert.equal(r.stage, 'produced');
   assert.equal(JSON.parse(fs.readFileSync(path.join(PROJ, 'format.json'), 'utf8')).format, 'A');
 });
+
+test('призыв старым способом (обычный регистр, моноширинная ссылка, текст целиком): Нику НЕ отправляется, названы шрифт и побуквенный набор', { skip: !can }, async () => {
+  const r = await produce('bad_cta'); assert.notEqual(r.code, 0); assert.equal(r.stage, 'editing'); assert.equal(r.agent.status, 'error'); assert.ok(!sentToNick(r.msgs));
+  assert.ok(r.msgs.some((m) => /НЕ отправлен вам/.test(m.text) && /призыв:/.test(m.text) && /моноширинный/.test(m.text) && /по буквам/.test(m.text)), r.msgs.map((m) => m.text.slice(0, 200)).join(' | '));
+});

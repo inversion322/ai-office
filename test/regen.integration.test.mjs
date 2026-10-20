@@ -19,7 +19,7 @@ let tmp, server, TOKEN;
 const api = async (p, body) => { const r = await fetch(API + p, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); return r.json(); };
 const OLD = ['Ребёнок съел конфету и носится как угорелый. Виноват сахар? Открываем дело номер один.', 'Улика первая. Шестнадцать работ, двадцать три эксперимента: никто не знал, где сахар, а где замена. Итог в журнале JAMA: на поведение детей сахар не влияет.', 'Улика вторая. Одним мамам сказали: сын съел много сахара. Но всем детям дали пустышку. Те мамы назвали сыновей более гиперактивными.', 'Вероятно, всё дело в ожидании. От сладкого ждут бури, а сладкое подают на празднике, где и так шумно.', 'Приговор: миф. Но сахар вреден для зубов и веса. ВОЗ советует: добавленных сахаров меньше десяти процентов калорий.'];
 function startServer(mode) {
-  return spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE, SMM_TTS_ESTIMATE_ONLY: '1', FAKE_SCRIPT_MODE: mode }, stdio: 'ignore' });
+  return spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE, SMM_TTS_ESTIMATE_ONLY: '1', FAKE_SCRIPT_MODE: mode, CRAFT_GATE: mode === 'craft' ? 'on' : 'off' }, stdio: 'ignore' });   // CRAFT_GATE=off: старые тесты проверяют новизну, длину и правки, а не драматургию
 }
 async function boot(mode) {
   if (server) { server.kill(); await sleep(700); }
@@ -86,6 +86,16 @@ test('служебные слова в тексте («улика первая»
   assert.match(qs, /служебные слова каркаса/); assert.match(qs, /абзац 2: номер улики/); assert.match(qs, /слово «поворот»/); assert.match(qs, /«источники на экране»/); assert.match(qs, /Перепиши эти места по смыслу/);
   assert.ok(qs.split('---').filter((x) => x.trim()).length >= 2, 'Ксении ушло минимум два запроса: первый чистый, второй с замечанием');
   assert.match(card.text, /Сценарий: «/); assert.ok(card.buttons.flat().some((b) => b.d === 'approve:7'));
+});
+
+test('драматургия: «перебор фактов» без идеи, дуги и связок возвращается Ксении с замечанием, исправленный текст доходит до Ника, в карточке идея, эмоция и связки', { skip: !can }, async () => {
+  const { card } = await regen('craft');
+  const now = JSON.parse(fs.readFileSync(path.join(RUN, 'script.json'), 'utf8'));
+  assert.equal(now.chain.length, now.segments.length - 1); assert.ok(now.chain.some((c) => c.link === 'но')); assert.ok(now.payoff && now.idea && now.emotion_arc.length >= 3);
+  const qs = fs.readFileSync(path.join(RUN, 'script.json.queries'), 'utf8');
+  assert.match(qs, /Автопроверка драматургии/); assert.match(qs, /поле chain/); assert.match(qs, /emotion_arc/); assert.match(qs, /payoff/); assert.match(qs, /SCRIPT_CRAFT\.md/);
+  assert.match(card.text, /Идея: Бурю у детей/); assert.match(card.text, /Эмоция: любопытство → удивление → недоверие → ясность/); assert.match(card.text, /Связки: 1→2 но, 2→3 поэтому, 3→4 но, 4→5 поэтому/);
+  assert.doesNotMatch(card.text, /Драматургию автопроверка не приняла/); assert.ok(card.buttons.flat().some((b) => b.d === 'approve:7'));
 });
 
 test('сессия Mini App может убрать карточку и сбросить ожидание сотрудника, но по-прежнему не может править промпты', { skip: !can }, async () => {

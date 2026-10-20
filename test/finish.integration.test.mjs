@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { copyLiveDb } from './fixtures/copy_db.mjs';
 
+process.env.CRAFT_GATE = 'off';   // эти тесты проверяют довод до конца и длину, драматургия проверяется в regen.integration и script_craft.test
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REAL = path.join(ROOT, 'server', 'data');
 const can = fs.existsSync(path.join(REAL, 'office.db')) && fs.existsSync(path.join(REAL, 'config.json')) && fs.existsSync('C:/hf_tts/venv/Scripts/python.exe');

@@ -34,10 +34,14 @@ if (/Напиши сценарий ролика/.test(q)) {
   const copy = regen && (mode === 'always_similar' || (mode === 'similar_then_new' && n === 1));
   const LONG = Array.from({ length: 6 }, (_, i) => 'Абзац ' + (i + 1) + ': ' + 'длинная фраза про шаги и здоровье взрослых людей, ' .repeat(4) + 'конец.');
   const STAGE_WORDS = ['Хук про конфету.', 'Улика первая. Шестнадцать работ показали, что сахар не влияет.', 'Поворот! Мамам дали пустышку, а они видели бурю.', 'Приговор: миф. Источники на экране.'];
-  const segments = mode === 'stage_words' && !fs.existsSync(out + '.second') ? (fs.writeFileSync(out + '.second', '1'), STAGE_WORDS) : mode === 'stage_words' ? NEW_SEGMENTS : mode === 'long' ? LONG : mode === 'short' ? NEW_SEGMENTS : !regen ? OLD_SEGMENTS : copy ? OLD_SEGMENTS.map((s, i) => (i === 0 ? s.replace('носится как угорелый', 'носится по дому') : s)) : NEW_SEGMENTS;
+  // режим craft: первый ответ «перебор фактов» (без идеи, дуги, связок), второй исправленный: Ксения реагирует на замечание автопроверки драматургии
+  const CRAFT_SEGS = ['Говорят, что сахар делает детей гиперактивными. Правда ли это? Откуда вообще такая уверенность?', 'Но учёные проверили: двадцать три эксперимента, сахар тайно подменяли заменой.', 'Поэтому вывод простой: на поведение детей сахар не влияет.', 'Но почему родители так уверены? Мамам сказали, что сын съел сахар, хотя все дети получили пустышку. Мамы всё равно нашли сыновей гиперактивнее.', 'Значит, дело в ожидании. Так что буря на празднике это не сахар, а сам праздник.'];
+  const CRAFT_FIELDS = { idea: 'Бурю у детей после сладкого создаёт ожидание взрослых, а не сахар.', emotion_arc: ['любопытство', 'удивление', 'недоверие', 'ясность'], payoff: 'буря на празднике это не сахар, а сам праздник', chain: [{ to: 2, link: 'но', why: 'вопрос → проверка' }, { to: 3, link: 'поэтому', why: 'проверка → вывод' }, { to: 4, link: 'но', why: 'вывод → почему верят' }, { to: 5, link: 'поэтому', why: 'опыт → развязка' }], self_check: 'пересказ через но/поэтому складывается' };
+  const craftOk = mode === 'craft' && n >= 2;
+  const segments = mode === 'craft' ? (craftOk ? CRAFT_SEGS : NEW_SEGMENTS) : mode === 'stage_words' && !fs.existsSync(out + '.second') ? (fs.writeFileSync(out + '.second', '1'), STAGE_WORDS) : mode === 'stage_words' ? NEW_SEGMENTS : mode === 'long' ? LONG : mode === 'short' ? NEW_SEGMENTS : !regen ? OLD_SEGMENTS : copy ? OLD_SEGMENTS.map((s, i) => (i === 0 ? s.replace('носится как угорелый', 'носится по дому') : s)) : NEW_SEGMENTS;
   fs.writeFileSync(out, JSON.stringify({ title: 'Сахар делает детей гиперактивными?', rubric: 'myth', hook_type: copy || !regen ? 'сцена' : 'цифра',
     hook_options: [{ type: 'цифра', line: segments[0], score: 9 }, { type: 'сцена', line: 'x', score: 6 }, { type: 'парадокс', line: 'y', score: 7 }],
-    segments, on_screen: [], claims: [], sources_card: ['Wolraich. JAMA. 1995.'], disclaimer: 'Не заменяет консультацию врача.' }));
+    segments, ...(craftOk ? CRAFT_FIELDS : {}), on_screen: [], claims: [], sources_card: ['Wolraich. JAMA. 1995.'], disclaimer: 'Не заменяет консультацию врача.' }));
 }
 if (/Проверь сценарий из файла/.test(q)) {
   const out = /Итог запиши строго в файл (.+?) \(валидный JSON/.exec(q)[1].trim();
@@ -46,7 +50,7 @@ if (/Проверь сценарий из файла/.test(q)) {
   fs.writeFileSync(out, JSON.stringify({ verdict: bad ? 'fix' : 'pass', summary: bad ? 'формулировка шире данных (имитация)' : 'факты подтверждены (имитация)', claims: [], required_changes: bad ? ['Сегмент 2: уточнить формулировку'] : [] }));
 }
 
-// ---- Кирилл (этап монтажа, конвейер produce). FAKE_VIDEO_MODE: good | tilted_hat | bad_format | static
+// ---- Кирилл (этап монтажа, конвейер produce). FAKE_VIDEO_MODE: good | tilted_hat | bad_format | static | bad_cta
 if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   const proj = /Создай проект `?([^`\s:]+(?::[^`\s:]+)?)`?:/.exec(q)[1].replace(/\\/g, '/'); const n = /dosie(\d+)_v1\.mp4/.exec(q)[1];
   const { spawnSync } = await import('node:child_process'); const path = await import('node:path');
@@ -55,5 +59,9 @@ if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   const { makeClip } = await import('./make_clip.mjs');
   makeClip(ff, `${proj}/final/dosie${n}_v1.mp4`, mode === 'bad_format' ? 'horizontal' : mode === 'static' ? 'static' : 'dynamic');
   fs.writeFileSync(proj + '/compositions/d_frame.html', mode === 'tilted_hat' ? 'tl.fromTo("#dk-hatwrap", { x: 0, y: 0, rotation: 0 }, { x: 3, y: -9, rotation: 16 }, 1);' : 'tl.fromTo("#dk-hatwrap", { y: 0 }, { y: -9 }, 1);');
+  // сцена призыва: эталон из репозитория (как копирует настоящий Кирилл); режим bad_cta кладёт прежнюю: обычный регистр, моноширинная ссылка, текст целиком
+  const { fileURLToPath } = await import('node:url');
+  const refCta = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'video', 'med_detective', 'CTA_REFERENCE.html'), 'utf8');
+  fs.writeFileSync(proj + '/compositions/d_cta.html', mode === 'bad_cta' ? '<style>.v-mono { font-family: "JetBrains Mono", monospace; }</style><div>Подписывайтесь</div><div class="v-mono">@med_detective_ru</div>' : refCta);
   fs.writeFileSync(proj + '/RESULT.md', '# Результат\nГотово (имитация).');
 }
