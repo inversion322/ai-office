@@ -13,7 +13,7 @@ import { copyLiveDb } from './fixtures/copy_db.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REAL = path.join(ROOT, 'server', 'data');
 const can = fs.existsSync(path.join(REAL, 'office.db')) && fs.existsSync(path.join(REAL, 'config.json')) && fs.existsSync('C:/hf_tts/venv/Scripts/python.exe');
-const PORT = 8800 + Math.floor(Math.random() * 90), API = `http://127.0.0.1:${PORT}`;
+const PORT = 9000 + (process.pid % 90), API = `http://127.0.0.1:${PORT}`;
 const RUN = path.join(ROOT, 'smm', 'runs', 'video_6'), FAKE = path.join(ROOT, 'test', 'fixtures', 'fake_agent.mjs');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let tmp, server, TOKEN;

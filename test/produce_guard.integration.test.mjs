@@ -14,7 +14,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REAL = path.join(ROOT, 'server', 'data'), FAKE = path.join(ROOT, 'test', 'fixtures', 'fake_agent.mjs');
 const FF = path.join(path.dirname(ffprobePath()), 'ffmpeg.exe');
 const can = fs.existsSync(path.join(REAL, 'office.db')) && fs.existsSync(FF);
-const PORT = 8800 + Math.floor(Math.random() * 90), API = `http://127.0.0.1:${PORT}`;
+const PORT = 9200 + (process.pid % 90), API = `http://127.0.0.1:${PORT}`;
 const PROJ = path.join(ROOT, 'video', 'dosie05'), RUN = path.join(ROOT, 'smm', 'runs', 'video_5');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let tmp, server, TOKEN;

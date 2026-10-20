@@ -12,7 +12,7 @@ import { copyLiveDb } from './fixtures/copy_db.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REAL = path.join(ROOT, 'server', 'data');
 const can = fs.existsSync(path.join(REAL, 'office.db')) && fs.existsSync(path.join(REAL, 'config.json')) && fs.existsSync('C:/hf_tts/venv/Scripts/python.exe');
-const PORT = 8900 + Math.floor(Math.random() * 90), API = `http://127.0.0.1:${PORT}`;
+const PORT = 9400 + (process.pid % 90), API = `http://127.0.0.1:${PORT}`;
 const RUN = path.join(ROOT, 'smm', 'runs', 'video_7'), FAKE = path.join(ROOT, 'test', 'fixtures', 'fake_agent.mjs');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let tmp, server, TOKEN;
@@ -76,6 +76,16 @@ test('если новизны так и не вышло за все круги, 
   const { card } = await regen('always_similar');
   assert.match(card.text, /⚠️ Перегенерация/); assert.match(card.text, /выше порога/); assert.ok(card.buttons.flat().some((b) => b.d === 'regen:7'));
   assert.equal(fs.readFileSync(path.join(RUN, 'script.json.calls'), 'utf8').trim(), '6', 'шесть кругов при перегенерации (было четыре) и ни одним больше');
+});
+
+test('служебные слова в тексте («улика первая», «поворот», «приговор», «источники на экране») автоматически возвращаются Ксении, Нику приходит уже чистый сценарий', { skip: !can }, async () => {
+  const { card } = await regen('stage_words');
+  const now = JSON.parse(fs.readFileSync(path.join(RUN, 'script.json'), 'utf8')), text = now.segments.join(' ');
+  assert.doesNotMatch(text, /улик|поворот|приговор|развязк|источники на экране/i, 'в итоговом тексте служебных слов нет');
+  const qs = fs.readFileSync(path.join(RUN, 'script.json.queries'), 'utf8');
+  assert.match(qs, /служебные слова каркаса/); assert.match(qs, /абзац 2: номер улики/); assert.match(qs, /слово «поворот»/); assert.match(qs, /«источники на экране»/); assert.match(qs, /Перепиши эти места по смыслу/);
+  assert.ok(qs.split('---').filter((x) => x.trim()).length >= 2, 'Ксении ушло минимум два запроса: первый чистый, второй с замечанием');
+  assert.match(card.text, /Сценарий: «/); assert.ok(card.buttons.flat().some((b) => b.d === 'approve:7'));
 });
 
 test('сессия Mini App может убрать карточку и сбросить ожидание сотрудника, но по-прежнему не может править промпты', { skip: !can }, async () => {

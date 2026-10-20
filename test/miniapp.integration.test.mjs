@@ -12,7 +12,7 @@ import { signInitData } from '../server/lib_tgauth.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REAL = path.join(ROOT, 'server', 'data');
 const can = fs.existsSync(path.join(REAL, 'office.db')) && fs.existsSync(path.join(REAL, 'config.json'));
-const PORT = 8900 + Math.floor(Math.random() * 90), API = `http://127.0.0.1:${PORT}`;
+const PORT = 9500 + (process.pid % 90), API = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let tmp, server, FULL, BOT;
 const call = async (p, { method = 'GET', token, body } = {}) => { const r = await fetch(API + p, { method, headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch {} return { status: r.status, j }; };

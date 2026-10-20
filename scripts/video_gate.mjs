@@ -6,6 +6,7 @@ import path from 'node:path';
 import { probeVideo, checkFormat } from './video_format.mjs';
 import { checkProject } from './check_duck_hat.mjs';
 import { decodeFrames, measure, judge, summaryLine } from './video_dynamics.mjs';
+import { checkSfx } from './sfx_check.mjs';
 
 const fmtFile = (proj) => path.join(proj, 'format.json');
 export const isFormatA = (proj) => { try { return JSON.parse(fs.readFileSync(fmtFile(proj), 'utf8')).format === 'A'; } catch { return false; } };
@@ -15,6 +16,7 @@ export function gate(mp4, proj, { dynamics = false } = {}) {
   const problems = []; let summary = '';
   problems.push(...checkFormat(probeVideo(mp4)).problems);
   for (const x of checkProject(proj).problems) for (const b of x.bad) problems.push(`шляпа не по центру: ${x.file}:${b.line} (${b.found})`);
+  if (process.env.SFX_GATE !== 'off' && (dynamics || isFormatA(proj))) problems.push(...checkSfx(proj).problems.map((p) => 'звук: ' + p));
   const useDyn = (dynamics || isFormatA(proj)) && process.env.DYNAMICS_GATE !== 'off';
   let metrics = null;
   if (useDyn) { metrics = measure(decodeFrames(mp4)); summary = summaryLine(metrics); problems.push(...judge(metrics).problems.map((p) => 'динамика: ' + p)); }

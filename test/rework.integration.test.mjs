@@ -14,7 +14,7 @@ import { copyLiveDb } from './fixtures/copy_db.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REAL = path.join(ROOT, 'server', 'data');
 const can = fs.existsSync(path.join(REAL, 'office.db')) && fs.existsSync(path.join(REAL, 'config.json'));
-const PORT = 8800 + Math.floor(Math.random() * 90);
+const PORT = 9300 + (process.pid % 90);
 const API = `http://127.0.0.1:${PORT}`;
 const PROJ = path.join(ROOT, 'video', 'dosie09');
 const FAKE = path.join(ROOT, 'test', 'fixtures', 'fake_kirill.mjs');
