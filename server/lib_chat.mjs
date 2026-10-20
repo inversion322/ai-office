@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { cleanReport } from './lib_text.mjs';
 import { classifyAnswer, quickPick, topicMentioned, stripButtonTalk } from './lib_intent.mjs';
+import { probeVideo, checkFormat, sendFields } from '../scripts/video_format.mjs';
 
 const OWNER = 323028999;
 const NAMES = { капитан: 'captain_smm', кряк: 'captain_smm', виктор: 'research', ксения: 'scriptwriter', лев: 'virality', вера: 'factcheck', кирилл: 'video', тимофей: 'packager' };
@@ -473,7 +474,8 @@ ${c.hist}
   }
   async function sendVideo(file, caption, buttons) {
     const t = cfg().smmBotToken; if (!t || NO_TG) return null;
-    const fd = new FormData(); fd.append('chat_id', String(chatId())); fd.append('caption', caption.slice(0, 1000)); fd.append('supports_streaming', 'true'); fd.append('width', '1080'); fd.append('height', '1920');
+    const probe = probeVideo(file), fmt = checkFormat(probe); if (!fmt.ok) throw new Error('формат ролика не по стандарту Shorts/Reels, не отправляю: ' + fmt.problems.join('; '));
+    const fd = new FormData(); fd.append('chat_id', String(chatId())); fd.append('caption', caption.slice(0, 1000)); for (const [k, v] of Object.entries(sendFields(probe))) fd.append(k, v);
     const kb = kbOf(JSON.stringify(buttons.map((row) => row.map((x) => ({ t: x[0], d: x[1] }))))); if (kb) fd.append('reply_markup', JSON.stringify(kb));
     fd.append('video', new Blob([fs.readFileSync(file)], { type: 'video/mp4' }), path.basename(file));
     const r = await (await fetch(`https://api.telegram.org/bot${t}/sendVideo`, { method: 'POST', body: fd })).json();

@@ -1,5 +1,6 @@
 // Общие функции SMM-конвейера: API офиса, Telegram-бот SMM, запуск агентов Hermes.
 import fs from 'node:fs';
+import { probeVideo, checkFormat, sendFields } from './video_format.mjs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +49,7 @@ export async function yieldToPriority(who, { maxWaitMs = 100 * 60e3 } = {}) {
 /* ---------- Telegram-бот SMM (токен только в server/data/config.json, ключ smmBotToken) ---------- */
 export async function tg(method, body) {
   const t = cfg().smmBotToken; if (!t) throw new Error('нет smmBotToken в server/data/config.json');
-  const r = await fetch(`https://api.telegram.org/bot${t}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const r = await fetch(`${tgBase()}/bot${t}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
   return r.json();
 }
 const chatId = () => cfg().smmBotChatId || OWNER;
@@ -76,15 +77,21 @@ export async function notify(text, buttons) {
 // Реплика сотрудника в его ветке чата (только дашборд, без Telegram): живая лента хода работы
 export const say = (agentId, text) => api('/api/chat/post', { office: 'smm', thread: agentId, sender: agentId, text, mirror: false }).catch(() => {});
 // Видео уходит в Telegram напрямую (кнопки привязаны к сообщению), в чат дашборда кладётся карточка действия с тем же tg_msg
+// Адрес Bot API. Подмена (TELEGRAM_API_BASE) нужна только тестам, чтобы увидеть, что реально уходит в Telegram; без тестового режима она игнорируется.
+export const tgBase = () => (process.env.TELEGRAM_API_BASE && (process.env.OFFICE_NO_TG_BASE_OK === '1') ? process.env.TELEGRAM_API_BASE : 'https://api.telegram.org');
 export async function sendVideoFile(file, caption, buttons) {
-  if (process.env.OFFICE_NO_TG) throw new Error('Telegram выключен (OFFICE_NO_TG)');
+  if (process.env.OFFICE_NO_TG && !(process.env.TELEGRAM_API_BASE && process.env.OFFICE_NO_TG_BASE_OK === '1')) throw new Error('Telegram выключен (OFFICE_NO_TG)');
+  // Единый путь отправки: формат проверяется ДО отправки, а Telegram получает реальные width/height/duration.
+  // Раньше здесь полей размера не было, и ролик №2 пришёл «сжатым» (плеер не знал, что он 1080x1920), хотя файл был идентичен принятому №1.
+  const probe = probeVideo(file), fmt = checkFormat(probe);
+  if (!fmt.ok) throw new Error('формат ролика не по стандарту Shorts/Reels, не отправляю: ' + fmt.problems.join('; '));
   const fd = new FormData();
   fd.append('chat_id', String(chatId()));
   fd.append('caption', String(caption).slice(0, 1000));
-  fd.append('supports_streaming', 'true');
+  for (const [k, v] of Object.entries(sendFields(probe))) fd.append(k, v);
   if (buttons) fd.append('reply_markup', JSON.stringify(kb(buttons)));
   fd.append('video', new Blob([fs.readFileSync(file)], { type: 'video/mp4' }), path.basename(file));
-  const r = await (await fetch(`https://api.telegram.org/bot${cfg().smmBotToken}/sendVideo`, { method: 'POST', body: fd })).json();
+  const r = await (await fetch(`${tgBase()}/bot${cfg().smmBotToken}/sendVideo`, { method: 'POST', body: fd })).json();
   if (!r.ok) throw new Error('Telegram sendVideo: ' + r.description);
   await api('/api/chat/post', { office: 'smm', thread: 'captain_smm', sender: 'captain_smm', text: `🎬 ${caption}\n\n(Файл отправлен в Telegram и лежит на ПК: ${file})`, buttons: buttons || undefined, tg_msg: r.result.message_id, mirror: false });
 }

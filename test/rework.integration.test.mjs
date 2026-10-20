@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { ffprobePath } from '../scripts/video_format.mjs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,7 +21,7 @@ let tmp, server, token;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const api = async (p, body) => (await fetch(API + p, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json();
-const env = (extra = {}) => ({ ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE, REWORK_POLL_MS: '600', PRIORITY_POLL_MS: '300', ...extra });
+const env = (extra = {}) => ({ ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE, REWORK_POLL_MS: '600', PRIORITY_POLL_MS: '300', TEST_FFMPEG: path.join(path.dirname(ffprobePath()), 'ffmpeg.exe'), ...extra });
 function runStage(args, extra) {
   return new Promise((resolve) => { const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), ...args], { cwd: ROOT, env: env(extra), stdio: ['ignore', 'pipe', 'pipe'] }); let out = ''; p.stdout.on('data', (b) => (out += b)); p.stderr.on('data', (b) => (out += b)); p.on('exit', (code) => resolve({ code, out })); });
 }

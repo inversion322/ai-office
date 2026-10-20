@@ -25,6 +25,8 @@ function ensureCtaFile(file) {
 import { speechSeconds as measureSpeech } from './smm_tts.mjs';
 import { cleanReport } from '../server/lib_text.mjs';
 import { checkTitle, checkTags, buildMessage, BRAND_TAG } from '../server/lib_pack.mjs';
+import { probeVideo, checkFormat } from './video_format.mjs';
+import { checkProject as checkHat } from './check_duck_hat.mjs';
 import { novelty, regenBlock, archiveScript, loadHistory, hookCatalog, LIMITS } from './script_novelty.mjs';
 const speechSeconds = async (segments) => { await yieldToPriority('scriptwriter'); return measureSpeech(segments, { root: ROOT }); };   // { sec, estimated, perSeg }
 const HOOK_NAMES = hookCatalog().replace(/ \([^)]*\)/g, '');       // только названия типов крючка, без пояснений
@@ -232,8 +234,7 @@ async function produce(id, comment) {
   await agent('video', 'working', 'Озвучка, субтитры, монтаж (Opus 5.5)', 20, 'Начал сборку ролика');
   const { spawn } = await import('node:child_process');
   const code = await new Promise((resolve) => {
-    const p = spawn(process.env.HERMES_BIN || path.join(process.env.LOCALAPPDATA || '', 'hermes', 'hermes-agent', '.hermes', 'bin', 'hermes.exe'),
-      ['-p', 'video', 'chat', '--query-file', bf, '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: ROOT, windowsHide: true, stdio: ['ignore', fs.openSync(path.join(abs, '_video_log.txt'), 'w'), 'ignore'] });
+    const p = hermesSpawn(['-p', 'video', 'chat', '--query-file', bf, '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: ROOT, windowsHide: true, stdio: ['ignore', fs.openSync(path.join(abs, '_video_log.txt'), 'w'), 'ignore'] });
     p.on('exit', resolve);
   });
   const mp4 = path.join(proj, 'final', `dosie${n}_v1.mp4`);
@@ -241,6 +242,15 @@ async function produce(id, comment) {
     await agent('video', 'error', 'Ролик не собран', 0, `Нет ${mp4} (код ${code})`, 'error');
     await safeNotify(`⚠️ Ролик «${v.title}» не собран, смотрите ${proj}/RESULT.md`);
     throw new Error('нет mp4');
+  }
+  { // Стандарт Shorts/Reels и шляпа проверяются конвейером, а не только словами в задании: не прошло, значит Нику не уходит
+    const f = checkFormat(probeVideo(mp4)); const hat = checkHat(proj);
+    if (!f.ok || hat.problems.length) {
+      const why = [...f.problems, ...hat.problems.flatMap((x) => x.bad.map((b) => `шляпа не по центру: ${x.file}:${b.line} (${b.found})`))].join('; ');
+      await agent('video', 'error', 'Ролик не прошёл проверку формата/шляпы', 0, why.slice(0, 200), 'error');
+      await safeNotify(`⚠️ Ролик «${v.title}» собран, но НЕ отправлен вам: не прошёл автоматическую проверку.\n${why}\nФайл: ${mp4}`);
+      throw new Error('ролик не прошёл проверку формата/шляпы: ' + why);
+    }
   }
   await setVideo(id, { stage: 'produced', video_path: path.relative(ROOT, mp4) });
   await agent('video', 'idle', 'Ролик готов, ждёт вашего просмотра', 100, 'Ролик собран');
@@ -329,6 +339,15 @@ async function rework(id, comment) {
     await setVideo(id, { stage: 'produced' });
     await safeNotify(`⚠️ Правки ролика №${id} не готовы: Кирилл остановился${fresh(mp4) ? ' (есть черновой рендер, но без финальной проверки)' : ''}. Прежняя версия v${cur} цела. Это сбой на нашей стороне, не ваш. Можно внести правки ещё раз или принять v${cur}.`, [[[`Внести правки ещё раз`, `rework:${id}`], [`Принять v${cur}`, `accept:${id}`]]]);
     return;
+  }
+  { // шляпа и формат: правка не имеет права вернуть наклон шляпы или испортить размер (формат проверит и сама отправка)
+    const f = checkFormat(probeVideo(mp4)); const hat = checkHat(proj);
+    if (!f.ok || hat.problems.length) {
+      const why = [...f.problems, ...hat.problems.flatMap((x) => x.bad.map((b) => `шляпа не по центру: ${x.file}:${b.line} (${b.found})`))].join('; ');
+      await agent('video', 'error', 'Правки не прошли проверку формата/шляпы', 0, why.slice(0, 200), 'error');
+      await safeNotify(`⚠️ Правки ролика №${id} ${ver} собраны, но НЕ отправлены вам: не прошли автоматическую проверку.\n${why}\nФайл: ${mp4}`);
+      throw new Error('правки не прошли проверку формата/шляпы: ' + why);
+    }
   }
   const md = fs.readFileSync(report, 'utf8');
   await setVideo(id, { stage: 'produced', video_path: path.relative(ROOT, mp4) });
