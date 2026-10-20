@@ -29,6 +29,7 @@ import { gate, markFormatA } from './video_gate.mjs';
 import { novelty, regenBlock, archiveScript, loadHistory, hookCatalog, LIMITS } from './script_novelty.mjs';
 import { styleIssues, styleFeedback, bridgeIssues } from './script_style.mjs';
 import { craftIssues, craftFeedback, craftSummary } from './script_craft.mjs';
+import { skillUsageNote } from './skill_usage.mjs';
 const speechSeconds = async (segments) => { await yieldToPriority('scriptwriter'); return measureSpeech(segments, { root: ROOT }); };   // { sec, estimated, perSeg }
 const HOOK_NAMES = hookCatalog().replace(/ \([^)]*\)/g, '');       // только названия типов крючка, без пояснений
 const NOTE = (v) => { try { return JSON.parse(v.notes || '{}'); } catch { return {}; } };
@@ -254,6 +255,7 @@ async function produce(id, comment) {
   await scene('captain_smm', 'video', `Кирилл, сценарий утверждён: «${v.title}». Озвучка, субтитры, монтаж.`);
   await yieldToPriority('video');          // идут правки другого ролика: один монтажёр, у правок приоритет
   await agent('video', 'working', 'Озвучка, субтитры, монтаж (Opus 5.5)', 20, 'Начал сборку ролика');
+  const videoStartedAt = Date.now();
   const { spawn } = await import('node:child_process');
   const code = await new Promise((resolve) => {
     const p = hermesSpawn(['-p', 'video', 'chat', '--query-file', bf, '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: ROOT, windowsHide: true, stdio: ['ignore', fs.openSync(path.join(abs, '_video_log.txt'), 'w'), 'ignore'] });
@@ -279,7 +281,9 @@ async function produce(id, comment) {
   await agent('captain_smm', 'waiting', 'Ждёт вашего решения по ролику', 0, `Ролик «${v.title}» готов`);
   let res = ''; try { res = cleanReport(fs.readFileSync(path.join(proj, 'RESULT.md'), 'utf8')); } catch {}
   const btn = [[['Принять ролик', `accept:${id}`], ['Внести правки', `rework:${id}`]]];
-  try { await sendVideoFile(mp4, `🎬 «${v.title}» готов.\n${res}${gt.summary ? '\n' + gt.summary : ''}\n\nПринять или внести правки?`, btn); }
+  const skillNote = skillUsageNote(videoStartedAt);
+  if (skillNote) console.log(skillNote);
+  try { await sendVideoFile(mp4, `🎬 «${v.title}» готов.\n${res}${gt.summary ? '\n' + gt.summary : ''}${skillNote ? '\n' + skillNote : ''}\n\nПринять или внести правки?`, btn); }
   catch (e) { await safeNotify(`🎬 Ролик готов: ${mp4}\n(не удалось отправить файл: ${e.message})\n${res}`, btn); }
   console.log('готово:', mp4);
 }
