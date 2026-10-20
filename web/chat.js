@@ -45,7 +45,7 @@ function actHtml(m) {
   const flat = (m.buttons || []).flat().filter((b) => !/^dismiss:/.test(b.d));
   const btns = `<div class="act-btns">${flat.map((b) => `<button type="button" data-act="${esc(b.d)}" data-mid="${m.id}">${esc(b.t)}</button>`).join('')}<button type="button" class="act-dismiss" data-act="dismiss:0" data-mid="${m.id}" title="Убрать карточку без действий">✖ Убрать</button></div>`;
   const rev = reviseHere
-    ? `<div class="rev"><textarea id="revText" placeholder="${revise.choice.startsWith('rework:') ? 'Что поправить в ролике? Кирилл начнёт сразу.' : 'Что поправить в сценарии?'}">${esc(revise.text)}</textarea><div class="btns"><button type="button" data-revsend="1">Отправить правки</button><button type="button" data-revcancel="1">Отмена</button></div></div>`
+    ? `<div class="rev"><textarea id="revText" placeholder="${revise.choice.startsWith('title:') ? 'Своё название ролика (до 100 знаков)' : revise.choice.startsWith('rework:') ? 'Что поправить в ролике? Кирилл начнёт сразу.' : 'Что поправить в сценарии?'}">${esc(revise.text)}</textarea><div class="btns"><button type="button" data-revsend="1">${revise.choice.startsWith('title:') ? 'Сохранить название' : 'Отправить правки'}</button><button type="button" data-revcancel="1">Отмена</button></div></div>`
     : btns;
   const long = m.text.length > 70 || m.text.includes('\n');
   const more = long ? `<button type="button" class="act-more" data-more="${m.id}">${open ? 'Свернуть ▴' : 'Подробнее ▾'}</button>` : '';
@@ -148,7 +148,7 @@ $('chatPinned').addEventListener('click', (e) => {
   if (e.target.closest('[data-revsend]')) { const t = ($('revText').value || '').trim(); if (!t) return $('revText').focus(); return answerAction(revise.mid, revise.choice, t); }
   const more = e.target.closest('[data-more]'); if (more) { const id = Number(more.dataset.more); expanded.has(id) ? expanded.delete(id) : expanded.add(id); pinKey = ''; return renderPinned(); }
   const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
-  if (b.dataset.act.startsWith('revise:') || b.dataset.act.startsWith('rework:')) { revise = { mid: Number(b.dataset.mid), choice: b.dataset.act, text: '' }; pinKey = ''; return renderPinned(); }
+  if (b.dataset.act.startsWith('revise:') || b.dataset.act.startsWith('rework:') || b.dataset.act.startsWith('title:')) { revise = { mid: Number(b.dataset.mid), choice: b.dataset.act, text: '' }; pinKey = ''; return renderPinned(); }
   if (b.dataset.act.startsWith('dismiss:') && !confirm('Убрать карточку? Действие не выполнится, вернуть её будет нельзя.')) return;
   b.disabled = true; answerAction(b.dataset.mid, b.dataset.act);
 });

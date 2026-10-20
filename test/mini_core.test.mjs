@@ -63,6 +63,8 @@ test('какие кнопки просят текст: правки обязат
   assert.deepEqual([C.commentMode('rework:1').ask, C.commentMode('rework:1').required], [true, true]);
   assert.deepEqual([C.commentMode('revise:3').ask, C.commentMode('revise:3').required], [true, true]);
   assert.deepEqual([C.commentMode('package:1').ask, C.commentMode('package:1').required], [true, false]);
+  assert.deepEqual([C.commentMode('title:1').ask, C.commentMode('title:1').required], [true, true], 'своё название: текст обязателен');
+  assert.equal(C.commentMode('publish_go:1').ask, false); assert.equal(C.commentMode('publish:1:yt').ask, false);
   for (const x of ['accept:1', 'pick:2', 'more:0', 'retry:3', 'approve:3', 'reject:3', '', null]) assert.equal(C.commentMode(x).ask, false, String(x));
   assert.match(C.commentMode('rework:1').sub, /приоритет/);
 });

@@ -28,7 +28,7 @@ import { craftIssues, craftFeedback, craftSummary } from './script_craft.mjs';
 import { evidenceIssues, evidenceFeedback, ledgerPath } from './agent_skills.mjs';
 import { skillUsageNote } from './skill_usage.mjs';
 import { fireReminders } from './reminders.mjs';
-import { publishYouTube, publishCard } from './publisher.mjs';
+import { publishYouTube, publishCard, loadPublishMeta } from './publisher.mjs';
 import { ytStatus } from './youtube.mjs';
 const speechSeconds = async (segments) => { await yieldToPriority('scriptwriter'); return measureSpeech(segments, { root: ROOT }); };   // { sec, estimated, perSeg }
 const HOOK_NAMES = hookCatalog().replace(/ \([^)]*\)/g, '');       // только названия типов крючка, без пояснений
@@ -429,6 +429,21 @@ async function rework(id, comment) {
 /* ---------------- 5. Пакет публикации: название-крючок и хэштеги (Тимофей, после приёмки ролика) ---------------- */
 // Сценарий для названия: у ролика №1 собран вручную, у остальных лежит в smm/runs/video_N
 const scriptFileOf = (id) => (Number(id) === 1 ? path.join(projectDir(1), 'script_ru.txt') : path.join(ROOT, 'smm', 'runs', `video_${id}`, 'script_ru.txt'));
+// Кнопки карточки названия. «Перейти к публикации» только когда YouTube подключён.
+const titleButtons = (id) => [[['🔄 Перегенерировать название', `package:${id}`], ['✏️ Своё название', `title:${id}`]], ...(ytStatus().ready ? [[['🚀 Перейти к публикации', `publish_go:${id}`]]] : [])];
+// Своё название, введённое Ником: сохраняется для Публикатора, хэштеги прежние. Автопроверка только предупреждает: решение за Ником.
+async function setTitle(id, title) {
+  const v = await getVideo(id); if (!v) throw new Error('нет ролика #' + id);
+  title = String(title || '').replace(/\s+/g, ' ').trim(); if (!title) throw new Error('пустое название'); if (title.length > 100) throw new Error(`название длиннее 100 знаков (${title.length})`);
+  const dir = path.join(ROOT, 'smm', 'runs', `package_${id}`); fs.mkdirSync(dir, { recursive: true });
+  const prev = loadPublishMeta(id), tags = prev ? prev.tags : [];
+  fs.writeFileSync(path.join(dir, 'publish_meta.json'), JSON.stringify({ title, tags, video_title: v.title, manual: true, ts: Date.now() }, null, 1), 'utf8');
+  let script = ''; try { script = fs.readFileSync(scriptFileOf(id), 'utf8'); } catch {}
+  const chk = checkTitle(title, { scriptText: script });
+  await say('packager', `Принял ваше название: «${title}».`);
+  await safeNotify(`✏️ Ваше название для «${v.title}»:\n«${title}»\n${chk.ok ? '' : `⚠️ Автопроверка (решать вам): ${chk.problems.join('; ')}.\n`}Хэштеги: ${tags.length ? tags.join(' ') : '—'}\n\nПерегенерировать, изменить ещё раз или перейти к публикации?`, titleButtons(id));
+  console.log('готово: своё название', title);
+}
 async function packageClip(id, comment) {
   const v = await getVideo(id); if (!v) throw new Error('нет ролика #' + id);
   const dir = path.join(ROOT, 'smm', 'runs', `package_${id}`); fs.mkdirSync(dir, { recursive: true });
@@ -471,8 +486,7 @@ async function packageClip(id, comment) {
   fs.writeFileSync(path.join(dir, 'publish_meta.json'), JSON.stringify({ title: pick.title, tags: tg.tags, video_title: v.title, ts: Date.now() }, null, 1), 'utf8');   // точный выбор для Публикатора
   await agent('packager', 'idle', 'Пакет публикации отправлен Нику', 100, `Пакет для «${v.title}» готов: «${pick.title}»`);
   await say('packager', `Готово: «${pick.title}», хэштегов ${tg.tags.length}. Отправила Нику.`);
-  await safeNotify(text, [[['Другое название', `package:${id}`]]]);
-  if (ytStatus().ready) await publishCard(id).catch((e) => console.error('карточка публикации не отправлена:', e.message));   // YouTube подключён: предлагаем выложить (только по кнопке)
+  await safeNotify(text, titleButtons(id));                  // перегенерировать, ввести своё, перейти к публикации (только по кнопке Ника)
   console.log('готово: пакет публикации', pick.title, tg.tags.join(' '));
   await fireReminders('package_done', (t) => safeNotify(t)).catch(() => {});   // напоминания Нику, привязанные к концу ролика
 }
@@ -487,7 +501,8 @@ const runOnce = () => cmd === 'topics' ? topics(opt('--hint', all))
   : cmd === 'package' ? packageClip(a1, opt('--comment', rest))
   : cmd === 'publish' ? publishYouTube(a1, opt('--target', rest) || 'ytp', { when: opt('--at', rest) || undefined }).then((r) => { if (!r.ok) process.exitCode = 1; })
   : cmd === 'publish-card' ? publishCard(a1, { only: opt('--only', rest) || undefined })
-  : Promise.resolve(console.log('Команды: topics [--hint …] | script <id> [--comment …] [--regen] | produce <id> [--comment …] | rework <id> --comment … | package <id> [--comment …] | publish <id> --target ytp|yt | publish-card <id>'));
+  : cmd === 'set-title' ? setTitle(a1, opt('--title', rest))
+  : Promise.resolve(console.log('Команды: topics [--hint …] | script <id> [--comment …] [--regen] | produce <id> [--comment …] | rework <id> --comment … | package <id> [--comment …] | publish <id> --target ytp|yt | publish-card <id> | set-title <id> --title …'));
 // Временные сбои (сервис озвучки, сеть, API): один автоповтор через 2 минуты, и только потом тревога Нику
 const TRANSIENT = /NoAudioReceived|WSServerHandshake|TTS_UNAVAILABLE|ECONNRESET|ECONNREFUSED|fetch failed|ETIMEDOUT|timed out|не удалось ни измерить/i;
 const run = (async () => {

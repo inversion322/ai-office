@@ -16,7 +16,7 @@ const safe = (p) => Promise.resolve(p).catch(() => {});
 /** Название и хэштеги из пакета Тимофея: publish_meta.json (точный выбор), иначе package.json (лучший вариант). */
 export function loadPublishMeta(id) {
   const dir = path.join(ROOT, 'smm', 'runs', `package_${Number(id)}`);
-  const m = readJson(path.join(dir, 'publish_meta.json')); if (m && m.title) return { title: m.title, tags: m.tags || [], videoTitle: m.video_title || '' };
+  const m = readJson(path.join(dir, 'publish_meta.json')); if (m && m.title) return { title: m.title, tags: m.tags || [], videoTitle: m.video_title || '', manual: !!m.manual };
   const j = readJson(path.join(dir, 'package.json')); if (!j || !Array.isArray(j.titles) || !j.titles.length) return null;
   const i = Math.max(0, Math.min(j.titles.length - 1, (Number(j.best) || 1) - 1));
   return { title: String(j.titles[i].title || '').trim(), tags: (j.hashtags || []).slice(0, 5), videoTitle: '' };
@@ -65,12 +65,12 @@ export async function publishYouTube(id, mode = 'ytp', { when } = {}) {
   }
 }
 
-/** Карточка с кнопками публикации (только если ролик принят и YouTube подключён). only: 'yt' | 'ytp' */
+/** Карточка публикации: главная кнопка «опубликовать», рядом приватная проверка; ниже можно поменять название. only: 'yt' | 'ytp' */
 export async function publishCard(id, { only } = {}) {
   const v = await getVideo(id); if (!v) throw new Error('нет ролика #' + id);
   const meta = loadPublishMeta(id), st = loadState(id), has = (p) => (st.youtube || []).find((x) => x.privacy === p);
-  const row = []; if (!only || only === 'ytp') if (!has('private') && !has('public')) row.push(['🧪 YouTube: приватная проверка', `publish:${id}:ytp`]); if (!only || only === 'yt') if (!has('public')) row.push(['🚀 YouTube Shorts: опубликовать', `publish:${id}:yt`]);
+  const row = []; if ((!only || only === 'yt') && !has('public')) row.push(['🚀 YouTube Shorts: опубликовать', `publish:${id}:yt`]); if ((!only || only === 'ytp') && !has('private') && !has('public')) row.push(['🧪 Приватная проверка', `publish:${id}:ytp`]);
   if (!row.length) return null;
-  const text = `🚀 Публикация ролика №${id} «${v.title}»\nНазвание: ${meta ? '«' + meta.title + '»' : '(пакета нет)'}\nХэштеги: ${meta ? meta.tags.join(' ') : '—'}\n${has('private') ? `Приватная проверка уже загружена: ${has('private').url}\n` : ''}Ничего не публикуется без вашей кнопки.${has('private') ? '' : ' В первый раз советую «приватная проверка»: ролик увидите только вы.'}`;
-  return notify(text, [row]);
+  const text = `🚀 Публикация ролика №${id} «${v.title}»\nНазвание: ${meta ? '«' + meta.title + '»' : '(пакета нет)'}${meta && meta.manual ? ' (ваше)' : ''}\nХэштеги: ${meta ? meta.tags.join(' ') : '—'}\n${has('private') ? `Приватная проверка уже загружена: ${has('private').url}\n` : ''}Ничего не публикуется без вашей кнопки. Название можно поменять кнопками ниже.`;
+  return notify(text, [row, [['✏️ Своё название', `title:${id}`], ['🔄 Перегенерировать название', `package:${id}`]]]);
 }

@@ -142,6 +142,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       if (r && (r.data === data || (type === 'pick' && String(r.data).startsWith('pick:')))) closeCard(o, 'answered', 'superseded', 'system');
     }
   }
+  const AWAIT_ACT = (kind) => (kind === 'rework' ? 'rework' : kind === 'title' ? 'title' : 'revise');     // какое действие продолжит следующий текст Ника
   async function execAction(data, comment, via, srcMsg) {
     const [act, idStr, mode] = String(data).split(':'); const id = Number(idStr);
     const v = act === 'confirm' || act === 'cancel' ? null : (id ? q('SELECT * FROM videos WHERE id=?', id)[0] : null);
@@ -198,7 +199,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       supersede(`accept:${id}`); supersede(`rework:${id}`);
       setStage(id, 'approved'); setAgent('captain_smm', 'idle', 'Ролик принят, ждёт вашей публикации', `Ник принял ролик «${v.title}»`);
       const ytReady = fs.existsSync(path.join(process.env.OFFICE_DATA_DIR || path.join(ROOT, 'server', 'data'), 'youtube_token.json'));
-      cap(ytReady ? 'Ролик принят. Тимофей уже придумывает название и хэштеги, пришлю одним сообщением и следом кнопки публикации в YouTube Shorts. Без вашей кнопки ничего не выкладывается.' : 'Ролик принят. Тимофей уже придумывает название и хэштеги, пришлю одним сообщением. Публикуете вы сами, когда готовы.');
+      cap(ytReady ? 'Ролик принят. Тимофей уже придумывает название и хэштеги, пришлю одним сообщением и на карточке можно перегенерировать название, ввести своё и перейти к публикации в YouTube Shorts. Без вашей кнопки ничего не выкладывается.' : 'Ролик принят. Тимофей уже придумывает название и хэштеги, пришлю одним сообщением. Публикуете вы сами, когда готовы.');
       spawnPipeline(['package', String(id)]);
     } else if (act === 'resume' && STUB && !process.env.HERMES_BIN) {
       cap('(тест) Кирилл не запущен: в тестовом режиме нет подмены модели.');          // тот же запрет, что в spawnPipeline: тест не должен будить настоящего Кирилла (Opus)
@@ -216,7 +217,20 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       setAgent('publisher', 'working', `Публикация ролика №${id}`, `Ник нажал «${mode === 'yt' ? 'опубликовать в YouTube Shorts' : 'приватная проверка в YouTube'}»`);
       cap(`Принято. Пётр Выкладов загружает «${v.title}» в YouTube ${mode === 'yt' ? 'публично' : 'как приватный (виден только вам)'}. Пришлю ссылку.`);
       spawnPipeline(['publish', String(id), '--target', mode]);
+    } else if (act === 'title' && v) {
+      // Своё название вместо предложенного Тимофеем: кнопка без текста ждёт следующее сообщение Ника, с текстом сохраняет сразу
+      const t = String(comment || '').replace(/\s+/g, ' ').trim();
+      if (!t) { kvSet('awaiting', JSON.stringify({ kind: 'title', id, mid: srcMsg && srcMsg.id, ts: now() })); cap('Напишите одним сообщением своё название ролика (до 100 знаков). Хэштеги останутся прежние.'); return {}; }
+      if (t.length > 100) { kvSet('awaiting', JSON.stringify({ kind: 'title', id, ts: now() })); cap(`Название длиннее 100 знаков (${t.length}): YouTube его не примет. Сократите и пришлите ещё раз.`); return {}; }
+      supersede(`package:${id}"`); supersede(`title:${id}"`); supersede(`publish_go:${id}"`); supersede(`publish:${id}:`);
+      cap(`Принято, ставлю ваше название: «${t}».`);
+      spawnPipeline(['set-title', String(id), '--title', t]);
+    } else if (act === 'publish_go' && v) {
+      if (v.stage !== 'approved') { cap(`Ролик «${v.title}» ещё не принят, публиковать рано.`, false); return {}; }
+      supersede(`publish_go:${id}"`); supersede(`publish:${id}:`);
+      spawnPipeline(['publish-card', String(id)]);
     } else if (act === 'package' && v) {
+      supersede(`publish_go:${id}"`); supersede(`publish:${id}:`);          // карточки публикации с прежним названием устарели
       cap(`Запускаю Тимофея заново: название и хэштеги для «${v.title}».`); spawnPipeline(['package', String(id), ...(comment && comment.trim() ? ['--comment', comment.trim()] : [])]);
     } else if (act === 'retry' && v) {
       if (v.stage === 'editing') { cap(`Запускаю монтаж заново: «${v.title}».`); spawnPipeline(['produce', String(id)]); }
@@ -273,7 +287,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     const btn = JSON.parse(m.buttons || '[]').flat().find((b) => b.d === choice);
     if (!btn) return { ok: false, error: 'нет такой кнопки' };
     // «Внести правки» / «Вернуть на правки» без текста (кнопка в Telegram): карточка остаётся открытой, пока не придёт комментарий, иначе кнопка «Принять» пропала бы зря
-    if (/^(rework|revise):/.test(choice) && !(comment && comment.trim())) {
+    if (/^(rework|revise|title):/.test(choice) && !(comment && comment.trim())) {
       try { await execAction(choice, undefined, via, m); } catch (e) { return { ok: false, error: e.message }; }
       return { ok: true, pending: 'comment' };
     }
@@ -433,10 +447,10 @@ ${c.hist}
       kvDel('awaiting');
       if (aw.mid) {                       // карточка, у которой нажали кнопку, закрывается как отвеченная с комментарием
         const card = q("SELECT id, tg_msg FROM messages WHERE id=? AND status='open'", aw.mid)[0];
-        if (card) { run("UPDATE messages SET status='answered', choice=?, answered_ts=?, answered_via=? WHERE id=?", `${aw.kind === 'rework' ? 'rework' : 'revise'}:${aw.id}`, now(), source, card.id);
+        if (card) { run("UPDATE messages SET status='answered', choice=?, answered_ts=?, answered_via=? WHERE id=?", `${AWAIT_ACT(aw.kind)}:${aw.id}`, now(), source, card.id);
           if (card.tg_msg && !NO_TG) tg('editMessageReplyMarkup', { chat_id: chatId(), message_id: card.tg_msg, reply_markup: { inline_keyboard: [] } }).catch(() => {}); }
       }
-      execAction(`${aw.kind === 'rework' ? 'rework' : 'revise'}:${aw.id}`, body, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true }));
+      execAction(`${AWAIT_ACT(aw.kind)}:${aw.id}`, body, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true }));
       return { ok: true, id, note: 'comment' };
     }
     const fast = fastAnswer(office, body, source);

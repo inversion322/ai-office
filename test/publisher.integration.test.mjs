@@ -86,13 +86,48 @@ test('карточка публикации: команда publish-card при�
   const ds = JSON.parse(JSON.stringify(card.buttons)).flat().map((b) => b.d); assert.ok(ds.includes(`publish:${v.id}:ytp`) && ds.includes(`publish:${v.id}:yt`), ds.join(','));
 });
 
-test('после пакета Тимофея: YouTube подключён -> следом карточка публикации и publish_meta.json с выбранным названием; не подключён -> карточки нет', { skip: !can }, async () => {
+test('после пакета Тимофея: карточка названия с «Перегенерировать», «Своё название» и (если YouTube подключён) «Перейти к публикации»; публикационная карточка сама не приходит', { skip: !can }, async () => {
   const run1 = (id, extra = {}) => new Promise((resolve) => { const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'package', String(id)], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', OFFICE_DATA_DIR: tmp, HERMES_BIN: FAKE, SMM_TTS_ESTIMATE_ONLY: '1', ...extra } }); p.on('exit', resolve); });
   for (const connected of [true, false]) {
-    if (!connected) { fs.rmSync(path.join(tmp, 'youtube_token.json'), { force: true }); }
+    if (!connected) fs.rmSync(path.join(tmp, 'youtube_token.json'), { force: true });
     const v = await newVideo({ title: connected ? 'Сахар делает детей гиперактивными?' : 'Сахар и дети, без YouTube' }); fs.writeFileSync(path.join(v.run, 'script_ru.txt'), 'Ребёнок съел конфету. Сахар не влияет на поведение. Это миф.\n'); fs.rmSync(path.join(ROOT, 'smm', 'runs', `package_${v.id}`, 'publish_meta.json'), { force: true });
-    const from = await lastId(); await run1(v.id); await waitFor(/Пакет публикации/, from);
+    const from = await lastId(); await run1(v.id); const pk = await waitFor(/Пакет публикации/, from);
     const meta = JSON.parse(fs.readFileSync(path.join(ROOT, 'smm', 'runs', `package_${v.id}`, 'publish_meta.json'), 'utf8')); assert.ok(meta.title && meta.tags.length >= 1, 'выбранное название и хэштеги записаны для Публикатора');
-    await sleep(1500); const card = (await msgs()).find((x) => x.id > from && /Публикация ролика №/.test(x.text)); assert.equal(!!card, connected, connected ? 'карточка есть' : 'карточки нет');
+    const ds = JSON.parse(JSON.stringify(pk.buttons)).flat().map((b) => b.d).filter((d) => d !== 'dismiss:0');
+    assert.deepEqual(ds, connected ? [`package:${v.id}`, `title:${v.id}`, `publish_go:${v.id}`] : [`package:${v.id}`, `title:${v.id}`]);
+    await sleep(1200); assert.ok(!(await msgs()).some((x) => x.id > from && /Публикация ролика №/.test(x.text)), 'публикационная карточка без нажатия «Перейти к публикации» не приходит');
   }
+  connect();
+});
+
+test('«Перейти к публикации»: приходит карточка с названием, главной кнопкой «опубликовать», приватной проверкой и кнопками смены названия; старая карточка названия закрыта', { skip: !can }, async () => {
+  connect(); const v = await newVideo(), from = await lastId();
+  const cid = (await api('/api/chat/post', { office: 'smm', thread: 'captain_smm', sender: 'captain_smm', text: 'Название', buttons: [[['🔄', `package:${v.id}`], ['✏️', `title:${v.id}`]], [['🚀', `publish_go:${v.id}`]]], mirror: false })).id;
+  assert.equal((await api('/api/chat/answer', { id: cid, choice: `publish_go:${v.id}`, via: 'dashboard' })).ok, true);
+  const card = await waitFor(/Публикация ролика №\d+ «Тест: шаги»/, from); const ds = JSON.parse(JSON.stringify(card.buttons)).flat().map((b) => b.d).filter((d) => d !== 'dismiss:0');
+  assert.deepEqual(ds, [`publish:${v.id}:yt`, `publish:${v.id}:ytp`, `title:${v.id}`, `package:${v.id}`]); assert.match(card.text, /«Десять тысяч шагов родились в рекламе\?»/);
+  assert.equal(g.st.inits.length, g.st.inits.length, 'до кнопки «опубликовать» ничего не загружено'); assert.ok(!fs.existsSync(path.join(v.run, 'publish.json')));
+});
+
+test('своё название: кнопка без текста просит написать; текст Ника сохраняется для публикации, хэштеги прежние, приходит обновлённая карточка; слишком длинное просят сократить', { skip: !can }, async () => {
+  connect(); const v = await newVideo(), from = await lastId();
+  const cid = (await api('/api/chat/post', { office: 'smm', thread: 'captain_smm', sender: 'captain_smm', text: 'Название', buttons: [[['🔄', `package:${v.id}`], ['✏️', `title:${v.id}`]], [['🚀', `publish_go:${v.id}`]]], mirror: false })).id;
+  const r = await api('/api/chat/answer', { id: cid, choice: `title:${v.id}`, via: 'dashboard' }); assert.deepEqual([r.ok, r.pending], [true, 'comment']);
+  await waitFor(/Напишите одним сообщением своё название/, from);
+  const f2 = await lastId(); await api('/api/chat/send', { office: 'smm', thread: 'captain_smm', text: 'я'.repeat(101), source: 'dashboard' }); await waitFor(/длиннее 100 знаков \(101\)/, f2);
+  const f3 = await lastId(); await api('/api/chat/send', { office: 'smm', thread: 'captain_smm', text: 'Шаги: откуда взялись десять тысяч?', source: 'dashboard' });
+  const card = await waitFor(/Ваше название для «Тест: шаги»/, f3); assert.match(card.text, /«Шаги: откуда взялись десять тысяч\?»/); assert.match(card.text, /#МедицинскийДетектив #10000шагов #Ходьба/);
+  const ds = JSON.parse(JSON.stringify(card.buttons)).flat().map((b) => b.d).filter((d) => d !== 'dismiss:0'); assert.deepEqual(ds, [`package:${v.id}`, `title:${v.id}`, `publish_go:${v.id}`]);
+  const meta = JSON.parse(fs.readFileSync(path.join(ROOT, 'smm', 'runs', `package_${v.id}`, 'publish_meta.json'), 'utf8')); assert.equal(meta.title, 'Шаги: откуда взялись десять тысяч?'); assert.equal(meta.manual, true); assert.deepEqual(meta.tags, ['#МедицинскийДетектив', '#10000шагов', '#Ходьба']);
+  // и в YouTube уйдёт именно оно
+  const f4 = await lastId(); await press(v.id, 'ytp'); await waitFor(/ПРИВАТНЫЙ/, f4); assert.equal(g.st.inits[g.st.inits.length - 1].meta.snippet.title, 'Шаги: откуда взялись десять тысяч?');
+});
+
+test('название можно ввести сразу текстом (без ожидания), а «перегенерировать» закрывает устаревшую карточку публикации с прежним названием', { skip: !can }, async () => {
+  connect(); const v = await newVideo(), from = await lastId();
+  const pub = (await api('/api/chat/post', { office: 'smm', thread: 'captain_smm', sender: 'captain_smm', text: 'Публикация', buttons: [[['🚀', `publish:${v.id}:yt`]], [['✏️', `title:${v.id}`], ['🔄', `package:${v.id}`]]], mirror: false })).id;
+  const cid = (await api('/api/chat/post', { office: 'smm', thread: 'captain_smm', sender: 'captain_smm', text: 'Название', buttons: [[['🔄', `package:${v.id}`], ['✏️', `title:${v.id}`]]], mirror: false })).id;
+  assert.equal((await api('/api/chat/answer', { id: cid, choice: `title:${v.id}`, comment: 'Мой вариант названия', via: 'dashboard' })).ok, true);
+  await waitFor(/Ваше название для/, from); const old = (await msgs()).find((x) => x.id === pub); assert.equal(old.status, 'answered', 'карточка публикации со старым названием закрыта');
+  const meta = JSON.parse(fs.readFileSync(path.join(ROOT, 'smm', 'runs', `package_${v.id}`, 'publish_meta.json'), 'utf8')); assert.equal(meta.title, 'Мой вариант названия');
 });

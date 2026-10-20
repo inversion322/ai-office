@@ -388,3 +388,15 @@ test('уже висящая карточка «не прошёл проверк�
   const b = JSON.parse(db.prepare("SELECT buttons FROM messages WHERE kind='action'").get().buttons).flat().map((x) => x.d);
   assert.ok(b.includes('approve:4')); assert.equal(chat2.pending('smm'), 1);
 });
+
+test('«Своё название» без текста (Telegram): карточка остаётся открытой, следующий текст Ника становится названием; слишком длинное просят сократить и ждут снова', async () => {
+  const { chat, db } = make(); const id = card(chat, [[['🔄 Перегенерировать название', 'package:3'], ['✏️ Своё название', 'title:3']]]);
+  const r = await chat.answer({ id, choice: 'title:3', via: 'telegram' }); assert.deepEqual([r.ok, r.pending], [true, 'comment']); assert.equal(chat.pending('smm'), 1, 'карточка не закрыта до получения названия');
+  assert.equal(JSON.parse(db.prepare("SELECT v FROM kv WHERE k='awaiting'").get().v).kind, 'title');
+  chat.incoming({ text: 'я'.repeat(101), source: 'telegram' });
+  assert.match(db.prepare("SELECT text FROM messages WHERE sender='captain_smm' ORDER BY id DESC LIMIT 1").get().text, /длиннее 100 знаков \(101\)/); assert.equal(JSON.parse(db.prepare("SELECT v FROM kv WHERE k='awaiting'").get().v).kind, 'title', 'ждёт новое название');
+  chat.incoming({ text: 'Десять тысяч шагов: откуда цифра?', source: 'telegram' });
+  assert.equal(chat.pending('smm'), 0); assert.equal(db.prepare("SELECT v FROM kv WHERE k='awaiting'").get(), undefined, 'ожидание сброшено');
+  const row = db.prepare('SELECT status,choice FROM messages WHERE id=?').get(id); assert.deepEqual([row.status, row.choice], ['answered', 'title:3']);
+  assert.ok(db.prepare("SELECT text FROM messages WHERE sender='captain_smm' AND text LIKE 'Принято, ставлю ваше название%'").get(), 'Капитан подтвердил название');
+});
