@@ -61,6 +61,6 @@ test('потолок проверок Веры: повтор из-за цита�
   assert.ok(!fs.existsSync(path.join(RUN, '_query_check1ev.txt'))); assert.match(card.text, /⚠️ У Веры не у всех фактов цитата из реестра/);
 });
 
-test('Ксении в задании назван бюджет слов (76-84, замеры), чтобы первый круг не пропадал на «слишком длинно»', () => {
-  return import('../scripts/agent_skills.mjs').then(({ skillsBlock }) => { const b = skillsBlock('scriptwriter', { dir: 'C:/x' }); assert.match(b, /БЮДЖЕТ СЛОВ/); assert.match(b, /76-84 слова без призыва/); assert.match(b, /97 = 61 с/); });
+test('Ксении в задании назван бюджет слов по реальному синтезу (88-100 слов, призыв ≈ 8,4 с), без цифр, выведенных из оценки при выключенной озвучке', () => {
+  return import('../scripts/agent_skills.mjs').then(({ skillsBlock }) => { const b = skillsBlock('scriptwriter', { dir: 'C:/x' }); assert.match(b, /БЮДЖЕТ СЛОВ/); assert.match(b, /88-100 слов без призыва/); assert.match(b, /≈ 8,4 с/); assert.ok(!/76-84/.test(b)); });
 });

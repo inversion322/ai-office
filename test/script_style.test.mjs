@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { styleIssues, styleFeedback, bridgeIssues } from '../scripts/script_style.mjs';
+import { styleIssues, styleFeedback, bridgeIssues, verdictIssues } from '../scripts/script_style.mjs';
 
 const rules = (a) => styleIssues(a).map((x) => x.rule);
 
@@ -41,4 +41,27 @@ test('правила стиля попали в промпт сценарист�
   assert.match(lib, /НЕ произноси «улика первая»/); assert.match(lib, /Единая сквозная мысль/); assert.match(lib, /ВНУТРЕННЯЯ формула/);
   const pipe = fs.readFileSync(new URL('../scripts/smm_pipeline.mjs', import.meta.url), 'utf8');
   assert.match(pipe, /"idea"/); assert.match(pipe, /служебные слова/i); assert.doesNotMatch(pipe, /можно коротко «Источники на экране/);
+});
+
+// ---- вердикт «миф/правда» не называется в начале ролика (решение Ника 2026-10-20)
+const hv = (segments, on_screen) => verdictIssues({ segments, on_screen });
+test('вердикт в хуке: «миф», «правда или миф», «это правда.», ложь, фейк, развенчиваем в первых двух абзацах ловятся', () => {
+  for (const s of ['Это миф? Давайте проверим.', 'Правда или миф: десять тысяч шагов?', 'Развенчиваем миф про шаги.', 'Говорят, это правда.', 'Ложь или нет?', 'Фейк про шаги.', 'Мифы о шагах живучи.']) assert.equal(hv([s, 'Дальше.']).length, 1, s);
+  assert.equal(hv(['Хук без ярлыка?', 'Откуда это? Развенчивают такое часто.']).length, 1, 'второй абзац тоже ранний');
+  assert.equal(hv(['Хук.', 'Второй.', 'Третий.', 'Приговор: это миф. Пользы почти нет.']).length, 0, 'вердикт в конце остаётся');
+});
+test('вердикт в хуке: «правда ли это?», «это правда?», «правда, что…?» (вопросы) разрешены, это дословный хук Ника', () => {
+  assert.deepEqual(hv(['Говорят, что нужно ходить по десять тысяч шагов в день, правда ли это?', 'Откуда взялась вообще эта цифра?']), []);
+  assert.deepEqual(hv(['Это правда?', 'Правда, что шаги считают?']), []);
+  assert.deepEqual(hv(['Правдоподобно звучит. Но правдивы ли цифры?']), [], 'правдоподобно/правдивы не ярлыки');
+});
+test('вердикт на экране: штамп «МИФ?» в описании первых двух кадров (как было в ролике про шаги) ловится, в поздних кадрах разрешён', () => {
+  const r = hv(['Хук?', 'Откуда?'], [{ segment: 1, headline: '10 000', note: 'гигантское число со штампом «МИФ?»', loupe: 'число' }, { segment: 2, headline: 'Откуда: реклама', numbers: ['47 471'] }, { segment: 6, note: 'печать МИФ на красном поле' }]);
+  assert.equal(r.length, 1); assert.equal(r[0].where, 'экран'); assert.equal(r[0].seg, 1); assert.match(r[0].quote, /МИФ/);
+  assert.deepEqual(hv(['Хук?', 'Откуда?'], [{ segment: 1, headline: '10 000 шагов в день: правда ли?' }]), [], 'заголовок-вопрос без ярлыка');
+});
+test('замечание Ксении про вердикт: понятно, где и что убрать; смешивается с замечаниями про служебные слова', () => {
+  const v = verdictIssues({ segments: ['Это миф?', 'Дальше.'], on_screen: [{ segment: 1, note: 'штамп МИФ?' }] });
+  const fb = styleFeedback(v); assert.match(fb, /Вердикт \(миф это или правда\) нельзя называть в начале ролика/); assert.match(fb, /в озвучке, абзац 1/); assert.match(fb, /на экране, абзац 1/); assert.match(fb, /on_screen: headline, note, loupe/); assert.match(fb, /только в конце, перед призывом/);
+  const both = styleFeedback([...styleIssues(['Улика первая. Факт.']), ...v]); assert.match(both, /служебные слова каркаса/); assert.match(both, /Вердикт \(миф/);
 });

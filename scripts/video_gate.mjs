@@ -9,6 +9,7 @@ import { decodeFrames, measure, judge, summaryLine } from './video_dynamics.mjs'
 import { checkSfx } from './sfx_check.mjs';
 import { checkCta } from './check_cta.mjs';
 import { checkProjectPlan, checkReportSection } from './check_library_plan.mjs';
+import { checkVerdictLabels } from './check_verdict_label.mjs';
 
 const fmtFile = (proj) => path.join(proj, 'format.json');
 export const isFormatA = (proj) => { try { return JSON.parse(fs.readFileSync(fmtFile(proj), 'utf8')).format === 'A'; } catch { return false; } };
@@ -20,6 +21,7 @@ export function gate(mp4, proj, { dynamics = false, reportName = 'RESULT.md' } =
   for (const x of checkProject(proj).problems) for (const b of x.bad) problems.push(`шляпа не по центру: ${x.file}:${b.line} (${b.found})`);
   if (process.env.SFX_GATE !== 'off' && (dynamics || isFormatA(proj))) problems.push(...checkSfx(proj).problems.map((p) => 'звук: ' + p));
   if (dynamics || isFormatA(proj)) problems.push(...checkCta(proj).problems.map((p) => 'призыв: ' + p));
+  if (process.env.VERDICT_GATE !== 'off' && (dynamics || isFormatA(proj))) problems.push(...checkVerdictLabels(proj).problems.map((p) => 'вердикт: ' + p));
   if (process.env.LIBRARY_GATE !== 'off' && (dynamics || isFormatA(proj))) { problems.push(...checkProjectPlan(proj).problems.map((p) => 'библиотека: ' + p)); const sec = reportName ? checkReportSection(proj, reportName) : []; problems.push(...sec.map((p) => 'библиотека: ' + p)); }
   const useDyn = (dynamics || isFormatA(proj)) && process.env.DYNAMICS_GATE !== 'off';
   let metrics = null;

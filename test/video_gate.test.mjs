@@ -66,3 +66,13 @@ test('ворота: нет плана библиотеки и раздела «�
     const rwk = gate(good, proj, { dynamics: true, reportName: 'RESULT_v3.md' }); assert.ok(rwk.problems.some((x) => /RESULT_v3\.md нет раздела/.test(x)), 'для правок отчёт RESULT_vN.md');
   } finally { delete process.env.LIBRARY_GATE; fs.writeFileSync(plan, keepP); fs.writeFileSync(rep, keepR); }
 });
+
+test('ворота: штамп «МИФ?» в начале ролика блокирует отправку Нику с пометкой «вердикт:»; VERDICT_GATE=off обходит; без формата A не проверяется', { skip: !have }, () => {
+  const idx = path.join(proj, 'index.html'), comp = path.join(proj, 'compositions', 's02.html');
+  fs.writeFileSync(idx, '<html><body><div data-duration="40"><div data-composition-id="s2" data-composition-src="compositions/s02.html" data-start="1.5" data-duration="3"></div></div></body></html>'); fs.writeFileSync(comp, '<div><span>10 000</span><span>МИФ?</span></div>');
+  try {
+    const bad = gate(good, proj, { dynamics: true }); assert.equal(bad.ok, false); assert.ok(bad.problems.some((x) => /^вердикт: compositions\/s02\.html \(с 1\.5 с/.test(x)), bad.problems.join('; '));
+    process.env.VERDICT_GATE = 'off'; assert.equal(gate(good, proj, { dynamics: true }).problems.some((x) => /^вердикт:/.test(x)), false); delete process.env.VERDICT_GATE;
+    assert.equal(gate(good, proj, { dynamics: false }).problems.some((x) => /^вердикт:/.test(x)), false, 'старый формат без динамики не проверяется');
+  } finally { delete process.env.VERDICT_GATE; fs.rmSync(idx, { force: true }); fs.rmSync(comp, { force: true }); }
+});
