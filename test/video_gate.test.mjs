@@ -4,13 +4,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+const ROOT_G = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 import { gate, isFormatA, markFormatA } from '../scripts/video_gate.mjs';
 import { makeClip } from './fixtures/make_clip.mjs';
 import { ffprobePath } from '../scripts/video_format.mjs';
 
 const FF = path.join(path.dirname(ffprobePath()), 'ffmpeg.exe'); const have = fs.existsSync(FF);
 let tmp, proj, good, stat;
-before(() => { if (!have) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-')); proj = path.join(tmp, 'dosie09'); fs.mkdirSync(path.join(proj, 'compositions'), { recursive: true }); good = makeClip(FF, path.join(tmp, 'good.mp4'), 'dynamic'); stat = makeClip(FF, path.join(tmp, 'stat.mp4'), 'static'); });
+before(() => { if (!have) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-')); proj = path.join(tmp, 'dosie09'); fs.mkdirSync(path.join(proj, 'compositions'), { recursive: true }); good = makeClip(FF, path.join(tmp, 'good.mp4'), 'dynamic'); stat = makeClip(FF, path.join(tmp, 'stat.mp4'), 'static');
+  fs.copyFileSync(path.join(ROOT_G, 'video', 'med_detective', 'LIBRARY_PLAN_REFERENCE.json'), path.join(proj, 'LIBRARY_PLAN.json')); fs.writeFileSync(path.join(proj, 'RESULT.md'), '# Итог\n## Использовано из библиотеки\n- iris-reveal'); });
 after(() => { try { tmp && fs.rmSync(tmp, { recursive: true, force: true }); } catch {} });
 
 test('динамичный ролик проходит все три проверки; метрики попадают в сводку', { skip: !have }, () => {
@@ -51,4 +53,16 @@ test('ворота: призыв не тем шрифтом и не по бук�
     assert.equal(gate(good, proj, { dynamics: true }).ok, true, 'обход CTA_GATE=off');
     delete process.env.CTA_GATE; assert.equal(gate(good, proj, { dynamics: false }).ok, true, 'без динамики и без формата A призыв старых роликов не проверяется');
   } finally { delete process.env.CTA_GATE; fs.rmSync(file, { force: true }); }
+});
+
+test('ворота: нет плана библиотеки и раздела «Использовано из библиотеки» (всё с нуля) блокирует отправку Нику; LIBRARY_GATE=off обходит; старый ролик без динамики не проверяется', { skip: !have }, () => {
+  const plan = path.join(proj, 'LIBRARY_PLAN.json'), rep = path.join(proj, 'RESULT.md'), keepP = fs.readFileSync(plan, 'utf8'), keepR = fs.readFileSync(rep, 'utf8');
+  try {
+    fs.rmSync(plan); fs.writeFileSync(rep, '# Итог без раздела');
+    const bad = gate(good, proj, { dynamics: true }); assert.equal(bad.ok, false);
+    assert.ok(bad.problems.some((x) => /^библиотека: нет LIBRARY_PLAN\.json/.test(x)), bad.problems.join('; ')); assert.ok(bad.problems.some((x) => /^библиотека: в RESULT\.md нет раздела/.test(x)));
+    process.env.LIBRARY_GATE = 'off'; assert.equal(gate(good, proj, { dynamics: true }).ok, true, 'обход LIBRARY_GATE=off'); delete process.env.LIBRARY_GATE;
+    assert.equal(gate(good, proj, { dynamics: false }).ok, true, 'старый формат без динамики: библиотека не проверяется');
+    const rwk = gate(good, proj, { dynamics: true, reportName: 'RESULT_v3.md' }); assert.ok(rwk.problems.some((x) => /RESULT_v3\.md нет раздела/.test(x)), 'для правок отчёт RESULT_vN.md');
+  } finally { delete process.env.LIBRARY_GATE; fs.writeFileSync(plan, keepP); fs.writeFileSync(rep, keepR); }
 });

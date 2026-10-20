@@ -15,5 +15,6 @@ fs.mkdirSync(path.join(proj, 'final'), { recursive: true });
 // Настоящий ролик в стандарте Shorts/Reels (конвейер проверяет формат до отправки). FAKE_KIRILL_CLIP: dynamic (по умолчанию) | static
 { const ff = process.env.TEST_FFMPEG; const out = path.join(proj, 'final', `dosie${m[1]}_${m[2]}.mp4`);
   try { const { makeClip } = await import('./make_clip.mjs'); if (!ff) throw new Error('нет ffmpeg'); makeClip(ff, out, process.env.FAKE_KIRILL_CLIP || 'dynamic'); } catch { fs.writeFileSync(out, Buffer.alloc(4096, 1)); } }
-fs.writeFileSync(path.join(proj, `RESULT_${m[2]}.md`), `# Отчёт ${m[2]}\n\nПравка внесена: заголовок крупнее, проверено на кадрах. Длительность 52,1 с.\n\n## Файлы\n- final/dosie${m[1]}_${m[2]}.mp4\n`);
+fs.writeFileSync(path.join(proj, `RESULT_${m[2]}.md`), `# Отчёт ${m[2]}\n\nПравка внесена: заголовок крупнее, проверено на кадрах. Длительность 52,1 с.\n\n## Файлы\n- final/dosie${m[1]}_${m[2]}.mp4\n\n\n## Использовано из библиотеки\n- iris-reveal (имитация)`);
+  try { const { fileURLToPath } = await import('node:url'); if (!fs.existsSync(path.join(proj, 'LIBRARY_PLAN.json'))) fs.copyFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'video', 'med_detective', 'LIBRARY_PLAN_REFERENCE.json'), path.join(proj, 'LIBRARY_PLAN.json')); } catch {}
 fs.appendFileSync(path.join(proj, 'PROGRESS.md'), `\n- 12:01: [fake] готово ${m[2]}`);

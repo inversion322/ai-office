@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const REQUIRED_SKILLS = ['hyperframes-animation', 'hyperframes-registry'];
+export const REQUIRED_SKILLS = ['hyperframes-animation', 'hyperframes-registry', 'vertical-video-editing'];
 const profileDb = () => path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'hermes', 'profiles', 'video', 'state.db');
 
 /** Возвращает { used: Set<string>, sessions: n, checked: bool }. dbFile нужен только тестам. */

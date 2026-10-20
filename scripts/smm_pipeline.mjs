@@ -30,6 +30,7 @@ import { novelty, regenBlock, archiveScript, loadHistory, hookCatalog, LIMITS } 
 import { styleIssues, styleFeedback, bridgeIssues } from './script_style.mjs';
 import { craftIssues, craftFeedback, craftSummary } from './script_craft.mjs';
 import { skillUsageNote } from './skill_usage.mjs';
+import { fireReminders } from './reminders.mjs';
 const speechSeconds = async (segments) => { await yieldToPriority('scriptwriter'); return measureSpeech(segments, { root: ROOT }); };   // { sec, estimated, perSeg }
 const HOOK_NAMES = hookCatalog().replace(/ \([^)]*\)/g, '');       // только названия типов крючка, без пояснений
 const NOTE = (v) => { try { return JSON.parse(v.notes || '{}'); } catch { return {}; } };
@@ -247,7 +248,7 @@ async function produce(id, comment) {
   const proj = path.join(ROOT, 'video', `dosie${n}`);
   const tpl = fs.readFileSync(path.join(ROOT, 'smm', 'brief_template.md'), 'utf8');
   const brief = tpl.replaceAll('{{N}}', n).replaceAll('{{ID}}', String(id)).replaceAll('{{TITLE}}', v.title).replaceAll('{{SCRIPT}}', path.join(abs, 'script_ru.txt').replaceAll('\\', '/'))
-    .replaceAll('{{FACTS}}', path.join(abs, 'FACTS.md').replaceAll('\\', '/')).replaceAll('{{PROJ}}', proj.replaceAll('\\', '/')).replaceAll('{{COMMENT}}', comment || 'нет');
+    .replaceAll('{{FACTS}}', path.join(abs, 'FACTS.md').replaceAll('\\', '/')).replaceAll('{{PROJ}}', proj.replaceAll('\\', '/')).replaceAll('{{VIDEO}}', ROOT.replaceAll('\\', '/') + '/video').replaceAll('{{SCRIPTS}}', ROOT.replaceAll('\\', '/') + '/scripts').replaceAll('{{COMMENT}}', comment || 'нет');
   if (ensureCtaFile(path.join(abs, 'script_ru.txt'))) console.log('в сценарий добавлен призыв подписаться (video/cta.json)');
   const bf = path.join(abs, 'BRIEF.md'); fs.writeFileSync(bf, brief, 'utf8');
 
@@ -304,6 +305,17 @@ function reworkBrief({ id, n, ver, cur, title, comment, proj }) {
 - Ролик «${title}», проект \`${P}\`. Текущая версия: \`final/dosie${n}_v${cur}.mp4\`. Её исходники лежат в проекте и в \`v${cur}_archive/\`: самый свежий \`build_dosie*.py\`, \`make_frames*.py\`, \`script_ru.txt\`, \`words.json\`, \`narration.mp3\`, отчёт \`RESULT*.md\`. Прочитай отчёт и скрипт сборки первыми.
 - **Не перезаписывай и не удаляй прежние версии** (\`final/dosie${n}_v*.mp4\` и их отчёты). Сделай копии скриптов сборки под ${ver} (\`build_dosie${n}_${ver}.py\`, \`make_frames_${ver}.py\`) и правь их.
 - Стандарт ролика (DESIGN.md, \`${V}/med_detective/DESIGN.md\`): ≤ 59,0 с; безопасная зона x 60-940, y 250-1440 для всего читаемого; громкость −14 LUFS, true peak ≤ −1,5 dBTP; призыв подписаться в конце (\`${V}/cta.json\`); динамика по \`${V}/med_detective/DYNAMICS.md\` (формат A: цветные поля на весь экран, гигантские числа и слова, шторки, новый шот каждые 1,5-3 с), готовый mp4 обязан пройти \`node ${S}/video_dynamics.mjs <mp4>\` с кодом 0, а также \`${S}/video_format.mjs\` и \`${S}/check_duck_hat.mjs <проект>\`; лупа отдельным элементом; экспорт 1080×1920, 30 к/с, H.264 High yuv420p, AAC 48 кГц, faststart, файл ≤ 40 МБ.
+
+## БИБЛИОТЕКА ПРЕЖДЕ ВСЕГО (решение Ника 2026-10-20; проверяется кодом, ролик без этого Нику не уходит)
+Готовые скиллы и блоки HyperFrames написаны профессионалами. **Ничего не выдумывай с нуля, если оно уже лежит в библиотеке.** С нуля делается только то, что ты искал и не нашёл (утка, лупа, CTA и дизайн-система уже наши).
+**До раскадровки, по порядку:**
+1. \`skill_view\` для \`hyperframes-animation\` (читай \`rules-index.md\`, \`blueprints-index.md\`, \`transitions/overview.md\` и \`transitions/catalog.md\`), \`hyperframes-registry\` и \`vertical-video-editing\` (хук, ритм, камера, звук). Заглядывай в \`editing-videos\` за темпом и громкостью, в \`media-use\` за звуками и картинками.
+2. Прочитай \`${V}/med_detective/BRAND_MOTION.md\` (три семейства переходов A/B/C, два стиля субтитров, порядок поиска) и \`${V}/library/SOUND_PALETTE.md\` (звуки и музыка).
+3. Поищи готовое: \`npx hyperframes catalog <слово>\` (субтитры \`caption-*\`, переходы, текст \`bottom-up-letters\`/\`char-slam-explode\`, \`hw-*\` рисованная графика, \`count-up\`); ставь \`npx hyperframes add <имя>\`. Графика CC0: \`${V}/library/cc0/graphics/\`. Звуки и музыка: \`${V}/library/cc0/sfx/\`, \`.../music/\` (только из палитры).
+4. Запиши план в \`${P}/LIBRARY_PLAN.json\` по эталону \`${V}/med_detective/LIBRARY_PLAN_REFERENCE.json\` и запусти \`node ${S}/check_library_plan.mjs ${P}\`: **код 0 обязателен ДО сборки**. Любой id проверяется по каталогам; выдуманный блок, звук перехода или звук не из палитры не пройдёт.
+5. Адаптируй блоки каталога под наш формат (они на 1920×1080 с Google Fonts): 1080×1920, \`cqw/cqh\`, шрифт только локальный Manrope 800, слова из \`words.json\`, цвета бренда, безопасная зона. Не подключай шрифты из сети.
+6. В \`RESULT.md\` добавь раздел **«Использовано из библиотеки»**: какие правила, блюпринты, блоки, переходы (A/B/C), стиль субтитров, звуки, графика и музыка взяты, и что сделано с нуля и почему.
+7. Звук: музыка тихая (−24 дБ от голоса, ducking на речи), без звуков на переходах; собери два варианта: основной и \`*_nomusic.mp4\` (без музыки), положи оба в \`final/\`.
 
 ## Как вносить правки
 0. **Если просьба про динамику / «ролик слабый» / DYNAMICS.md: это полная переделка визуала, а не правка.** Прочитай \`${V}/med_detective/DYNAMICS.md\` целиком, сделай раскадровку (по кадру на шот) и посмотри её до полного рендера; звук, текст, тайминги речи и призыв остаются, картинка строится заново в новом языке. Вердикт по динамике выносит измеритель, не ты.
@@ -367,7 +379,7 @@ async function rework(id, comment) {
     return;
   }
   const md = fs.readFileSync(report, 'utf8');
-  const gt = gate(mp4, proj, { dynamics: /DYNAMICS\.md/.test(comment) });   // правка про динамику (или проект уже формата A) тоже проверяется измерением
+  const gt = gate(mp4, proj, { dynamics: /DYNAMICS\.md/.test(comment), reportName: `RESULT_${ver}.md` });   // правка про динамику (или проект уже формата A) тоже проверяется измерением
   if (!gt.ok) {
     const why = gt.problems.join('; ');
     await agent('video', 'error', 'Правки не прошли проверку (формат/шляпа/динамика)', 0, why.slice(0, 200), 'error');
@@ -433,6 +445,7 @@ async function packageClip(id, comment) {
   await say('packager', `Готово: «${pick.title}», хэштегов ${tg.tags.length}. Отправила Нику.`);
   await safeNotify(text, [[['Другое название', `package:${id}`]]]);
   console.log('готово: пакет публикации', pick.title, tg.tags.join(' '));
+  await fireReminders('package_done', (t) => safeNotify(t)).catch(() => {});   // напоминания Нику, привязанные к концу ролика
 }
 
 const [cmd, a1, ...rest] = process.argv.slice(2);

@@ -67,3 +67,8 @@ test('призыв старым способом (обычный регистр,
   const r = await produce('bad_cta'); assert.notEqual(r.code, 0); assert.equal(r.stage, 'editing'); assert.equal(r.agent.status, 'error'); assert.ok(!sentToNick(r.msgs));
   assert.ok(r.msgs.some((m) => /НЕ отправлен вам/.test(m.text) && /призыв:/.test(m.text) && /моноширинный/.test(m.text) && /по буквам/.test(m.text)), r.msgs.map((m) => m.text.slice(0, 200)).join(' | '));
 });
+
+test('ролик «всё с нуля» (нет LIBRARY_PLAN.json и раздела «Использовано из библиотеки»): Нику НЕ отправляется, названо, что нужно использовать библиотеку', { skip: !can }, async () => {
+  const r = await produce('no_plan'); assert.notEqual(r.code, 0); assert.equal(r.stage, 'editing'); assert.equal(r.agent.status, 'error'); assert.ok(!sentToNick(r.msgs));
+  assert.ok(r.msgs.some((m) => /НЕ отправлен вам/.test(m.text) && /библиотека:/.test(m.text) && /LIBRARY_PLAN\.json/.test(m.text) && /Использовано из библиотеки/.test(m.text)), r.msgs.map((m) => m.text.slice(0, 220)).join(' | '));
+});

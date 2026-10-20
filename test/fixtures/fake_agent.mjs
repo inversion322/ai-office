@@ -50,7 +50,7 @@ if (/Проверь сценарий из файла/.test(q)) {
   fs.writeFileSync(out, JSON.stringify({ verdict: bad ? 'fix' : 'pass', summary: bad ? 'формулировка шире данных (имитация)' : 'факты подтверждены (имитация)', claims: [], required_changes: bad ? ['Сегмент 2: уточнить формулировку'] : [] }));
 }
 
-// ---- Кирилл (этап монтажа, конвейер produce). FAKE_VIDEO_MODE: good | tilted_hat | bad_format | static | bad_cta
+// ---- Кирилл (этап монтажа, конвейер produce). FAKE_VIDEO_MODE: good | tilted_hat | bad_format | static | bad_cta | no_plan
 if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   const proj = /Создай проект `?([^`\s:]+(?::[^`\s:]+)?)`?:/.exec(q)[1].replace(/\\/g, '/'); const n = /dosie(\d+)_v1\.mp4/.exec(q)[1];
   const { spawnSync } = await import('node:child_process'); const path = await import('node:path');
@@ -63,5 +63,8 @@ if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   const { fileURLToPath } = await import('node:url');
   const refCta = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'video', 'med_detective', 'CTA_REFERENCE.html'), 'utf8');
   fs.writeFileSync(proj + '/compositions/d_cta.html', mode === 'bad_cta' ? '<style>.v-mono { font-family: "JetBrains Mono", monospace; }</style><div>Подписывайтесь</div><div class="v-mono">@med_detective_ru</div>' : refCta);
-  fs.writeFileSync(proj + '/RESULT.md', '# Результат\nГотово (имитация).');
+  // библиотека: эталонный план и раздел отчёта; режим no_plan имитирует Кирилла, который всё сделал с нуля
+  const refPlan = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'video', 'med_detective', 'LIBRARY_PLAN_REFERENCE.json'), 'utf8');
+  if (mode !== 'no_plan') fs.writeFileSync(proj + '/LIBRARY_PLAN.json', refPlan);
+  fs.writeFileSync(proj + '/RESULT.md', '# Результат\nГотово (имитация).' + (mode === 'no_plan' ? '' : '\n\n## Использовано из библиотеки\n- iris-reveal, caption-highlight (имитация)'));
 }
