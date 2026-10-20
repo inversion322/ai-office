@@ -2,6 +2,7 @@
 import { test, after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { copyLiveDb } from './fixtures/copy_db.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -20,7 +21,7 @@ const initData = ({ id = 323028999, age = 10, token = BOT } = {}) => { const p =
 before(async () => {
   if (!can) return;
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mini-test-'));
-  fs.copyFileSync(path.join(REAL, 'office.db'), path.join(tmp, 'office.db'));
+  copyLiveDb(REAL, tmp);
   const cfg = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')); FULL = cfg.token; BOT = cfg.smmBotToken;
   fs.writeFileSync(path.join(tmp, 'config.json'), JSON.stringify(cfg));
   server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1' }, stdio: 'ignore' });

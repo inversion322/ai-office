@@ -44,14 +44,14 @@ if (/Проверь сценарий из файла/.test(q)) {
   fs.writeFileSync(out, JSON.stringify({ verdict: bad ? 'fix' : 'pass', summary: bad ? 'формулировка шире данных (имитация)' : 'факты подтверждены (имитация)', claims: [], required_changes: bad ? ['Сегмент 2: уточнить формулировку'] : [] }));
 }
 
-// ---- Кирилл (этап монтажа, конвейер produce). FAKE_VIDEO_MODE: good | tilted_hat | bad_format
+// ---- Кирилл (этап монтажа, конвейер produce). FAKE_VIDEO_MODE: good | tilted_hat | bad_format | static
 if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   const proj = /Создай проект `?([^`\s:]+(?::[^`\s:]+)?)`?:/.exec(q)[1].replace(/\\/g, '/'); const n = /dosie(\d+)_v1\.mp4/.exec(q)[1];
   const { spawnSync } = await import('node:child_process'); const path = await import('node:path');
   const ff = process.env.TEST_FFMPEG; const mode = process.env.FAKE_VIDEO_MODE || 'good';
   fs.mkdirSync(proj + '/final', { recursive: true }); fs.mkdirSync(proj + '/compositions', { recursive: true });
-  const size = mode === 'bad_format' ? '1920x1080' : '1080x1920';
-  spawnSync(ff, ['-v', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=${size}:r=30:d=2`, '-f', 'lavfi', '-i', 'sine=d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '48000', '-ac', '2', `${proj}/final/dosie${n}_v1.mp4`]);
+  const { makeClip } = await import('./make_clip.mjs');
+  makeClip(ff, `${proj}/final/dosie${n}_v1.mp4`, mode === 'bad_format' ? 'horizontal' : mode === 'static' ? 'static' : 'dynamic');
   fs.writeFileSync(proj + '/compositions/d_frame.html', mode === 'tilted_hat' ? 'tl.fromTo("#dk-hatwrap", { x: 0, y: 0, rotation: 0 }, { x: 3, y: -9, rotation: 16 }, 1);' : 'tl.fromTo("#dk-hatwrap", { y: 0 }, { y: -9 }, 1);');
   fs.writeFileSync(proj + '/RESULT.md', '# Результат\nГотово (имитация).');
 }

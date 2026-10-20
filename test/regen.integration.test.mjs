@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { copyLiveDb } from './fixtures/copy_db.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REAL = path.join(ROOT, 'server', 'data');
@@ -34,7 +35,7 @@ async function regen(mode) {
   for (let i = 0; i < 90; i++) { await sleep(1000); const m = (await api('/api/chat?office=smm')).messages.filter((x) => x.kind === 'action' && x.status === 'open' && /Сценарий: «/.test(x.text)); if (m.length) return { card: m[m.length - 1], all: (await api('/api/chat?office=smm')).messages }; }
   throw new Error('карточка нового сценария не пришла за 90 с');
 }
-before(() => { if (!can) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'regen-test-')); fs.copyFileSync(path.join(REAL, 'office.db'), path.join(tmp, 'office.db')); fs.copyFileSync(path.join(REAL, 'config.json'), path.join(tmp, 'config.json')); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token; });
+before(() => { if (!can) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'regen-test-')); copyLiveDb(REAL, tmp); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token; });
 after(async () => { try { server && server.kill(); } catch {} await sleep(600); fs.rmSync(RUN, { recursive: true, force: true }); try { tmp && fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch {} });
 
 test('перегенерация: прежняя версия сохранена в history, написана новая с другим крючком, на карточке есть строка о перегенерации и кнопка «Перегенерировать»', { skip: !can }, async () => {

@@ -25,8 +25,7 @@ function ensureCtaFile(file) {
 import { speechSeconds as measureSpeech } from './smm_tts.mjs';
 import { cleanReport } from '../server/lib_text.mjs';
 import { checkTitle, checkTags, buildMessage, BRAND_TAG } from '../server/lib_pack.mjs';
-import { probeVideo, checkFormat } from './video_format.mjs';
-import { checkProject as checkHat } from './check_duck_hat.mjs';
+import { gate, markFormatA } from './video_gate.mjs';
 import { novelty, regenBlock, archiveScript, loadHistory, hookCatalog, LIMITS } from './script_novelty.mjs';
 const speechSeconds = async (segments) => { await yieldToPriority('scriptwriter'); return measureSpeech(segments, { root: ROOT }); };   // { sec, estimated, perSeg }
 const HOOK_NAMES = hookCatalog().replace(/ \([^)]*\)/g, '');       // только названия типов крючка, без пояснений
@@ -243,22 +242,21 @@ async function produce(id, comment) {
     await safeNotify(`⚠️ Ролик «${v.title}» не собран, смотрите ${proj}/RESULT.md`);
     throw new Error('нет mp4');
   }
-  { // Стандарт Shorts/Reels и шляпа проверяются конвейером, а не только словами в задании: не прошло, значит Нику не уходит
-    const f = checkFormat(probeVideo(mp4)); const hat = checkHat(proj);
-    if (!f.ok || hat.problems.length) {
-      const why = [...f.problems, ...hat.problems.flatMap((x) => x.bad.map((b) => `шляпа не по центру: ${x.file}:${b.line} (${b.found})`))].join('; ');
-      await agent('video', 'error', 'Ролик не прошёл проверку формата/шляпы', 0, why.slice(0, 200), 'error');
-      await safeNotify(`⚠️ Ролик «${v.title}» собран, но НЕ отправлен вам: не прошёл автоматическую проверку.\n${why}\nФайл: ${mp4}`);
-      throw new Error('ролик не прошёл проверку формата/шляпы: ' + why);
-    }
+  const gt = gate(mp4, proj, { dynamics: true });        // новый ролик всегда формата A: формат, шляпа и динамика проверяются конвейером, а не только словами в задании
+  if (!gt.ok) {
+    const why = gt.problems.join('; ');
+    await agent('video', 'error', 'Ролик не прошёл проверку (формат/шляпа/динамика)', 0, why.slice(0, 200), 'error');
+    await safeNotify(`⚠️ Ролик «${v.title}» собран, но НЕ отправлен вам: не прошёл автоматическую проверку.\n- ${gt.problems.join('\n- ')}\nФайл: ${mp4}`);
+    throw new Error('ролик не прошёл проверку: ' + why);
   }
+  markFormatA(proj);
   await setVideo(id, { stage: 'produced', video_path: path.relative(ROOT, mp4) });
   await agent('video', 'idle', 'Ролик готов, ждёт вашего просмотра', 100, 'Ролик собран');
   await say('video', `Ролик собран: ${path.relative(ROOT, mp4)}. Отчёт: ${path.relative(ROOT, path.join(proj, 'RESULT.md'))}.`);
   await agent('captain_smm', 'waiting', 'Ждёт вашего решения по ролику', 0, `Ролик «${v.title}» готов`);
   let res = ''; try { res = cleanReport(fs.readFileSync(path.join(proj, 'RESULT.md'), 'utf8')); } catch {}
   const btn = [[['Принять ролик', `accept:${id}`], ['Внести правки', `rework:${id}`]]];
-  try { await sendVideoFile(mp4, `🎬 «${v.title}» готов.\n${res}\n\nПринять или внести правки?`, btn); }
+  try { await sendVideoFile(mp4, `🎬 «${v.title}» готов.\n${res}${gt.summary ? '\n' + gt.summary : ''}\n\nПринять или внести правки?`, btn); }
   catch (e) { await safeNotify(`🎬 Ролик готов: ${mp4}\n(не удалось отправить файл: ${e.message})\n${res}`, btn); }
   console.log('готово:', mp4);
 }
@@ -267,7 +265,7 @@ async function produce(id, comment) {
 /* ---------------- 4. Правки готового ролика (Кирилл, Opus 5.5, high; у ролика приоритет) ---------------- */
 const projectDir = (id) => (Number(id) === 1 ? path.join(ROOT, 'video', 'med_detective', 'dosie01') : path.join(ROOT, 'video', `dosie${String(id).padStart(2, '0')}`));   // ролик №1 собран вручную в проекте med_detective
 function reworkBrief({ id, n, ver, cur, title, comment, proj }) {
-  const P = proj.replaceAll('\\', '/'), V = ROOT.replaceAll('\\', '/') + '/video';
+  const P = proj.replaceAll('\\', '/'), V = ROOT.replaceAll('\\', '/') + '/video', S = ROOT.replaceAll('\\', '/') + '/scripts';
   return `# Правки ролика №${id} → ${ver}: ${comment.replace(/\s+/g, ' ').slice(0, 70)}
 
 Ты Кирилл Кадров, Video Editor AI-офиса Ника (Claude Opus 5.5, высокие усилия). Отвечай и пиши отчёт по-русски. Публиковать ничего нельзя: результат уходит Нику на приёмку. **У этой работы приоритет над всем остальным: остальные этапы конвейера ждут, поэтому делай сразу и без пауз.**
@@ -278,10 +276,11 @@ function reworkBrief({ id, n, ver, cur, title, comment, proj }) {
 ## База
 - Ролик «${title}», проект \`${P}\`. Текущая версия: \`final/dosie${n}_v${cur}.mp4\`. Её исходники лежат в проекте и в \`v${cur}_archive/\`: самый свежий \`build_dosie*.py\`, \`make_frames*.py\`, \`script_ru.txt\`, \`words.json\`, \`narration.mp3\`, отчёт \`RESULT*.md\`. Прочитай отчёт и скрипт сборки первыми.
 - **Не перезаписывай и не удаляй прежние версии** (\`final/dosie${n}_v*.mp4\` и их отчёты). Сделай копии скриптов сборки под ${ver} (\`build_dosie${n}_${ver}.py\`, \`make_frames_${ver}.py\`) и правь их.
-- Стандарт ролика (DESIGN.md, \`${V}/med_detective/DESIGN.md\`): ≤ 59,0 с; безопасная зона x 60-940, y 250-1440 для всего читаемого; громкость −14 LUFS, true peak ≤ −1,5 dBTP; призыв подписаться в конце (\`${V}/cta.json\`); динамика (новая картинка каждые 1-1,5 с, статики дольше 1,5 с нет); лупа отдельным элементом; экспорт 1080×1920, 30 к/с, H.264 High yuv420p, AAC 48 кГц, faststart, файл ≤ 40 МБ.
+- Стандарт ролика (DESIGN.md, \`${V}/med_detective/DESIGN.md\`): ≤ 59,0 с; безопасная зона x 60-940, y 250-1440 для всего читаемого; громкость −14 LUFS, true peak ≤ −1,5 dBTP; призыв подписаться в конце (\`${V}/cta.json\`); динамика по \`${V}/med_detective/DYNAMICS.md\` (формат A: цветные поля на весь экран, гигантские числа и слова, шторки, новый шот каждые 1,5-3 с), готовый mp4 обязан пройти \`node ${S}/video_dynamics.mjs <mp4>\` с кодом 0, а также \`${S}/video_format.mjs\` и \`${S}/check_duck_hat.mjs <проект>\`; лупа отдельным элементом; экспорт 1080×1920, 30 к/с, H.264 High yuv420p, AAC 48 кГц, faststart, файл ≤ 40 МБ.
 
 ## Как вносить правки
-1. Меняй **только то, что просит Ник**. Всё остальное остаётся как в v${cur}: не ломай принятое (тайминги, лупу, зону, призыв, громкость).
+0. **Если просьба про динамику / «ролик слабый» / DYNAMICS.md: это полная переделка визуала, а не правка.** Прочитай \`${V}/med_detective/DYNAMICS.md\` целиком, сделай раскадровку (по кадру на шот) и посмотри её до полного рендера; звук, текст, тайминги речи и призыв остаются, картинка строится заново в новом языке. Вердикт по динамике выносит измеритель, не ты.
+1. Меняй **только то, что просит Ник** (кроме случая из п. 0). Всё остальное остаётся как в v${cur}: не ломай принятое (тайминги, лупу, зону, призыв, громкость).
 2. Если правка касается **текста озвучки или фактов** (слова диктора, числа, названия источников): текст сценария сам НЕ МЕНЯЙ (он проверен фактчекером). Сделай всё остальное из просьбы, а по тексту опиши в отчёте раздел «Нужна правка сценария» с точной формулировкой просьбы: её передадут сценаристу и фактчекеру.
 3. Озвучку генерируй заново только если она действительно меняется (скорость, пауза и т. п.): \`C:/hf_tts/venv/Scripts/python.exe ${V}/narrate.py --lang ru --text <script_ru.txt> --out <narration.mp3> --srt <captions.srt> --words <words.json> --patience 1200\`. Код выхода 4 (сервис недоступен) значит «подожди 10 минут и повтори»; голос и движок не менять.
 4. Проверки после правки (затронутые правкой обязательно; длительность и безопасную зону проверяй всегда): \`npx --yes hyperframes@0.8.174 check\` без замечаний, рендер \`--quality standard\`, \`ffprobe\` ≤ 59,0 с, кадры затронутых мест смотри через \`vision_analyze\` (наложения, обрезания, выход за зону, мелкий шрифт), громкость \`ebur128\`, призыв подписаться в последней сцене.
@@ -340,23 +339,22 @@ async function rework(id, comment) {
     await safeNotify(`⚠️ Правки ролика №${id} не готовы: Кирилл остановился${fresh(mp4) ? ' (есть черновой рендер, но без финальной проверки)' : ''}. Прежняя версия v${cur} цела. Это сбой на нашей стороне, не ваш. Можно внести правки ещё раз или принять v${cur}.`, [[[`Внести правки ещё раз`, `rework:${id}`], [`Принять v${cur}`, `accept:${id}`]]]);
     return;
   }
-  { // шляпа и формат: правка не имеет права вернуть наклон шляпы или испортить размер (формат проверит и сама отправка)
-    const f = checkFormat(probeVideo(mp4)); const hat = checkHat(proj);
-    if (!f.ok || hat.problems.length) {
-      const why = [...f.problems, ...hat.problems.flatMap((x) => x.bad.map((b) => `шляпа не по центру: ${x.file}:${b.line} (${b.found})`))].join('; ');
-      await agent('video', 'error', 'Правки не прошли проверку формата/шляпы', 0, why.slice(0, 200), 'error');
-      await safeNotify(`⚠️ Правки ролика №${id} ${ver} собраны, но НЕ отправлены вам: не прошли автоматическую проверку.\n${why}\nФайл: ${mp4}`);
-      throw new Error('правки не прошли проверку формата/шляпы: ' + why);
-    }
-  }
   const md = fs.readFileSync(report, 'utf8');
+  const gt = gate(mp4, proj, { dynamics: /DYNAMICS\.md/.test(comment) });   // правка про динамику (или проект уже формата A) тоже проверяется измерением
+  if (!gt.ok) {
+    const why = gt.problems.join('; ');
+    await agent('video', 'error', 'Правки не прошли проверку (формат/шляпа/динамика)', 0, why.slice(0, 200), 'error');
+    await safeNotify(`⚠️ Правки ролика №${id} ${ver} собраны, но НЕ отправлены вам: не прошли автоматическую проверку.\n- ${gt.problems.join('\n- ')}\nФайл: ${mp4}`);
+    throw new Error('правки не прошли проверку: ' + why);
+  }
+  if (gt.dynamicsChecked) markFormatA(proj);
   await setVideo(id, { stage: 'produced', video_path: path.relative(ROOT, mp4) });
   await agent('video', 'idle', `Правки внесены, ${ver} ждёт вашего просмотра`, 100, `Ролик №${id} ${ver} собран`);
   await say('video', `Правки внесены: ${path.relative(ROOT, mp4)}.`);
   await agent('captain_smm', 'waiting', `Ждёт вашего решения по ролику №${id} ${ver}`, 0, `Ролик №${id} ${ver} готов`);
   const needScript = /нужна правка сценария/i.test(md) ? '\n⚠️ Часть просьбы касается текста озвучки: нужны сценарист и фактчекер, подробности в отчёте Кирилла.' : '';
   const btn = [[['Принять ролик', `accept:${id}`], ['Внести правки', `rework:${id}`]]];
-  const caption = `🎬 Ролик №${id} ${ver}: правки внесены.\n${cleanReport(md)}${needScript}\n\nПринять или внести ещё правки?`;
+  const caption = `🎬 Ролик №${id} ${ver}: правки внесены.\n${cleanReport(md)}${gt.summary ? '\n' + gt.summary : ''}${needScript}\n\nПринять или внести ещё правки?`;
   try { await sendVideoFile(mp4, caption, btn); } catch (e) { await safeNotify(`${caption}\n(файл не отправился: ${e.message}; он лежит на ПК: ${mp4})`, btn); }
   console.log('готово:', mp4);
 }

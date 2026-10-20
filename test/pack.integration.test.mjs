@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { copyLiveDb } from './fixtures/copy_db.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REAL = path.join(ROOT, 'server', 'data');
@@ -24,7 +25,7 @@ const lastCard = async () => (await api('/api/chat?office=smm')).messages.filter
 before(async () => {
   if (!can) return;
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pack-test-'));
-  fs.copyFileSync(path.join(REAL, 'office.db'), path.join(tmp, 'office.db')); fs.copyFileSync(path.join(REAL, 'config.json'), path.join(tmp, 'config.json'));
+  copyLiveDb(REAL, tmp);
   token = JSON.parse(fs.readFileSync(path.join(tmp, 'config.json'), 'utf8')).token;
   fs.mkdirSync(RUN, { recursive: true });
   fs.writeFileSync(path.join(RUN, 'script_ru.txt'), 'Ребёнок съел конфету. Сахар не влияет на поведение. Миф.\n\nПодписывайтесь на телеграм-канал «Медицинский детектив»: там больше полезного.\n', 'utf8');

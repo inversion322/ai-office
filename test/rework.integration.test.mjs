@@ -9,6 +9,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ffprobePath } from '../scripts/video_format.mjs';
 import { fileURLToPath } from 'node:url';
+import { copyLiveDb } from './fixtures/copy_db.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REAL = path.join(ROOT, 'server', 'data');
@@ -29,7 +30,7 @@ function runStage(args, extra) {
 before(async () => {
   if (!can) return;
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-test-'));
-  fs.copyFileSync(path.join(REAL, 'office.db'), path.join(tmp, 'office.db')); fs.copyFileSync(path.join(REAL, 'config.json'), path.join(tmp, 'config.json'));
+  copyLiveDb(REAL, tmp);
   token = JSON.parse(fs.readFileSync(path.join(tmp, 'config.json'), 'utf8')).token;
   fs.mkdirSync(path.join(PROJ, 'final'), { recursive: true });
   fs.writeFileSync(path.join(PROJ, 'final', 'dosie09_v1.mp4'), Buffer.alloc(2048, 7));
@@ -79,6 +80,28 @@ test('правки не вышли: приоритет снят, прежняя 
   const card = (await api('/api/chat?office=smm')).messages.filter((m) => m.kind === 'action' && m.status === 'open').pop();
   assert.ok(/не готовы/.test(card.text)); assert.deepEqual(card.buttons.flat().map((b) => b.d).filter((d) => d !== 'dismiss:0'), ['rework:9', 'accept:9']);
   const a = (await api('/api/state?office=smm')).agents.find((x) => x.id === 'video'); assert.equal(a.status, 'error');
+});
+
+test('правка про динамику (DYNAMICS.md): статичный результат Нику НЕ отправляется, названы цифры динамики', { skip: !can }, async () => {
+  const before = (await api('/api/chat?office=smm')).messages.length;
+  const res = await runStage(['rework', '9', '--comment', 'Динамика по DYNAMICS.md: переделать визуал'], { FAKE_KIRILL_SECONDS: '1', FAKE_KIRILL_CLIP: 'static' });
+  assert.notEqual(res.code, 0, res.out);
+  const msgs = (await api('/api/chat?office=smm')).messages.slice(before);
+  assert.ok(!msgs.some((m) => m.kind === 'action' && /accept:9/.test(JSON.stringify(m.buttons))), 'карточка приёмки не должна прийти');
+  assert.ok(msgs.some((m) => /НЕ отправлены вам/.test(m.text) && /динамика:/.test(m.text) && /резких смен/.test(m.text)));
+  assert.equal((await api('/api/priority')).active, false, 'приоритет снят и после отказа проверки');
+  assert.equal((await api('/api/state?office=smm')).agents.find((x) => x.id === 'video').status, 'error');
+  assert.equal(fs.existsSync(path.join(PROJ, 'format.json')), false, 'проект не помечен форматом A');
+});
+
+test('правка про динамику: динамичный результат уходит Нику со строкой метрик, проект помечен форматом A, следующие правки тоже проверяются по динамике', { skip: !can }, async () => {
+  const res = await runStage(['rework', '9', '--comment', 'Динамика по DYNAMICS.md: ещё раз'], { FAKE_KIRILL_SECONDS: '1', FAKE_KIRILL_CLIP: 'dynamic' });
+  assert.equal(res.code, 0, res.out);
+  const card = (await api('/api/chat?office=smm')).messages.filter((m) => m.kind === 'action' && m.status === 'open').pop();
+  assert.match(card.text, /Динамика: резких смен \d+/); assert.deepEqual(card.buttons.flat().map((b) => b.d).filter((d) => d !== 'dismiss:0'), ['accept:9', 'rework:9']);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(PROJ, 'format.json'), 'utf8')).format, 'A');
+  const res2 = await runStage(['rework', '9', '--comment', 'поправь заголовок'], { FAKE_KIRILL_SECONDS: '1', FAKE_KIRILL_CLIP: 'static' });   // без слова DYNAMICS.md, но проект уже формата A
+  assert.notEqual(res2.code, 0, 'проект формата A: статичный результат правки блокируется и без упоминания динамики');
 });
 
 test('правки без текста: стадия не меняется, ошибка понятная', { skip: !can }, async () => {
