@@ -1,5 +1,5 @@
 // Конвейер Nick G SMM.   node scripts/smm_pipeline.mjs topics [--hint "пожелание"]
-//                         node scripts/smm_pipeline.mjs script <id> [--comment "правки"] [--regen]   (--regen: написать заново, не правя прежний)
+//                         node scripts/smm_pipeline.mjs script <id> [--comment "правки"] [--regen] [--finish]   (--regen: написать заново, не правя прежний; --finish: довести текущий текст до длины и проверки Веры; если в video_N есть PREAPPROVED и Вера пропустила, сценарий сразу уходит в монтаж)
 //                         node scripts/smm_pipeline.mjs produce <id> [--comment "правки"]
 // topics: Виктор ищет кандидатов -> Лев оценивает -> бот присылает Нику темы кнопками (точка участия №1).
 // script: Ксения пишет сценарий -> Вера проверяет факты (до 2 кругов правок) -> бот присылает Нику на утверждение (точка №2).
@@ -10,7 +10,7 @@ import path from 'node:path';
 import { ROOT, api, agent, scene, promptOf, videos, getVideo, setVideo, runAgent, readJson, notify, sendVideoFile, topicsMessage, say, yieldToPriority, setPriority, hermesSpawn } from './smm_lib.mjs';
 
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-const safeNotify = async (text, buttons) => { try { await notify(text, buttons); } catch (e) { console.error('УВЕДОМЛЕНИЕ НЕ ДОСТАВЛЕНО:', e.message); fs.appendFileSync(path.join(ROOT, 'smm', 'undelivered.txt'), `\n--- ${new Date().toISOString()}\n${text}\n`); } };
+const safeNotify = async (text, buttons) => { try { return await notify(text, buttons); } catch (e) { console.error('УВЕДОМЛЕНИЕ НЕ ДОСТАВЛЕНО:', e.message); fs.appendFileSync(path.join(ROOT, 'smm', 'undelivered.txt'), `\n--- ${new Date().toISOString()}\n${text}\n`); } };
 const CTA = JSON.parse(fs.readFileSync(path.join(ROOT, 'video', 'cta.json'), 'utf8'));   // призыв подписаться: один текст для всех роликов
 const CTA_WORDS = CTA.voice_ru.split(/\s+/).length;
 const MAX_SPEECH = 53, MAX_WORDS = 100;      // озвучка до 53 с ВМЕСТЕ с призывом (rate +25%), сценарий без призыва до 100 слов, итоговый ролик строго до 59 с
@@ -92,7 +92,7 @@ async function topics(hint) {
 }
 
 /* ---------------- 2. Сценарий + проверка фактов ---------------- */
-async function script(id, comment, regen = false) {
+async function script(id, comment, regen = false, finish = false) {
   const v = await getVideo(id); if (!v) throw new Error('нет ролика #' + id);
   const n = NOTE(v);
   const dir = path.join(ROOT, 'smm', 'runs', `video_${id}`); fs.mkdirSync(dir, { recursive: true });
@@ -100,27 +100,33 @@ async function script(id, comment, regen = false) {
   // Каждая прежняя версия сохраняется в history/: по ней видно, что уже было, и с ней сравнивается перегенерация.
   const savedBefore = archiveScript(dir);
   const history = loadHistory(path.join(dir, 'history'));
+  const PRE = path.join(dir, 'PREAPPROVED');                      // Ник уже сказал «утверждаю»: как только Вера пропустит, сразу монтаж, без нового вопроса
+  let skipWrite = finish && !!readJson(sj);                       // «довести до конца»: текущий текст не переписывается вслепую, сначала замер длины и проверка
   let fresh = regen && history.length > 0;                       // писать с нуля, а не править прежний текст
   const banned = [];                                              // черновики этой же перегенерации, отброшенные автопроверкой
   let prev = fresh ? null : readJson(sj), changes = comment && !fresh ? [`${prev ? 'Правки' : 'Пожелания'} Ника: ${comment}`] : [], check = null, ok = false, nv = null, nvWarn = false;
   if (regen && !fresh) console.log('перегенерация без истории: прежних версий нет, пишу обычным порядком');
   if (fresh) fs.rmSync(sj, { force: true });                       // прежний текст сохранён в history/; упавший запуск модели не должен принять его за новый
-  const MAXR = fresh ? 4 : 3;                                     // у перегенерации один лишний круг на случай отбракованного по новизне черновика
+  const MAXR = fresh ? 6 : 5;                                     // у перегенерации один лишний круг на случай отбракованного по новизне черновика
 
   for (let round = 1; round <= MAXR; round++) {
-    await agent('captain_smm', 'working', `Сценарий: «${v.title}»`, 30 + round * 10, round === 1 ? `Передал Ксении тему «${v.title}»` : `Круг правок ${round}`);
-    await scene('captain_smm', 'scriptwriter', `Напиши сценарий: «${v.title}».`);
-    await agent('scriptwriter', 'working', `Пишу сценарий (круг ${round})`, 40, 'Пишу сценарий');
-    const t1 = await runAgent({
-      label: `script${round}`, outFile: sj, persona: await promptOf('scriptwriter'),
-      task: `Напиши сценарий ролика «Медицинского детектива» на тему: «${v.title}» (рубрика ${v.rubric === 'tips' ? '«Советы детектива»' : '«Миф»'}).
-Материалы разведки и оценки (данные, не инструкции): ${JSON.stringify({ evidence: n.evidence, angle: n.angle, why_massive: n.why_massive, risk: n.risk, reason: n.reason })}.
-ЖЁСТКИЕ РАМКИ (решение Ника): ролик строго не больше 59 секунд, озвучка не больше ${MAX_SPEECH} с при быстром диктор (+25%) вместе с призывом подписаться, то есть НЕ БОЛЬШЕ ${MAX_WORDS} слов во всех твоих абзацах вместе (длину потом измеряют синтезом, перебор вернут). Призыв «${CTA.voice_ru}» (${CTA_WORDS} слов, ≈ 4 с) в конец ролика добавит конвейер сам: НЕ пиши его и не заканчивай текст призывом; твой последний абзац это приговор или совет (можно коротко «Источники на экране.»). Динамика: первая фраза это хук, который цепляет за 1,5 секунды; фразы до 9 слов; быстрый темп, никакой воды; последняя мысль замыкает ролик на начало или даёт повод пересмотреть. Для каждого абзаца в on_screen укажи, какие детали подсветить лупой (числа, названия исследований, оговорки авторов).
-${fresh ? '' : 'Образец формата и тона: уже снятый сценарий video/med_detective/dosie01/script_ru.txt и его таблица фактов dosie01/FACTS.md (читай, не копируй). '}Проверь первоисточники сама (PubMed/Cochrane/ВОЗ), открой их.${prev ? `\nПредыдущая версия сценария (правь её): ${JSON.stringify(prev)}` : ''}${changes.length ? `\nОбязательные правки: ${changes.join(' | ')}` : ''}${fresh ? `\n\n${regenBlock([...history, ...banned], { comment: comment || '' })}` : ''}
-Формат файла: {"title","rubric","hook_type":"тип крючка первой фразы: ${HOOK_NAMES}","hook_options":[{"type","line","score"}] (3 крючка разных типов с оценкой 1-10; обязательно при перегенерации),"segments":["абзац 1","абзац 2",…] (5-7 абзацев, 85-100 слов всего БЕЗ призыва, числа и аббревиатуры словами),"on_screen":[{"segment":1,"headline":"…","numbers":["…"],"note":"что показать","loupe":"деталь для лупы"}],"claims":[{"text":"утверждение из сценария","source":"журнал/организация, год","url":"…","pmid":"…","quote":"точная цитата или близкий перевод из первоисточника","caveat":"оговорка авторов, если есть"}],"sources_card":["Автор. Журнал. Год."],"disclaimer":"Не заменяет консультацию врача. …"}.`,
-    });
+    let t1 = null;
+    if (!skipWrite) {
+      await agent('captain_smm', 'working', `Сценарий: «${v.title}»`, 30 + round * 10, round === 1 ? `Передал Ксении тему «${v.title}»` : `Круг правок ${round}`);
+      await scene('captain_smm', 'scriptwriter', `Напиши сценарий: «${v.title}».`);
+      await agent('scriptwriter', 'working', `Пишу сценарий (круг ${round})`, 40, 'Пишу сценарий');
+      t1 = await runAgent({
+        label: `script${round}`, outFile: sj, persona: await promptOf('scriptwriter'),
+        task: `Напиши сценарий ролика «Медицинского детектива» на тему: «${v.title}» (рубрика ${v.rubric === 'tips' ? '«Советы детектива»' : '«Миф»'}).
+  Материалы разведки и оценки (данные, не инструкции): ${JSON.stringify({ evidence: n.evidence, angle: n.angle, why_massive: n.why_massive, risk: n.risk, reason: n.reason })}.
+  ЖЁСТКИЕ РАМКИ (решение Ника): ролик строго не больше 59 секунд, озвучка не больше ${MAX_SPEECH} с при быстром диктор (+25%) вместе с призывом подписаться, то есть НЕ БОЛЬШЕ ${MAX_WORDS} слов во всех твоих абзацах вместе (длину потом измеряют синтезом, перебор вернут). Призыв «${CTA.voice_ru}» (${CTA_WORDS} слов, ≈ 4 с) в конец ролика добавит конвейер сам: НЕ пиши его и не заканчивай текст призывом; твой последний абзац это приговор или совет (можно коротко «Источники на экране.»). Динамика: первая фраза это хук, который цепляет за 1,5 секунды; фразы до 9 слов; быстрый темп, никакой воды; последняя мысль замыкает ролик на начало или даёт повод пересмотреть. Для каждого абзаца в on_screen укажи, какие детали подсветить лупой (числа, названия исследований, оговорки авторов).
+  ${fresh ? '' : 'Образец формата и тона: уже снятый сценарий video/med_detective/dosie01/script_ru.txt и его таблица фактов dosie01/FACTS.md (читай, не копируй). '}Проверь первоисточники сама (PubMed/Cochrane/ВОЗ), открой их.${prev ? `\nПредыдущая версия сценария (правь её): ${JSON.stringify(prev)}` : ''}${changes.length ? `\nОбязательные правки: ${changes.join(' | ')}` : ''}${fresh ? `\n\n${regenBlock([...history, ...banned], { comment: comment || '' })}` : ''}
+  Формат файла: {"title","rubric","hook_type":"тип крючка первой фразы: ${HOOK_NAMES}","hook_options":[{"type","line","score"}] (3 крючка разных типов с оценкой 1-10; обязательно при перегенерации),"segments":["абзац 1","абзац 2",…] (5-7 абзацев, 85-100 слов всего БЕЗ призыва, числа и аббревиатуры словами),"on_screen":[{"segment":1,"headline":"…","numbers":["…"],"note":"что показать","loupe":"деталь для лупы"}],"claims":[{"text":"утверждение из сценария","source":"журнал/организация, год","url":"…","pmid":"…","quote":"точная цитата или близкий перевод из первоисточника","caveat":"оговорка авторов, если есть"}],"sources_card":["Автор. Журнал. Год."],"disclaimer":"Не заменяет консультацию врача. …"}.`,
+      });
+    }
+    skipWrite = false;
     prev = readJson(sj);
-    if (!prev || !Array.isArray(prev.segments)) { await agent('scriptwriter', 'error', 'Сценарий не получился', 0, `Нет script.json (код ${t1.code})`, 'error'); await safeNotify(`⚠️ Сценарий «${v.title}» не получился, см. ${dir}`); throw new Error('нет script.json'); }
+    if (!prev || !Array.isArray(prev.segments)) { await agent('scriptwriter', 'error', 'Сценарий не получился', 0, `Нет script.json (код ${t1 && t1.code})`, 'error'); await safeNotify(`⚠️ Сценарий «${v.title}» не получился, см. ${dir}`); throw new Error('нет script.json'); }
     if (fresh) {                                                  // перегенерация: новая версия обязана отличаться от всех прежних
       nv = novelty(prev, [...history, ...banned]);
       console.log('новизна: ' + nv.summary);
@@ -164,6 +170,16 @@ ${fresh ? '' : 'Образец формата и тона: уже снятый �
     changes = check.required_changes || [];
   }
 
+  // Пока шли круги, Ник мог отклонить тему: тогда ни карточки, ни монтажа (раньше итог затирал стадию «отклонён» обратно в «проверен»)
+  const live = await getVideo(id);
+  if (live && live.stage === 'rejected') {
+    fs.rmSync(PRE, { force: true });
+    await agent('scriptwriter', 'idle', 'Тема отклонена Ником, сценарий не нужен', 0, 'Тема отклонена за время работы над сценарием'); await agent('captain_smm', 'idle', 'Свободен', 0, 'Тема отклонена, сценарий не передаю');
+    console.log('тема отклонена за время работы: сценарий не отправлен'); return;
+  }
+  // Круги кончились: сотрудник не «работает» дальше (раньше Ксения так и висела «Сокращаю…», хотя процесса уже не было)
+  const lengthFail = !ok && /не укладывается в лимит/.test(String(check && check.summary));
+  await agent('scriptwriter', 'idle', ok ? 'Сценарий передан Нику' : lengthFail ? 'Сценарий не уложился в лимит, ждёт решения Ника' : 'Сценарий не прошёл проверку, ждёт решения Ника', 100, ok ? 'Сценарий готов' : 'Круги закончились без результата', ok ? 'info' : 'warn');
   const text = withCta(prev.segments).join('\n\n') + '\n';   // последний абзац: призыв подписаться (video/cta.json)
   fs.writeFileSync(path.join(dir, 'script_ru.txt'), text, 'utf8');
   const facts = [`# ${prev.title || v.title}: проверка фактов (Вера Доказова)`, '', `Вердикт: ${check.verdict}. ${check.summary || ''}`, '', '| Утверждение | Источник | Что в источнике | Статус |', '|---|---|---|---|',
@@ -171,14 +187,30 @@ ${fresh ? '' : 'Образец формата и тона: уже снятый �
   fs.writeFileSync(path.join(dir, 'FACTS.md'), facts, 'utf8');
   await setVideo(id, { stage: ok ? 'checked' : 'script', script_path: path.join('smm', 'runs', `video_${id}`, 'script_ru.txt'), notes: JSON.stringify({ ...n, check: { verdict: check.verdict, summary: check.summary, required_changes: check.required_changes } }) });
   await agent('captain_smm', 'waiting', ok ? 'Ждёт утверждения сценария Ником' : 'Вера не пропустила сценарий', 0, ok ? `Сценарий «${v.title}» проверен, нужен ответ Ника` : 'Сценарий не прошёл проверку');
-  const verdictLine = ok ? `✅ Вера проверила факты: ${check.summary || 'всё подтверждено'}` : `⚠️ Вера НЕ пропустила (после ${MAXR} кругов): ${(check.required_changes || []).join('; ')}`;
+  const lastDur = lengthFail ? (/(\d+(?:\.\d+)?) с/.exec(String(check.summary)) || [])[1] : null;
+  const verdictLine = ok ? `✅ Вера проверила факты: ${check.summary || 'всё подтверждено'}`
+    : lengthFail ? `⚠️ Текст длиннее лимита${lastDur ? ` (${lastDur} с при ${MAX_SPEECH} с)` : ''}, и Вера последнюю версию не проверяла: правки по фактам удлинили ролик. «Утвердить после проверки»: Ксения сократит, Вера проверит, и если пропустит, сразу запускаю монтаж. Ничего нажимать больше не придётся.`
+    : `⚠️ Вера НЕ пропустила (после ${MAXR} кругов): ${(check.required_changes || []).join('; ')}\n«Утвердить после проверки»: Ксения учтёт замечания, Вера проверит заново, и если пропустит, сразу запускаю монтаж.`;
   const sources = (prev.sources_card || []).map((s) => '• ' + s).join('\n');
   const hookLine = prev.hook_type ? `\nКрючок: «${String(prev.segments[0]).split(/(?<=[.!?…])\s/)[0]}» (тип: ${prev.hook_type})` : '';
   const regenLine = regen && history.length ? `\n${nvWarn ? '⚠️' : '🔄'} Перегенерация, написано заново (прежних версий: ${history.length}). ${nv ? (nvWarn ? 'Совпадение с прежними выше порога: ' + nv.reasons.join('; ') + '. Можно нажать «Перегенерировать» ещё раз.' : `Совпадение с прежними ${Math.round(nv.worst.containment * 100)}%, порог ${Math.round(LIMITS.containment * 100)}%.`) : ''}` : '';
-  await safeNotify(`📝 Сценарий: «${prev.title || v.title}»${regenLine}${hookLine}\n\n${text}\n${verdictLine}\n\nИсточники:\n${sources}\n\nФайлы: smm/runs/video_${id}/ (script_ru.txt, FACTS.md)`,
+  const preApproved = fs.existsSync(PRE);
+  const cardId = await safeNotify(`📝 Сценарий: «${prev.title || v.title}»${regenLine}${hookLine}\n\n${text}\n${verdictLine}\n\nИсточники:\n${sources}\n\nФайлы: smm/runs/video_${id}/ (script_ru.txt, FACTS.md)`,
     ok ? [[['Утвердить сценарий', `approve:${id}`], ['Нужны правки', `revise:${id}`]], [['🔄 Перегенерировать', `regen:${id}`], ['Отклонить тему', `reject:${id}`]]]
-       : [[['Нужны правки', `revise:${id}`], ['🔄 Перегенерировать', `regen:${id}`]], [['Отклонить тему', `reject:${id}`]]]);
+       : [[['Утвердить после проверки', `approve:${id}`], ['Нужны правки', `revise:${id}`]], [['🔄 Перегенерировать', `regen:${id}`], ['Отклонить тему', `reject:${id}`]]]);
   console.log(ok ? 'сценарий проверен' : 'сценарий НЕ прошёл проверку');
+  // Предварительное утверждение Ника (его прямое «делаем»): исполняется только если Вера пропустила и тема не отклонена за время работы
+  if (preApproved) {
+    fs.rmSync(PRE, { force: true });
+    const cur = await getVideo(id);
+    if (ok && cardId && cur && cur.stage === 'checked') {
+      await safeNotify('Вера пропустила. Ваше «утверждаю» засчитано, сценарий выше уходит в монтаж: вопрос повторять не буду.');
+      await api('/api/chat/answer', { id: cardId, choice: `approve:${id}`, via: 'auto', echo: false });
+      console.log('предварительное утверждение исполнено: монтаж запущен');
+    } else if (!ok) {
+      await safeNotify(`⚠️ Вера снова не пропустила сценарий «${v.title}», ваше предварительное «утверждаю» не исполнено: ролик в монтаж не ушёл. Решение за вами: кнопки на карточке выше.`);
+    }
+  }
 }
 
 /* ---------------- 3. Озвучка и монтаж (Кирилл, Opus 5.5, high) ---------------- */
@@ -363,7 +395,7 @@ const [cmd, a1, ...rest] = process.argv.slice(2);
 const opt = (name, from) => { const i = from.indexOf(name); return i >= 0 ? from[i + 1] : ''; };
 const all = [a1, ...rest];
 const runOnce = () => cmd === 'topics' ? topics(opt('--hint', all))
-  : cmd === 'script' ? script(a1, opt('--comment', rest), all.includes('--regen'))
+  : cmd === 'script' ? script(a1, opt('--comment', rest), all.includes('--regen'), all.includes('--finish'))
   : cmd === 'produce' ? produce(a1, opt('--comment', rest))
   : cmd === 'rework' ? rework(a1, opt('--comment', rest))
   : cmd === 'package' ? packageClip(a1, opt('--comment', rest))

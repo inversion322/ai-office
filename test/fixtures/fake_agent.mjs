@@ -15,7 +15,7 @@ if (/Тимофей Заголовков/.test(q) && /пакет публика�
   fs.writeFileSync(out, JSON.stringify(payload));
 }
 
-// ---- Ксения и Вера (этап сценария). Режимы FAKE_SCRIPT_MODE: ok | similar_then_new | always_similar
+// ---- Ксения и Вера (этап сценария). Режимы FAKE_SCRIPT_MODE: ok | similar_then_new | always_similar | long (не влезает в лимит) | short (влезает)
 const OLD_SEGMENTS = ['Ребёнок съел конфету и носится как угорелый. Виноват сахар? Открываем дело номер один.',
   'Улика первая. Шестнадцать работ, двадцать три эксперимента: никто не знал, где сахар, а где замена. Итог в журнале JAMA: на поведение детей сахар не влияет.',
   'Улика вторая. Одним мамам сказали: сын съел много сахара. Но всем детям дали пустышку. Те мамы назвали сыновей более гиперактивными.',
@@ -31,12 +31,15 @@ if (/Напиши сценарий ролика/.test(q)) {
   const mode = process.env.FAKE_SCRIPT_MODE || 'ok', regen = /ПЕРЕГЕНЕРАЦИЯ/.test(q);
   const counter = out + '.calls'; const n = (fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0) + 1; fs.writeFileSync(counter, String(n));
   const copy = regen && (mode === 'always_similar' || (mode === 'similar_then_new' && n === 1));
-  const segments = !regen ? OLD_SEGMENTS : copy ? OLD_SEGMENTS.map((s, i) => (i === 0 ? s.replace('носится как угорелый', 'носится по дому') : s)) : NEW_SEGMENTS;
+  const LONG = Array.from({ length: 6 }, (_, i) => 'Абзац ' + (i + 1) + ': ' + 'длинная фраза про шаги и здоровье взрослых людей, ' .repeat(4) + 'конец.');
+  const segments = mode === 'long' ? LONG : mode === 'short' ? NEW_SEGMENTS : !regen ? OLD_SEGMENTS : copy ? OLD_SEGMENTS.map((s, i) => (i === 0 ? s.replace('носится как угорелый', 'носится по дому') : s)) : NEW_SEGMENTS;
   fs.writeFileSync(out, JSON.stringify({ title: 'Сахар делает детей гиперактивными?', rubric: 'myth', hook_type: copy || !regen ? 'сцена' : 'цифра',
     hook_options: [{ type: 'цифра', line: segments[0], score: 9 }, { type: 'сцена', line: 'x', score: 6 }, { type: 'парадокс', line: 'y', score: 7 }],
     segments, on_screen: [], claims: [], sources_card: ['Wolraich. JAMA. 1995.'], disclaimer: 'Не заменяет консультацию врача.' }));
 }
 if (/Проверь сценарий из файла/.test(q)) {
   const out = /Итог запиши строго в файл (.+?) \(валидный JSON/.exec(q)[1].trim();
-  fs.writeFileSync(out, JSON.stringify({ verdict: 'pass', summary: 'факты подтверждены (имитация)', claims: [], required_changes: [] }));
+  if (process.env.FAKE_DELAY_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_DELAY_MS)));
+  const bad = process.env.FAKE_CHECK_MODE === 'fail';
+  fs.writeFileSync(out, JSON.stringify({ verdict: bad ? 'fix' : 'pass', summary: bad ? 'формулировка шире данных (имитация)' : 'факты подтверждены (имитация)', claims: [], required_changes: bad ? ['Сегмент 2: уточнить формулировку'] : [] }));
 }

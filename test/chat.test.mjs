@@ -294,10 +294,13 @@ test('модель: тема в «ясной» команде не назван�
   assert.equal(stageOf(db, 5), 'scored'); assert.equal(chat.pending('smm'), 1);
 });
 
-test('модель: дорогие шаги (утвердить сценарий) даже при «ясной» команде идут через подтверждение', async () => {
+test('модель: «утверждаю сценарий» (прямое указание, слово и тема названы) на проверенном сценарии утверждает сразу; без слова утверждения идёт одна карточка подтверждения', async () => {
   const m = make(); m.db.prepare("INSERT INTO videos VALUES (8,'Ролик','checked',0)").run();
   const { chat, db } = await llm({ reply: '', action: { type: 'approve', video_id: 8, comment: '', explicit: true } }, 'утверждаю сценарий 8', m);
-  assert.equal(stageOf(db, 8), 'checked'); assert.equal(chat.pending('smm'), 1);
+  assert.equal(stageOf(db, 8), 'editing'); assert.equal(chat.pending('smm'), 0);
+  const m2 = make(); m2.db.prepare("INSERT INTO videos VALUES (8,'Ролик','checked',0)").run();
+  const r2 = await llm({ reply: '', action: { type: 'approve', video_id: 8, comment: '', explicit: true } }, 'ну пусть будет сценарий 8', m2);
+  assert.equal(stageOf(r2.db, 8), 'checked'); assert.equal(r2.chat.pending('smm'), 1);
 });
 
 test('модель: повторное предложение того же действия заменяет прежнюю карточку, дублей нет', async () => {
@@ -325,4 +328,63 @@ test('этап запущен: второй такой же не стартуе�
     assert.equal(msgs(db).filter((m) => /Тема выбрана/.test(m.text)).length, 1, 'вторая «Тема выбрана» не пришла');
     assert.ok(msgs(db).some((m) => /Ксения уже пишет сценарий/.test(m.text)));
   } finally { delete process.env.HERMES_BIN; }
+});
+
+
+/* ---------- «агенты отвечают на прямые указания»: утверждение до проверки Веры, «Делаем» ---------- */
+function withPipeline(fn) {         // подмена конвейера: пишет свои аргументы в файл, ничего не делает
+  return async () => {
+    const m = make(); const log = path.join(m.dir, 'spawned.txt');
+    fs.mkdirSync(path.join(m.dir, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(m.dir, 'scripts', 'smm_pipeline.mjs'), `import fs from 'node:fs'; fs.appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(' ') + '\\n'); setTimeout(() => {}, 1500);`);
+    process.env.HERMES_BIN = 'fake';
+    try { await fn({ ...m, spawned: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : []) }); } finally { delete process.env.HERMES_BIN; }
+  };
+}
+const failedCard = (chat, id = 4) => chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: '📝 Сценарий: «Шаги»', buttons: [[['Утвердить после проверки', `approve:${id}`], ['Нужны правки', `revise:${id}`]], [['🔄 Перегенерировать', `regen:${id}`], ['Отклонить тему', `reject:${id}`]]] });
+
+test('«Делаем» на карточке «не прошёл проверку»: утверждение засчитано, запущено «довести до конца», карточка закрыта, ответа-отказа нет', withPipeline(async ({ chat, db, dir, spawned }) => {
+  db.prepare("INSERT INTO videos VALUES (4,'Шаги','script',0)").run(); failedCard(chat);
+  chat.incoming({ text: 'Делаем', source: 'telegram' }); await tick(700);
+  assert.equal(chat.pending('smm'), 0); assert.deepEqual(spawned(), ['script 4 --finish']);
+  assert.ok(fs.existsSync(path.join(dir, 'smm', 'runs', 'video_4', 'PREAPPROVED')), 'утверждение запомнено');
+  const cap = msgs(db).filter((m) => m.sender === 'captain_smm').map((m) => m.text).join('\n'); assert.match(cap, /Принято, сценарий «Шаги» утверждён/); assert.match(cap, /сразу запущу Кирилла/);
+  assert.ok(!msgs(db).some((m) => /заглушка/.test(m.text)), 'модель не вызывалась'); assert.equal(stageOf(db, 4), 'script', 'монтаж ещё не начат: Вера не пропустила');
+}));
+
+test('«Утвердить после проверки» кнопкой делает то же самое; повторное нажатие/слово не запускает второй раз', withPipeline(async ({ chat, db, spawned }) => {
+  db.prepare("INSERT INTO videos VALUES (4,'Шаги','script',0)").run(); const id = failedCard(chat);
+  await chat.answer({ id, choice: 'approve:4', via: 'telegram' });
+  const id2 = failedCard(chat); await chat.answer({ id: id2, choice: 'approve:4', via: 'dashboard' }); await tick(300);
+  assert.equal(spawned().length, 1, 'один запуск'); assert.ok(msgs(db).some((m) => /Ксения с Верой ещё работают/.test(m.text)));
+}));
+
+test('«Делаем» при двух открытых карточках с утверждением не угадывает: уходит Капитану', async () => {
+  const { chat, db } = make(); db.prepare("INSERT INTO videos VALUES (4,'Шаги','script',0),(8,'Ролик','produced',0)").run();
+  failedCard(chat, 4); chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: 'Ролик готов', buttons: [[['Принять ролик', 'accept:8'], ['Внести правки', 'rework:8']]] });
+  chat.incoming({ text: 'Делаем', source: 'dashboard', thread: 'captain_smm' }); await tick(1300);
+  assert.equal(chat.pending('smm'), 2); assert.ok(msgs(db).some((m) => /заглушка/.test(m.text)));
+});
+
+test('«Делаем» на карточке проверенного сценария («Утвердить сценарий») утверждает и запускает монтаж', withPipeline(async ({ chat, db, spawned }) => {
+  db.prepare("INSERT INTO videos VALUES (4,'Шаги','checked',0)").run(); chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: 'Сценарий', buttons: [[['Утвердить сценарий', 'approve:4'], ['Нужны правки', 'revise:4']]] });
+  chat.incoming({ text: 'Делаем', source: 'dashboard', thread: 'captain_smm' }); await tick(600);
+  assert.equal(stageOf(db, 4), 'editing'); assert.deepEqual(spawned(), ['produce 4']);
+}));
+
+test('правки, перегенерация и отклонение снимают предварительное утверждение', withPipeline(async ({ chat, db, dir }) => {
+  for (const act of ['revise:4', 'regen:4', 'reject:4']) {
+    db.prepare("DELETE FROM videos WHERE id=4").run(); db.prepare("INSERT INTO videos VALUES (4,'Шаги','script',0)").run();
+    const pre = path.join(dir, 'smm', 'runs', 'video_4', 'PREAPPROVED'); fs.mkdirSync(path.dirname(pre), { recursive: true }); fs.writeFileSync(pre, '1');
+    const id = failedCard(chat); await chat.answer({ id, choice: act, comment: act === 'revise:4' ? 'короче' : undefined, via: 'dashboard' });
+    assert.equal(fs.existsSync(pre), false, act);
+  }
+}));
+
+test('уже висящая карточка «не прошёл проверку» без кнопки утверждения получает её при запуске (тупик из 20.10)', () => {
+  const { db, chat } = make(); db.prepare("INSERT INTO videos VALUES (4,'Шаги','script',0)").run();
+  chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: 'Сценарий', buttons: [[['Нужны правки', 'revise:4'], ['🔄 Перегенерировать', 'regen:4']], [['Отклонить тему', 'reject:4']]] });
+  const chat2 = setupChat({ db, ROOT: path.dirname(db.prepare('PRAGMA database_list').get().file), DATA_DIR: os.tmpdir() });
+  const b = JSON.parse(db.prepare("SELECT buttons FROM messages WHERE kind='action'").get().buttons).flat().map((x) => x.d);
+  assert.ok(b.includes('approve:4')); assert.equal(chat2.pending('smm'), 1);
 });

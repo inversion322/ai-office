@@ -74,7 +74,7 @@ test('слишком похожий черновик отклоняется ав
 test('если новизны так и не вышло за все круги, Нику честно сказано об этом, а кнопка «Перегенерировать» остаётся', { skip: !can }, async () => {
   const { card } = await regen('always_similar');
   assert.match(card.text, /⚠️ Перегенерация/); assert.match(card.text, /выше порога/); assert.ok(card.buttons.flat().some((b) => b.d === 'regen:7'));
-  assert.equal(fs.readFileSync(path.join(RUN, 'script.json.calls'), 'utf8').trim(), '4', 'четыре круга и ни одним больше');
+  assert.equal(fs.readFileSync(path.join(RUN, 'script.json.calls'), 'utf8').trim(), '6', 'шесть кругов при перегенерации (было четыре) и ни одним больше');
 });
 
 test('сессия Mini App может убрать карточку и сбросить ожидание сотрудника, но по-прежнему не может править промпты', { skip: !can }, async () => {
