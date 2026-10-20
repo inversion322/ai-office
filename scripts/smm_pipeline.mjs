@@ -28,6 +28,8 @@ import { craftIssues, craftFeedback, craftSummary } from './script_craft.mjs';
 import { evidenceIssues, evidenceFeedback, ledgerPath } from './agent_skills.mjs';
 import { skillUsageNote } from './skill_usage.mjs';
 import { fireReminders } from './reminders.mjs';
+import { publishYouTube, publishCard } from './publisher.mjs';
+import { ytStatus } from './youtube.mjs';
 const speechSeconds = async (segments) => { await yieldToPriority('scriptwriter'); return measureSpeech(segments, { root: ROOT }); };   // { sec, estimated, perSeg }
 const HOOK_NAMES = hookCatalog().replace(/ \([^)]*\)/g, '');       // только названия типов крючка, без пояснений
 const NOTE = (v) => { try { return JSON.parse(v.notes || '{}'); } catch { return {}; } };
@@ -466,9 +468,11 @@ async function packageClip(id, comment) {
   const dropped = [...tg.dropped, ...titles.filter((t) => !t.check.ok).map((t) => [`«${t.title}»`, t.check.problems.join(', ')])];
   const text = buildMessage({ videoTitle: v.title, title: pick.title, why: j.why, alternatives: alts, tags: tg.tags, dropped, honesty: j.honesty || 'Название и хэштеги помогают найти ролик, но охват решает то, досматривают ли его до конца.' });
   fs.writeFileSync(path.join(dir, 'publish_pack.txt'), text + '\n', 'utf8');
+  fs.writeFileSync(path.join(dir, 'publish_meta.json'), JSON.stringify({ title: pick.title, tags: tg.tags, video_title: v.title, ts: Date.now() }, null, 1), 'utf8');   // точный выбор для Публикатора
   await agent('packager', 'idle', 'Пакет публикации отправлен Нику', 100, `Пакет для «${v.title}» готов: «${pick.title}»`);
   await say('packager', `Готово: «${pick.title}», хэштегов ${tg.tags.length}. Отправила Нику.`);
   await safeNotify(text, [[['Другое название', `package:${id}`]]]);
+  if (ytStatus().ready) await publishCard(id).catch((e) => console.error('карточка публикации не отправлена:', e.message));   // YouTube подключён: предлагаем выложить (только по кнопке)
   console.log('готово: пакет публикации', pick.title, tg.tags.join(' '));
   await fireReminders('package_done', (t) => safeNotify(t)).catch(() => {});   // напоминания Нику, привязанные к концу ролика
 }
@@ -481,13 +485,15 @@ const runOnce = () => cmd === 'topics' ? topics(opt('--hint', all))
   : cmd === 'produce' ? produce(a1, opt('--comment', rest))
   : cmd === 'rework' ? rework(a1, opt('--comment', rest))
   : cmd === 'package' ? packageClip(a1, opt('--comment', rest))
-  : Promise.resolve(console.log('Команды: topics [--hint …] | script <id> [--comment …] [--regen] | produce <id> [--comment …] | rework <id> --comment … | package <id> [--comment …]'));
+  : cmd === 'publish' ? publishYouTube(a1, opt('--target', rest) || 'ytp', { when: opt('--at', rest) || undefined }).then((r) => { if (!r.ok) process.exitCode = 1; })
+  : cmd === 'publish-card' ? publishCard(a1, { only: opt('--only', rest) || undefined })
+  : Promise.resolve(console.log('Команды: topics [--hint …] | script <id> [--comment …] [--regen] | produce <id> [--comment …] | rework <id> --comment … | package <id> [--comment …] | publish <id> --target ytp|yt | publish-card <id>'));
 // Временные сбои (сервис озвучки, сеть, API): один автоповтор через 2 минуты, и только потом тревога Нику
 const TRANSIENT = /NoAudioReceived|WSServerHandshake|TTS_UNAVAILABLE|ECONNRESET|ECONNREFUSED|fetch failed|ETIMEDOUT|timed out|не удалось ни измерить/i;
 const run = (async () => {
   try { await runOnce(); }
   catch (e) {
-    if (cmd === 'rework' || !TRANSIENT.test(String((e && e.message) || e))) throw e;     // правки ролика не перезапускаем сами: это долгий запуск монтажёра
+    if (cmd === 'rework' || cmd === 'publish' || !TRANSIENT.test(String((e && e.message) || e))) throw e;     // правки ролика не перезапускаем сами: это долгий запуск монтажёра
     const who = cmd === 'script' ? 'scriptwriter' : cmd === 'produce' ? 'video' : 'research';
     console.error('временный сбой, повтор через 2 минуты:', String(e.message).split('\n')[0]);
     await agent(who, 'working', 'Временный сбой сервиса, повторю через 2 минуты', 5, `Временный сбой: ${String(e.message).split('\n')[0].slice(0, 160)}`, 'warn');
@@ -499,8 +505,8 @@ run.catch(async (e) => {
   const msg = String((e && e.message) || e).split('\n')[0].slice(0, 220);
   console.error('ОШИБКА:', msg);
   try {   // статусы не должны зависать «в работе», а Ник должен узнать о сбое и получить кнопку «Повторить»
-    const who = cmd === 'script' ? 'scriptwriter' : (cmd === 'produce' || cmd === 'rework') ? 'video' : cmd === 'package' ? 'packager' : 'research';
-    const stage = { script: 'сценария', produce: 'монтажа', rework: 'правок ролика', package: 'названия и хэштегов', topics: 'поиска тем' }[cmd] || cmd;
+    const who = cmd === 'script' ? 'scriptwriter' : (cmd === 'produce' || cmd === 'rework') ? 'video' : cmd === 'package' ? 'packager' : cmd === 'publish' ? 'publisher' : 'research';
+    const stage = { script: 'сценария', produce: 'монтажа', rework: 'правок ролика', package: 'названия и хэштегов', publish: 'публикации', topics: 'поиска тем' }[cmd] || cmd;
     if (cmd === 'rework') await setPriority(false);
     await agent(who, 'error', 'Сбой: ' + msg, 0, `Сбой этапа ${stage}: ${msg}`, 'error');
     if (cmd === 'script') { await agent('factcheck', 'idle', 'Ждёт сценарий на проверку', 0); }

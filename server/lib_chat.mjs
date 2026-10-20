@@ -143,7 +143,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     }
   }
   async function execAction(data, comment, via, srcMsg) {
-    const [act, idStr] = String(data).split(':'); const id = Number(idStr);
+    const [act, idStr, mode] = String(data).split(':'); const id = Number(idStr);
     const v = act === 'confirm' || act === 'cancel' ? null : (id ? q('SELECT * FROM videos WHERE id=?', id)[0] : null);
     const cap = (text, mirrorTg = true) => post({ thread: 'captain_smm', sender: 'captain_smm', text, mirrorTg });
     if (act === 'confirm') {
@@ -197,7 +197,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     } else if (act === 'accept' && v) {
       supersede(`accept:${id}`); supersede(`rework:${id}`);
       setStage(id, 'approved'); setAgent('captain_smm', 'idle', 'Ролик принят, ждёт вашей публикации', `Ник принял ролик «${v.title}»`);
-      cap('Ролик принят. Тимофей уже придумывает название и хэштеги, пришлю одним сообщением. Публикуете вы сами, когда готовы.');
+      const ytReady = fs.existsSync(path.join(process.env.OFFICE_DATA_DIR || path.join(ROOT, 'server', 'data'), 'youtube_token.json'));
+      cap(ytReady ? 'Ролик принят. Тимофей уже придумывает название и хэштеги, пришлю одним сообщением и следом кнопки публикации в YouTube Shorts. Без вашей кнопки ничего не выкладывается.' : 'Ролик принят. Тимофей уже придумывает название и хэштеги, пришлю одним сообщением. Публикуете вы сами, когда готовы.');
       spawnPipeline(['package', String(id)]);
     } else if (act === 'resume' && STUB && !process.env.HERMES_BIN) {
       cap('(тест) Кирилл не запущен: в тестовом режиме нет подмены модели.');          // тот же запрет, что в spawnPipeline: тест не должен будить настоящего Кирилла (Opus)
@@ -206,6 +207,15 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       const dir = path.join(ROOT, 'video', 'med_detective'); const out = fs.openSync(path.join(dir, 'dosie01', `_run_${job.ver}_resume_log.txt`), 'a');
       spawn(HERMES, ['-p', 'video', 'chat', '--query-file', job.brief, '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: dir, detached: true, stdio: ['ignore', out, out], windowsHide: true }).unref();
       cap('Запустила Кирилла заново: он продолжит по сохранённым файлам. Ход работы виден справа в «Сейчас в работе».');
+    } else if (act === 'publish' && v) {
+      // Публикация только по кнопке и только принятого ролика; одну и ту же карточку второй раз не исполняем
+      if (!['yt', 'ytp'].includes(mode)) { cap('Не понял, куда публиковать.', false); return {}; }
+      if (v.stage !== 'approved') { cap(`Ролик «${v.title}» ещё не принят, публиковать рано.`, false); return {}; }
+      supersede(`publish:${id}:${mode}`);
+      if (stageRunning(['publish', String(id)])) { cap(`Публикатор уже загружает ролик «${v.title}». Второй раз не запускаю.`, false); return {}; }
+      setAgent('publisher', 'working', `Публикация ролика №${id}`, `Ник нажал «${mode === 'yt' ? 'опубликовать в YouTube Shorts' : 'приватная проверка в YouTube'}»`);
+      cap(`Принято. Пётр Выкладов загружает «${v.title}» в YouTube ${mode === 'yt' ? 'публично' : 'как приватный (виден только вам)'}. Пришлю ссылку.`);
+      spawnPipeline(['publish', String(id), '--target', mode]);
     } else if (act === 'package' && v) {
       cap(`Запускаю Тимофея заново: название и хэштеги для «${v.title}».`); spawnPipeline(['package', String(id), ...(comment && comment.trim() ? ['--comment', comment.trim()] : [])]);
     } else if (act === 'retry' && v) {
