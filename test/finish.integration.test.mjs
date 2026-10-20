@@ -70,7 +70,8 @@ test('предварительное утверждение, но Вера не 
   assert.equal(r.stage, 'script'); assert.equal(fs.existsSync(path.join(RUN, 'PREAPPROVED')), false);
   assert.ok(r.msgs.some((m) => /ваше предварительное «утверждаю» не исполнено/.test(m.text)));
   const c = card(r.msgs); assert.equal(c.status, 'open'); assert.ok(c.buttons.flat().some((b) => b.d === 'approve:6' && /после проверки/.test(b.t)));
-  assert.equal(fs.readdirSync(RUN).filter((f) => /^_query_check\d+\.txt$/.test(f)).length, 4, 'пять кругов, первый ушёл на замер длины: четыре проверки Веры (раньше всего три круга)');
+  assert.equal(fs.readdirSync(RUN).filter((f) => /^_query_check\d+\.txt$/.test(f)).length, 2, 'потолок: Вера проверяет не больше двух раз за этап, даже если пять кругов правок ещё не кончились (решение Ника: 2 круга вместо трёх)');
+  assert.match(card(r.msgs).text, /Вера НЕ пропустила \(проверок Веры: 2\)/);
 });
 
 test('текст так и не влез в лимит: честная подпись «длиннее лимита, Вера не проверяла», Ксения не остаётся «работает», кнопка утверждения есть', { skip: !can }, async () => {

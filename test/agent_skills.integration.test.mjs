@@ -17,13 +17,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let tmp, server, TOKEN; const made = [];
 const api = async (p, body) => { const r = await fetch(API + p, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); return r.json(); };
 const OLD = ['Ребёнок съел конфету и носится как угорелый. Виноват сахар? Открываем дело.', 'Шестнадцать работ показали, что сахар не влияет.', 'Мамам дали пустышку, а они видели бурю.', 'Вывод: миф. Источники на экране.'];
-async function boot(checkMode) {
+async function boot(checkMode, extra = {}) {
   if (server) { server.kill(); await sleep(700); }
-  server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE, SMM_TTS_ESTIMATE_ONLY: '1', FAKE_CHECK_MODE: checkMode, FAKE_SCRIPT_MODE: 'short', CRAFT_GATE: 'off', SKILL_GATE: 'off' }, stdio: 'ignore', windowsHide: true });
+  server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE, SMM_TTS_ESTIMATE_ONLY: '1', FAKE_CHECK_MODE: checkMode, FAKE_SCRIPT_MODE: 'short', CRAFT_GATE: 'off', SKILL_GATE: 'off', ...extra }, stdio: 'ignore', windowsHide: true });
   for (let i = 0; i < 40; i++) { try { if ((await fetch(API + '/health')).ok) return; } catch {} await sleep(300); }
 }
-async function run(checkMode) {
-  await boot(checkMode);
+async function run(checkMode, extra) {
+  await boot(checkMode, extra);
   const id = (await api('/api/video', { title: 'Тест: шаги и польза', stage: 'checked', rubric: 'myth' })).id, RUN = path.join(ROOT, 'smm', 'runs', `video_${id}`); made.push(RUN);
   fs.rmSync(RUN, { recursive: true, force: true }); fs.mkdirSync(RUN, { recursive: true }); fs.writeFileSync(path.join(RUN, 'script.json'), JSON.stringify({ title: 'Шаги', segments: OLD, hook_type: 'сцена' }));
   const cid = (await api('/api/chat/post', { office: 'smm', thread: 'captain_smm', sender: 'captain_smm', text: 'Сценарий', buttons: [[['Утвердить сценарий', `approve:${id}`], ['Нужны правки', `revise:${id}`]]], mirror: false })).id;
@@ -53,4 +53,14 @@ test('Вера так и не принесла цитаты: после одно
   const { card, RUN } = await run('evidence_never');
   assert.deepEqual(fs.readFileSync(path.join(RUN, 'check.json.checks'), 'utf8').trim().split('\n'), ['first', 'retry'], 'один повтор, не бесконечно');
   assert.match(card.text, /⚠️ У Веры не у всех фактов цитата из реестра/); assert.match(card.text, /Вера проверила факты/);
+});
+
+test('потолок проверок Веры: повтор из-за цитат тоже считается; при потолке 1 повтора нет, Нику предупреждение на карточке (а не третий запуск)', { skip: !can }, async () => {
+  const { card, RUN } = await run('evidence_never', { MAX_FACT_CHECKS: '1' });
+  assert.deepEqual(fs.readFileSync(path.join(RUN, 'check.json.checks'), 'utf8').trim().split('\n'), ['first'], 'один запуск Веры, повтора из-за цитат нет');
+  assert.ok(!fs.existsSync(path.join(RUN, '_query_check1ev.txt'))); assert.match(card.text, /⚠️ У Веры не у всех фактов цитата из реестра/);
+});
+
+test('Ксении в задании назван бюджет слов (76-84, замеры), чтобы первый круг не пропадал на «слишком длинно»', () => {
+  return import('../scripts/agent_skills.mjs').then(({ skillsBlock }) => { const b = skillsBlock('scriptwriter', { dir: 'C:/x' }); assert.match(b, /БЮДЖЕТ СЛОВ/); assert.match(b, /76-84 слова без призыва/); assert.match(b, /97 = 61 с/); });
 });

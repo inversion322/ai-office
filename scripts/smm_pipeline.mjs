@@ -2,7 +2,7 @@
 //                         node scripts/smm_pipeline.mjs script <id> [--comment "правки"] [--regen] [--finish]   (--regen: написать заново, не правя прежний; --finish: довести текущий текст до длины и проверки Веры; если в video_N есть PREAPPROVED и Вера пропустила, сценарий сразу уходит в монтаж)
 //                         node scripts/smm_pipeline.mjs produce <id> [--comment "правки"]
 // topics: Виктор ищет кандидатов -> Лев оценивает -> бот присылает Нику темы кнопками (точка участия №1).
-// script: Ксения пишет сценарий -> Вера проверяет факты (до 2 кругов правок) -> бот присылает Нику на утверждение (точка №2).
+// script: Ксения пишет сценарий -> Вера проверяет факты (не больше двух проверок за этап) -> бот присылает Нику на утверждение (точка №2).
 // produce: Кирилл Кадров (профиль video, Opus 5.5, высокие усилия) озвучивает и монтирует -> бот присылает ролик (точка №3).
 // Публикует всегда только Ник. Состояние видно на дашборде (вкладка Nick G SMM).
 import fs from 'node:fs';
@@ -110,6 +110,7 @@ async function script(id, comment, regen = false, finish = false) {
   let skipWrite = finish && !!readJson(sj);                       // «довести до конца»: текущий текст не переписывается вслепую, сначала замер длины и проверка
   let fresh = regen && history.length > 0;                       // писать с нуля, а не править прежний текст
   const banned = [];                                              // черновики этой же перегенерации, отброшенные автопроверкой
+  const MAX_CHECKS = Number(process.env.MAX_FACT_CHECKS) || 2; let veraRuns = 0;   // потолок: Вера проверяет сценарий не больше двух раз за этап, повтор из-за цитат тоже считается (решение Ника 2026-10-20: 2 круга вместо трёх, экономия ~5 минут)
   const skillState = {}; let evWarn = null, quoteCount = 0;               // какие обязательные скиллы сотрудники так и не открыли, и цитаты Веры не из реестра
   let prev = fresh ? null : readJson(sj), changes = comment && !fresh ? [`${prev ? 'Правки' : 'Пожелания'} Ника: ${comment}`] : [], check = null, ok = false, nv = null, nvWarn = false, craftWarn = null;
   if (regen && !fresh) console.log('перегенерация без истории: прежних версий нет, пишу обычным порядком');
@@ -186,6 +187,7 @@ async function script(id, comment, regen = false, finish = false) {
     const checkTask = `Проверь сценарий из файла ${sj} (читай его). Для КАЖДОГО объекта claims открой первоисточник (url/PMID), найди подтверждающее место и сравни со словами сценария (segments): число, тип исследования, популяция, оговорки. Проверь также, что в сценарии нет советов по лечению, дозировок, брендов и обещаний результата, а числа в озвучке записаны словами.
 Формат файла: {"verdict":"pass"|"fix","claims":[{"text","source_checked":true/false,"quote_found":"что именно сказано в источнике","status":"верно|упрощено|не подтверждено|отклонить","note":""}],"required_changes":["конкретная правка…"],"summary":"1-2 предложения"}. verdict "pass" только если все claims «верно» или безвредно «упрощено» с оговоркой в тексте.`;
     const runCheck = async (label, extra) => runAgent({ label, agentId: 'factcheck', outFile: cj, profile: 'smm', persona: await promptOf('factcheck'), maxTurns: 90, budgetSec: 1500, task: checkTask + (extra ? `\n\n${extra}` : '') });
+    veraRuns++;
     const t2 = await runAgent({
       label: `check${round}`, outFile: cj, profile: 'smm', persona: await promptOf('factcheck'), maxTurns: 90, budgetSec: 1500, task: checkTask,
     });
@@ -196,7 +198,9 @@ async function script(id, comment, regen = false, finish = false) {
     if (process.env.EVIDENCE_GATE !== 'off') {
       const ledger = () => readJson(ledgerPath(dir));
       let ev = evidenceIssues(check, ledger());
-      if (!ev.ok) {
+      if (!ev.ok && veraRuns >= MAX_CHECKS) console.log('доказательства: ' + ev.issues.join('; ') + ' (потолок проверок Веры, повтора нет, предупреждение уйдёт на карточку)');
+      if (!ev.ok && veraRuns < MAX_CHECKS) {
+        veraRuns++;
         console.log('доказательства: ' + ev.issues.join('; '));
         await agent('factcheck', 'working', 'Добавляю в реестр дословные цитаты', 60, `Автопроверка: у ${ev.issues.length} утверждений нет цитаты из реестра, возвращаю Вере`, 'warn');
         const keep = check, t3 = await runCheck(`check${round}ev`, evidenceFeedback(ev.issues));
@@ -208,7 +212,7 @@ async function script(id, comment, regen = false, finish = false) {
     ok = check.verdict === 'pass';
     await say('factcheck', ok ? `Проверила: ${check.summary || 'факты подтверждены'}` : `Не пропускаю, нужны правки: ${(check.required_changes || []).join('; ')}`);
     await agent('factcheck', 'idle', ok ? 'Сценарий проверен' : 'Вернула сценарий на правки', 100, ok ? 'Факты подтверждены' : `Нужны правки: ${(check.required_changes || []).length}`, ok ? 'info' : 'warn');
-    if (ok || round === MAXR) break;
+    if (ok || round === MAXR || veraRuns >= MAX_CHECKS) break;
     await scene('factcheck', 'scriptwriter', 'Ксения, нужны правки по фактам.', 'chat');
     changes = check.required_changes || [];
   }
@@ -233,7 +237,7 @@ async function script(id, comment, regen = false, finish = false) {
   const lastDur = lengthFail ? (/(\d+(?:\.\d+)?) с/.exec(String(check.summary)) || [])[1] : null;
   const verdictLine = ok ? `✅ Вера проверила факты: ${check.summary || 'всё подтверждено'}`
     : lengthFail ? `⚠️ Текст длиннее лимита${lastDur ? ` (${lastDur} с при ${MAX_SPEECH} с)` : ''}, и Вера последнюю версию не проверяла: правки по фактам удлинили ролик. «Утвердить после проверки»: Ксения сократит, Вера проверит, и если пропустит, сразу запускаю монтаж. Ничего нажимать больше не придётся.`
-    : `⚠️ Вера НЕ пропустила (после ${MAXR} кругов): ${(check.required_changes || []).join('; ')}\n«Утвердить после проверки»: Ксения учтёт замечания, Вера проверит заново, и если пропустит, сразу запускаю монтаж.`;
+    : `⚠️ Вера НЕ пропустила (проверок Веры: ${veraRuns}): ${(check.required_changes || []).join('; ')}\n«Утвердить после проверки»: Ксения учтёт замечания, Вера проверит заново, и если пропустит, сразу запускаю монтаж.`;
   const sources = (prev.sources_card || []).map((s) => '• ' + s).join('\n');
   const hookLine = prev.hook_type ? `\nКрючок: «${String(prev.segments[0]).split(/(?<=[.!?…])\s/)[0]}» (тип: ${prev.hook_type})` : '';
   const regenLine = regen && history.length ? `\n${nvWarn ? '⚠️' : '🔄'} Перегенерация, написано заново (прежних версий: ${history.length}). ${nv ? (nvWarn ? 'Совпадение с прежними выше порога: ' + nv.reasons.join('; ') + '. Можно нажать «Перегенерировать» ещё раз.' : `Совпадение с прежними ${Math.round(nv.worst.containment * 100)}%, порог ${Math.round(LIMITS.containment * 100)}%.`) : ''}` : '';
