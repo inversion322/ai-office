@@ -37,7 +37,7 @@ if (/Напиши сценарий ролика/.test(q)) {
   const STAGE_WORDS = ['Хук про конфету.', 'Улика первая. Шестнадцать работ показали, что сахар не влияет.', 'Поворот! Мамам дали пустышку, а они видели бурю.', 'Приговор: миф. Источники на экране.'];
   // режим craft: первый ответ «перебор фактов» (без идеи, дуги, связок), второй исправленный: Ксения реагирует на замечание автопроверки драматургии
   const CRAFT_SEGS = ['Говорят, что сахар делает детей гиперактивными. Правда ли это? Откуда вообще такая уверенность?', 'Но учёные проверили: двадцать три эксперимента, сахар тайно подменяли заменой.', 'Поэтому вывод простой: на поведение детей сахар не влияет.', 'Но почему родители так уверены? Мамам сказали, что сын съел сахар, хотя все дети получили пустышку. Мамы всё равно нашли сыновей гиперактивнее.', 'Значит, дело в ожидании. Так что буря на празднике это не сахар, а сам праздник.'];
-  const CRAFT_FIELDS = { idea: 'Бурю у детей после сладкого создаёт ожидание взрослых, а не сахар.', emotion_arc: ['любопытство', 'удивление', 'недоверие', 'ясность'], payoff: 'буря на празднике это не сахар, а сам праздник', chain: [{ to: 2, link: 'но', why: 'вопрос → проверка' }, { to: 3, link: 'поэтому', why: 'проверка → вывод' }, { to: 4, link: 'но', why: 'вывод → почему верят' }, { to: 5, link: 'поэтому', why: 'опыт → развязка' }], self_check: 'пересказ через но/поэтому складывается' };
+  const CRAFT_FIELDS = { idea: 'Бурю у детей после сладкого создаёт ожидание взрослых, а не сахар.', emotion_arc: ['любопытство', 'удивление', 'недоверие', 'ясность'], payoff: 'буря на празднике это не сахар, а сам праздник', lens: { candidates: ['Подозреваемый с алиби: сахар в опыте тайно подменяли пустышкой (инверсия злодея)', 'Бурю создаёт праздник, а не конфета (эффект второго порядка)', 'Взгляд мамы, которая уверена, что сын после сладкого неуправляем (смена точки зрения)'], chosen: 2, why: 'опыт с пустышкой в JAMA' }, stake: 'Вы после каждой конфеты ждёте от ребёнка бурю и заранее ругаете сахар', gaps: ['Сахар ли делает детей гиперактивными на самом деле?', 'Почему же тогда мы каждый раз видим бурю?'], bookend: 'сахар', chain: [{ to: 2, link: 'но', why: 'вопрос → проверка' }, { to: 3, link: 'поэтому', why: 'проверка → вывод' }, { to: 4, link: 'но', why: 'вывод → почему верят' }, { to: 5, link: 'поэтому', why: 'опыт → развязка' }], self_check: 'пересказ через но/поэтому складывается' };
   const craftOk = mode === 'craft' && n >= 2;
   const segments = mode === 'craft' ? (craftOk ? CRAFT_SEGS : NEW_SEGMENTS) : mode === 'stage_words' && !fs.existsSync(out + '.second') ? (fs.writeFileSync(out + '.second', '1'), STAGE_WORDS) : mode === 'stage_words' ? NEW_SEGMENTS : mode === 'long' ? LONG : mode === 'short' ? NEW_SEGMENTS : !regen ? OLD_SEGMENTS : copy ? OLD_SEGMENTS.map((s, i) => (i === 0 ? s.replace('носится как угорелый', 'носится по дому') : s)) : NEW_SEGMENTS;
   fs.writeFileSync(out, JSON.stringify({ title: 'Сахар делает детей гиперактивными?', rubric: 'myth', hook_type: copy || !regen ? 'сцена' : 'цифра',
@@ -59,7 +59,7 @@ if (/Проверь сценарий из файла/.test(q)) {
   fs.writeFileSync(out, JSON.stringify({ verdict: bad ? 'fix' : 'pass', summary: bad ? 'формулировка шире данных (имитация)' : 'факты подтверждены (имитация)', claims: [], required_changes: bad ? ['Сегмент 2: уточнить формулировку'] : [] }));
 }
 
-// ---- Кирилл (этап монтажа, конвейер produce). FAKE_VIDEO_MODE: good | tilted_hat | bad_format | static | bad_cta | no_plan
+// ---- Кирилл (этап монтажа, конвейер produce). FAKE_VIDEO_MODE: good | tilted_hat | bad_format | static | bad_cta | no_plan | no_vizavi
 if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   const proj = /Создай проект `?([^`\s:]+(?::[^`\s:]+)?)`?:/.exec(q)[1].replace(/\\/g, '/'); const n = /dosie(\d+)_v1\.mp4/.exec(q)[1];
   const { spawnSync } = await import('node:child_process'); const path = await import('node:path');
@@ -75,7 +75,10 @@ if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   // библиотека: эталонный план и раздел отчёта; режим no_plan имитирует Кирилла, который всё сделал с нуля
   const refPlan = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'video', 'med_detective', 'LIBRARY_PLAN_REFERENCE.json'), 'utf8');
   if (mode !== 'no_plan') fs.writeFileSync(proj + '/LIBRARY_PLAN.json', refPlan);
-  fs.writeFileSync(proj + '/RESULT.md', '# Результат\nГотово (имитация).' + (mode === 'no_plan' ? '' : '\n\n## Использовано из библиотеки\n- iris-reveal, caption-highlight (имитация)'));
+  // vizavi-motion: эталонные раскадровка и журнал правок; режим no_vizavi имитирует Кирилла, который скилл не применил
+  const mdir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'video', 'med_detective');
+  if (mode !== 'no_vizavi') { fs.copyFileSync(path.join(mdir, 'STORYBOARD_REFERENCE.json'), proj + '/STORYBOARD.json'); fs.copyFileSync(path.join(mdir, 'REVIEW_LOG_REFERENCE.json'), proj + '/REVIEW_LOG.json'); }
+  fs.writeFileSync(proj + '/RESULT.md', '# Результат\nГотово (имитация).' + (mode === 'no_plan' ? '' : '\n\n## Использовано из библиотеки\n- iris-reveal, caption-highlight (имитация)') + (mode === 'no_vizavi' ? '' : '\n\n## Использовано из vizavi-motion\n- раскадровка с вариантами (имитация)'));
 }
 
 // ---- Ежедневные темы (Виктор и Лев). FAKE_DAILY_MODE: ok | all_dups (всё повторы) | dups_then_new (1 круг повторы, 2 новые)

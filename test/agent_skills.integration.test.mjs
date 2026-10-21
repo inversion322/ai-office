@@ -37,7 +37,7 @@ after(async () => { try { server && server.kill(); } catch {} await sleep(600); 
 test('задания сотрудников несут блоки скиллов: Ксения (script-craft, humanizer), Вера (реестр в папке сценария, команды sources.py), у каждого запуска своя метка', { skip: !can }, async () => {
   const { RUN } = await run('evidence_retry');
   const q1 = fs.readFileSync(path.join(RUN, '_query_script1.txt'), 'utf8'), q2 = fs.readFileSync(path.join(RUN, '_query_check1.txt'), 'utf8');
-  assert.match(q1, /СКИЛЛЫ ПРЕЖДЕ ВСЕГО/); assert.match(q1, /short-video-script-craft/); assert.match(q1, /humanizer/); assert.match(q1, /\[метка запуска, служебная: RUN-script1-/);
+  assert.match(q1, /СКИЛЛЫ ПРЕЖДЕ ВСЕГО/); assert.match(q1, /short-video-script-craft/); assert.match(q1, /humanizer/); assert.match(q1, /storytelling-hooks/); assert.match(q1, /"lens"/); assert.match(q1, /ЭТО НЕ СПИСОК И НЕ ОТЧЁТ ОБ ОПЫТЕ/); assert.match(q1, /\[метка запуска, служебная: RUN-script1-/);
   assert.match(q2, /grounded-citations/); assert.match(q2, /ledger\.json/); assert.match(q2, /sources\.py/); assert.match(q2, /\[метка запуска, служебная: RUN-check1-/);
 });
 

@@ -12,7 +12,7 @@ import { ffprobePath } from '../scripts/video_format.mjs';
 const FF = path.join(path.dirname(ffprobePath()), 'ffmpeg.exe'); const have = fs.existsSync(FF);
 let tmp, proj, good, stat;
 before(() => { if (!have) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-')); proj = path.join(tmp, 'dosie09'); fs.mkdirSync(path.join(proj, 'compositions'), { recursive: true }); good = makeClip(FF, path.join(tmp, 'good.mp4'), 'dynamic'); stat = makeClip(FF, path.join(tmp, 'stat.mp4'), 'static');
-  fs.copyFileSync(path.join(ROOT_G, 'video', 'med_detective', 'LIBRARY_PLAN_REFERENCE.json'), path.join(proj, 'LIBRARY_PLAN.json')); fs.writeFileSync(path.join(proj, 'RESULT.md'), '# Итог\n## Использовано из библиотеки\n- iris-reveal'); });
+  fs.copyFileSync(path.join(ROOT_G, 'video', 'med_detective', 'LIBRARY_PLAN_REFERENCE.json'), path.join(proj, 'LIBRARY_PLAN.json')); fs.writeFileSync(path.join(proj, 'RESULT.md'), '# Итог\n## Использовано из библиотеки\n- iris-reveal\n## Использовано из vizavi-motion\n- раскадровка'); for (const [ref, to] of [['STORYBOARD_REFERENCE.json', 'STORYBOARD.json'], ['REVIEW_LOG_REFERENCE.json', 'REVIEW_LOG.json']]) fs.copyFileSync(path.join(ROOT_G, 'video', 'med_detective', ref), path.join(proj, to)); });
 after(() => { try { tmp && fs.rmSync(tmp, { recursive: true, force: true }); } catch {} });
 
 test('динамичный ролик проходит все три проверки; метрики попадают в сводку', { skip: !have }, () => {
@@ -58,7 +58,7 @@ test('ворота: призыв не тем шрифтом и не по бук�
 test('ворота: нет плана библиотеки и раздела «Использовано из библиотеки» (всё с нуля) блокирует отправку Нику; LIBRARY_GATE=off обходит; старый ролик без динамики не проверяется', { skip: !have }, () => {
   const plan = path.join(proj, 'LIBRARY_PLAN.json'), rep = path.join(proj, 'RESULT.md'), keepP = fs.readFileSync(plan, 'utf8'), keepR = fs.readFileSync(rep, 'utf8');
   try {
-    fs.rmSync(plan); fs.writeFileSync(rep, '# Итог без раздела');
+    fs.rmSync(plan); fs.writeFileSync(rep, '# Итог без раздела библиотеки\n## Использовано из vizavi-motion\n- раскадровка');   // раздел vizavi на месте: здесь проверяется только библиотека
     const bad = gate(good, proj, { dynamics: true }); assert.equal(bad.ok, false);
     assert.ok(bad.problems.some((x) => /^библиотека: нет LIBRARY_PLAN\.json/.test(x)), bad.problems.join('; ')); assert.ok(bad.problems.some((x) => /^библиотека: в RESULT\.md нет раздела/.test(x)));
     process.env.LIBRARY_GATE = 'off'; assert.equal(gate(good, proj, { dynamics: true }).ok, true, 'обход LIBRARY_GATE=off'); delete process.env.LIBRARY_GATE;
@@ -75,4 +75,15 @@ test('ворота: штамп «МИФ?» в начале ролика блок
     process.env.VERDICT_GATE = 'off'; assert.equal(gate(good, proj, { dynamics: true }).problems.some((x) => /^вердикт:/.test(x)), false); delete process.env.VERDICT_GATE;
     assert.equal(gate(good, proj, { dynamics: false }).problems.some((x) => /^вердикт:/.test(x)), false, 'старый формат без динамики не проверяется');
   } finally { delete process.env.VERDICT_GATE; fs.rmSync(idx, { force: true }); fs.rmSync(comp, { force: true }); }
+});
+
+test('ворота: без раскадровки с вариантами, журнала правок и раздела отчёта ролик Нику не уходит (vizavi:); VIZAVI_GATE=off обходит; старый ролик без динамики не проверяется', { skip: !have }, () => {
+  const sb = path.join(proj, 'STORYBOARD.json'), rl = path.join(proj, 'REVIEW_LOG.json'), rep = path.join(proj, 'RESULT.md'), kS = fs.readFileSync(sb, 'utf8'), kR = fs.readFileSync(rl, 'utf8'), kRep = fs.readFileSync(rep, 'utf8');
+  try {
+    fs.rmSync(sb); fs.rmSync(rl); fs.writeFileSync(rep, '# Итог\n## Использовано из библиотеки\n- iris-reveal');
+    const bad = gate(good, proj, { dynamics: true }); assert.equal(bad.ok, false);
+    for (const need of [/^vizavi: нет STORYBOARD\.json/, /^vizavi: нет REVIEW_LOG\.json/, /^vizavi: в RESULT\.md нет раздела «Использовано из vizavi-motion»/]) assert.ok(bad.problems.some((x) => need.test(x)), need + ' :: ' + bad.problems.join('; '));
+    process.env.VIZAVI_GATE = 'off'; assert.equal(gate(good, proj, { dynamics: true }).ok, true, 'обход VIZAVI_GATE=off'); delete process.env.VIZAVI_GATE;
+    assert.equal(gate(good, proj, { dynamics: false }).ok, true, 'старый формат без динамики: vizavi не проверяется');
+  } finally { delete process.env.VIZAVI_GATE; fs.writeFileSync(sb, kS); fs.writeFileSync(rl, kR); fs.writeFileSync(rep, kRep); }
 });

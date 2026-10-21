@@ -12,20 +12,20 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FAKE = path.join(ROOT, 'test', 'fixtures', 'fake_agent.mjs');
 const LOCAL = path.join(process.env.LOCALAPPDATA || '', 'hermes');
 
-test('обязательные скиллы: Ксения (short-video-script-craft, humanizer), Вера (grounded-citations); остальным обязательных нет; youtube-content намеренно не подключён', () => {
-  assert.deepEqual(requiredFor('scriptwriter'), ['short-video-script-craft', 'humanizer']); assert.deepEqual(requiredFor('factcheck'), ['grounded-citations']);
+test('обязательные скиллы: Ксения (short-video-script-craft, storytelling, storytelling-hooks, humanizer), Вера (grounded-citations); остальным обязательных нет; youtube-content намеренно не подключён', () => {
+  assert.deepEqual(requiredFor('scriptwriter'), ['short-video-script-craft', 'storytelling', 'storytelling-hooks', 'humanizer']); assert.deepEqual(requiredFor('factcheck'), ['grounded-citations']);
   for (const a of ['research', 'virality', 'packager', 'captain_smm', 'нет-такого']) assert.deepEqual(requiredFor(a), [], a);
   assert.ok(!JSON.stringify(AGENT_SKILLS).includes('youtube-content'), 'пакета youtube_transcript_api на ПК нет, ставить без согласия Ника нельзя');
 });
 
 test('скиллы лежат в профиле smm, из которого работают сотрудники (иначе skill_view упадёт), и ledger-скрипт на месте', { skip: !process.env.LOCALAPPDATA }, () => {
-  for (const [rel, f] of [['creative/short-video-script-craft', 'SKILL.md'], ['creative/humanizer', 'SKILL.md'], ['research/grounded-citations', 'SKILL.md'], ['web/blocked-page-recovery', 'SKILL.md']]) assert.ok(fs.existsSync(path.join(LOCAL, 'profiles', 'smm', 'skills', rel, f)), 'нет в профиле smm: ' + rel);
+  for (const [rel, f] of [['creative/short-video-script-craft', 'SKILL.md'], ['creative/humanizer', 'SKILL.md'], ['creative/storytelling', 'SKILL.md'], ['creative/storytelling-hooks', 'SKILL.md'], ['research/grounded-citations', 'SKILL.md'], ['web/blocked-page-recovery', 'SKILL.md']]) assert.ok(fs.existsSync(path.join(LOCAL, 'profiles', 'smm', 'skills', rel, f)), 'нет в профиле smm: ' + rel);
   assert.ok(fs.existsSync(SOURCES_PY()), 'нет sources.py: ' + SOURCES_PY());
 });
 
 test('блок Ксении: оба скилла, ограничение пунктов humanizer (31 и 32 запрещены), нельзя трогать числа, связки и строки Ника', () => {
   const b = skillsBlock('scriptwriter', { dir: 'C:/x/video_9' });
-  assert.match(b, /skill_view\('short-video-script-craft'\)/); assert.match(b, /skill_view\('humanizer'\)/); assert.match(b, /НЕ применяй 31 и 32/); assert.match(b, /Не трогай числа.*связки «но\/поэтому».*дословно/s); assert.match(b, /blocked-page-recovery/);
+  assert.match(b, /skill_view\('short-video-script-craft'\)/); assert.match(b, /skill_view\('humanizer'\)/); assert.match(b, /storytelling/); assert.match(b, /storytelling-hooks/); assert.match(b, /ИСТОРИЯ ДО ТЕКСТА/); assert.match(b, /lens/); assert.match(b, /bookend/); assert.match(b, /НЕ берёшь: выдуманные личные истории/); assert.match(b, /НЕ применяй 31 и 32/); assert.match(b, /Не трогай числа.*связки «но\/поэтому».*дословно/s); assert.match(b, /blocked-page-recovery/);
 });
 
 test('блок Веры: реестр лежит в папке сценария, команды с --ledger, PubMed через efetch в файл, цитату принимает только quote, в check.json поля source/ledger_id/quote_found', () => {
@@ -94,7 +94,7 @@ async function runWith(checker, { label = 'script1', env = {} } = {}) {
 }
 const got = (...n) => ({ checked: true, sessions: 1, used: new Set(n) });
 test('runAgent: обязательные скиллы не открыты в первой попытке → ровно один повтор с «ПОВТОР»; во второй открыты → нет предупреждения', { skip: !can }, async () => {
-  const { r, dir, files, calls } = await runWith((n) => (n === 1 ? got('humanizer') : got('short-video-script-craft', 'humanizer')));
+  const { r, dir, files, calls } = await runWith((n) => (n === 1 ? got('humanizer') : got('short-video-script-craft', 'storytelling', 'storytelling-hooks', 'humanizer')));
   try {
     assert.ok(files.includes('_query_script1.txt') && files.includes('_query_script1_retry2.txt'), files.join(','));
     assert.match(fs.readFileSync(path.join(dir, '_query_script1_retry2.txt'), 'utf8'), /ПОВТОР: .*short-video-script-craft/); assert.ok(!/ПОВТОР:/.test(fs.readFileSync(path.join(dir, '_query_script1.txt'), 'utf8')));
@@ -104,10 +104,10 @@ test('runAgent: обязательные скиллы не открыты в п�
 });
 test('runAgent: и после повтора не открыла: ровно один повтор, missing остаётся (карточка Нику покажет предупреждение)', { skip: !can }, async () => {
   const { r, dir, calls } = await runWith(() => got('humanizer'));
-  try { assert.equal(calls.length, 2); assert.equal(r.skills.retried, true); assert.deepEqual(r.skills.missing, ['short-video-script-craft']); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  try { assert.equal(calls.length, 2); assert.equal(r.skills.retried, true); assert.deepEqual(r.skills.missing, ['short-video-script-craft', 'storytelling', 'storytelling-hooks']); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 test('runAgent: открыла всё сразу — повтора нет; базу сессий прочитать не удалось или сессий нет — молчим и не повторяем; SKILL_GATE=off — не проверяем', { skip: !can }, async () => {
-  for (const [name, checker, env, expectCalls] of [['всё открыто', () => got('short-video-script-craft', 'humanizer'), {}, 1], ['база недоступна', () => ({ checked: false, sessions: 0, used: new Set() }), {}, 1], ['сессий нет', () => ({ checked: true, sessions: 0, used: new Set() }), {}, 1], ['гейт выключен', () => got(), { SKILL_GATE: 'off' }, 0]]) {
+  for (const [name, checker, env, expectCalls] of [['всё открыто', () => got('short-video-script-craft', 'storytelling', 'storytelling-hooks', 'humanizer'), {}, 1], ['база недоступна', () => ({ checked: false, sessions: 0, used: new Set() }), {}, 1], ['сессий нет', () => ({ checked: true, sessions: 0, used: new Set() }), {}, 1], ['гейт выключен', () => got(), { SKILL_GATE: 'off' }, 0]]) {
     const { r, dir, files, calls } = await runWith(checker, { env });
     try { assert.equal(calls.length, expectCalls, name); assert.ok(!files.includes('_query_script1_retry2.txt'), name); assert.equal(r.skills.retried, false, name); if (name === 'всё открыто') assert.equal(r.skills.checked, true); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }
