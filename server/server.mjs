@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { ensureExtraAgents } from './lib_extra_agents.mjs';
 import { setupChat } from './lib_chat.mjs';
+import { initProgress, seedHistory, sampleRuns, decorateAgents } from './lib_progress.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.OFFICE_DATA_DIR || path.join(__dirname, 'data');
@@ -152,6 +153,9 @@ function seedPrompts() {
 }
 seedPrompts();
 ensureExtraAgents(db);
+// Прогресс и оценка времени: история запусков сотрудников (agent_runs), сборщик раз в 5 с (ловит и записи из lib_chat)
+initProgress(db); seedHistory(db);
+setInterval(() => { try { sampleRuns(db); } catch (e) { console.error('progress sampler:', e.message); } }, 5000).unref();
 const chat = setupChat({ db, ROOT: path.resolve(__dirname, '..'), DATA_DIR });
 // Разовое разделение офисов: Виктор и Алиса (не подключены) уходят в резерв, в офис поиска работы и в SMM они не входят.
 if (!q("SELECT 1 x FROM kv WHERE k='office_split_v1'")[0]) {
@@ -213,7 +217,8 @@ http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/api/state') {
     const asked = url.searchParams.get('office');
     const office = OFFICES.some((o) => o.id === asked) ? asked : 'jobs';
-    const agents = q('SELECT * FROM agents WHERE office=? ORDER BY desk', office);
+    sampleRuns(db);
+    const agents = decorateAgents(db, q('SELECT * FROM agents WHERE office=? ORDER BY desk', office));
     const jobs = office === 'jobs' ? q('SELECT * FROM jobs ORDER BY updated_at DESC LIMIT 100') : [];
     const stages = {};
     for (const j of jobs) stages[j.stage] = (stages[j.stage] || 0) + 1;
@@ -231,8 +236,11 @@ http.createServer(async (req, res) => {
   // Агенты пишут сюда статус
   if (req.method === 'POST' && url.pathname === '/api/agent') {
     const b = await body(req);
-    run('UPDATE agents SET status=COALESCE(?,status), task=COALESCE(?,task), progress=COALESCE(?,progress), updated_at=? WHERE id=?',
-      b.status ?? null, b.task ?? null, b.progress ?? null, now(), b.id);
+    sampleRuns(db);                                              // фиксируем прежнее состояние, чтобы переход (начал/закончил) считался точно
+    // real: прогресс настоящий (вехи по файлам работы), а не заглушка этапа; только такой процент опережает расчёт по времени
+    run('UPDATE agents SET status=COALESCE(?,status), task=COALESCE(?,task), progress=COALESCE(?,progress), progress_real=CASE WHEN ? IS NULL THEN progress_real WHEN ? THEN 1 ELSE 0 END, updated_at=? WHERE id=?',
+      b.status ?? null, b.task ?? null, b.progress ?? null, b.progress ?? null, b.real ? 1 : 0, now(), b.id);
+    sampleRuns(db);
     if (b.log) run('INSERT INTO events (ts,agent_id,level,message) VALUES (?,?,?,?)', now(), b.id, b.level || 'info', b.log);
     return json(res, 200, { ok: true });
   }

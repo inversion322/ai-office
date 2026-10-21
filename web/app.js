@@ -67,6 +67,12 @@ function setStatusClasses(agents) {
   });
 }
 /* постоянная подпись над сотрудником: над чем работает прямо сейчас (виден ход работы, а не только жесты утки) */
+/* шкала прогресса: процент и «ещё ~N мин» внутри полоски (решение Ника 2026-10-21); цифры считает сервер, поле pb */
+function pbarHTML(a) {
+  const pb = a && a.status === 'working' && a.pb; if (!pb) return '';
+  const tip = pb.basis === 'history' ? `Оценка по ${pb.n} прошлым запускам этой работы` : pb.basis === 'default' ? 'Первая оценка: истории запусков этой работы ещё нет, цифра уточнится' : 'Оценки пока нет';
+  return `<div class="pbar${pb.overrun ? ' over' : ''}" title="${esc(tip)}"><i style="width:${Number(pb.pct) || 0}%"></i><span>${esc(pb.label)}</span></div>`;
+}
 function updateBadge(a, walking) {
   const layer = $('bubbles'); if (!layer) return;
   let b = layer.querySelector(`.work-badge[data-id="${a.id}"]`);
@@ -78,7 +84,7 @@ function updateBadge(a, walking) {
   const short = String(a.task).replace(/\s*\(дело[^)]*\)/i, '').replace(/\s*⏱.*$/, '');
   const mins = (/⏱\s*([^]*)$/.exec(a.task) || [])[1];
   b.style.left = (x + 1) + '%'; b.style.top = (y + 2.5) + '%'; b.title = a.task; b.classList.add('side');
-  b.innerHTML = `<small>⚙ работает${mins ? ' · ' + esc(mins) : ''}</small>${esc(short.length > 46 ? short.slice(0, 44) + '…' : short)}${pr ? `<i style="width:${pr}%"></i>` : ''}`;
+  b.innerHTML = `<small>⚙ работает${mins ? ' · ' + esc(mins) : ''}</small>${esc(short.length > 46 ? short.slice(0, 44) + '…' : short)}${pbarHTML(a) || (pr ? `<i style="width:${pr}%"></i>` : '')}`;
 }
 
 /* ---------- сцены: диалоги и выдача задач ---------- */
@@ -214,7 +220,7 @@ function renderDetail() {
   box.classList.remove('hidden');
   box.innerHTML = `<h4>${esc(a.name)}</h4><div class="t">${esc(a.title || a.role)}</div>
     <p>Статус: <b>${STATUS[a.status] || esc(a.status)}</b></p><p>Модель: <b>${esc(a.model)}</b></p><p>Команда: <b>${esc(a.team)}</b></p>
-    <p>Задача: <b>${esc(a.task || '—')}</b></p><div class="bar"><i style="width:${Number(a.progress) || 0}%"></i></div>
+    <p>Задача: <b>${esc(a.task || '—')}</b></p>${pbarHTML(a) || `<div class="bar"><i style="width:${Number(a.progress) || 0}%"></i></div>`}
     <button class="btn-primary wide" id="openCfg" data-open="${esc(a.id)}">Промпт и навыки</button>${a.status === 'waiting' || a.status === 'error' ? `<button class="btn-ghost wide clear-wait" data-clearwait="${esc(a.id)}">${a.status === 'waiting' ? 'Снять ожидание' : 'Сбросить ошибку'}</button>` : ''}`;
 }
 

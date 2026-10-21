@@ -229,6 +229,13 @@ details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-weight:700;f
 .live-card .t{font-size:11.5px;color:var(--ink);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .live-card .m{font-size:10.5px;color:var(--mut);font-family:"JetBrains Mono",monospace}
 .live-card .bar{margin-top:3px;height:4px}.live-card .bar i{background:var(--info)}
+/* шкала прогресса с подписью внутри: «62% · ещё ~12 мин» */
+.pbar{position:relative;height:18px;margin-top:5px;border-radius:9px;background:#E3EAF5;border:1px solid #C9D6EA;overflow:hidden}
+.pbar i,.work-badge .pbar i{position:absolute;left:0;top:0;bottom:0;height:auto;background:linear-gradient(90deg,#A9D0FF,#7DB2F7);transition:width .8s}
+.pbar span{position:relative;display:block;text-align:center;font:700 10.5px/16px "JetBrains Mono",monospace;color:#1F2430;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 6px}
+.pbar.over i,.work-badge .pbar.over i{background:linear-gradient(90deg,#FFD9A0,#F5B25A)}
+.work-badge .pbar{margin:4px -4px -2px}.work-badge .pbar span{font-size:10px;padding:0 3px}
+.live-card .pbar{height:16px;margin-top:3px}.live-card .pbar span{font-size:10px;line-height:14px}
 .live-empty{padding:6px 14px 12px;font-size:12.5px;color:var(--mut)}
 .live-feed{list-style:none;overflow-y:auto;overflow-x:hidden;flex:1;min-height:60px;padding:2px 14px 10px}
 .live-feed li{display:grid;grid-template-columns:auto 1fr;gap:4px 8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px;line-height:1.35}

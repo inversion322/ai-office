@@ -106,7 +106,7 @@ function liveCard(a, kind) {
   const task = (i >= 0 ? raw.slice(0, i) : raw).trim().replace(/\s*\(дело[^)]*\)/i, '');
   const meta = i >= 0 ? raw.slice(i + 1).trim() : '';
   const pr = Math.max(0, Math.min(100, Number(a.progress) || 0));
-  return `<div class="live-card ${kind}" data-agent="${esc(a.id)}" title="${esc(a.name)}: ${esc(task)}. Нажмите, чтобы открыть чат"><div class="av">${duckSVG(a, { size: 40 })}</div><div><b>${esc(a.name)}</b><div class="t">${esc(task)}</div>${meta ? `<div class="m">⏱ ${esc(meta)}</div>` : ''}${kind === '' && pr ? `<div class="bar"><i style="width:${pr}%"></i></div>` : ''}</div></div>`;
+  return `<div class="live-card ${kind}" data-agent="${esc(a.id)}" title="${esc(a.name)}: ${esc(task)}. Нажмите, чтобы открыть чат"><div class="av">${duckSVG(a, { size: 40 })}</div><div><b>${esc(a.name)}</b><div class="t">${esc(task)}</div>${meta ? `<div class="m">⏱ ${esc(meta)}</div>` : ''}${kind === '' ? (pbarHTML(a) || (pr ? `<div class="bar"><i style="width:${pr}%"></i></div>` : '')) : ''}</div></div>`;
 }
 function renderLive(s) {
   const agents = s.agents || [];

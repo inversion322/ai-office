@@ -27,7 +27,8 @@ export async function api(p, body) {
   if (!r.ok) throw new Error(`${p}: HTTP ${r.status}`);
   return r.json();
 }
-export const agent = (id, status, task, progress, log, level) => api('/api/agent', { id, status, task, progress, log, level });
+// extra.real = true: progress настоящий (вехи по файлам работы), дашборд тогда считает остаток по нему, а не только по времени
+export const agent = (id, status, task, progress, log, level, extra = {}) => api('/api/agent', { id, status, task, progress, log, level, ...extra });
 export const scene = (from, to, text, kind = 'assign') => api('/api/scene', { from, to, text, kind, ttl: 9000 });
 export const promptOf = async (id) => (await api('/api/agent-config?id=' + id)).prompt.body;
 export const videos = async () => (await api('/api/state?office=smm')).videos;

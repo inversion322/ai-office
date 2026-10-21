@@ -545,7 +545,7 @@ ${c.hist}
       try { const last = fs.readFileSync(path.join(VIDEO_JOB.dir, 'PROGRESS.md'), 'utf8').split(/\r?\n/).map((s) => s.trim()).filter(Boolean).pop();
         if (last && last !== W.lastProgress) { W.lastProgress = last; evt(VIDEO_JOB.agent, last.slice(0, 220)); } } catch {}
       const pr = Math.min(92, 8 + Math.round(mins * 1.2));
-      run('UPDATE agents SET status=?, task=?, progress=?, updated_at=? WHERE id=?', 'working', `${task} ⏱ ${mins} мин${W.steps ? ` · шаг ${W.steps}` : ''}`, pr, now(), VIDEO_JOB.agent);
+      run('UPDATE agents SET status=?, task=?, progress=?, progress_real=0, updated_at=? WHERE id=?', 'working', `${task} ⏱ ${mins} мин${W.steps ? ` · шаг ${W.steps}` : ''}`, pr, now(), VIDEO_JOB.agent);
     } else if (ag.status === 'working' && String(ag.task).includes('⏱')) {
       W.pid = null; await finishVideoJob(ag);
     }

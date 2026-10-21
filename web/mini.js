@@ -122,7 +122,7 @@
   function stageName(s) { return ({ idea: 'идея', scored: 'оценена', script: 'сценарий', checked: 'факты проверены', produced: 'смонтирован', accepted: 'принят', published: 'опубликован' })[s] || s || ''; }
   function agentHtml(a) {
     const busy = a.status === 'working';
-    const prog = busy && Number(a.progress) ? `<div class="bar"><i style="width:${Math.min(100, Number(a.progress))}%"></i></div>` : '';
+    const prog = busy ? (C.progressBar(a) || (Number(a.progress) ? `<div class="bar"><i style="width:${Math.min(100, Number(a.progress))}%"></i></div>` : '')) : '';
     return `<article class="agent ${C.esc(a.status)}" data-open="${C.esc(a.id)}"><div class="duck" data-duck="${C.esc(a.id)}"></div>
       <div class="agent-body"><div class="agent-top"><b>${C.esc(a.name.split(' ')[0])}</b><span class="st ${C.esc(a.status)}">${C.esc(C.statusText(a.status))}</span></div>
       <div class="role">${C.esc(a.title || a.role)}</div><div class="task">${C.esc(a.task || '—')}</div>${prog}${C.clearLabel(a.status) ? `<button class="clear" data-clear="${C.esc(a.id)}">${C.clearLabel(a.status)}</button>` : ''}</div></article>`;

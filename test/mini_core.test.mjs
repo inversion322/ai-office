@@ -80,3 +80,12 @@ test('кнопка сброса статуса есть только у ждущ
   assert.equal(C.clearLabel('waiting'), 'Снять ожидание'); assert.equal(C.clearLabel('error'), 'Сбросить ошибку');
   for (const s of ['working', 'idle', 'offline', '', null, undefined]) assert.equal(C.clearLabel(s), '');
 });
+
+test('шкала прогресса: только у работающего, процент и подпись внутри, подсказка о происхождении оценки, подпись экранируется', () => {
+  const w = { status: 'working', pb: { pct: 62, label: '62% · ещё ~12 мин', basis: 'history', n: 3, overrun: false } };
+  const html = C.progressBar(w);
+  assert.match(html, /width:62%/); assert.match(html, />62% · ещё ~12 мин</); assert.match(html, /по 3 прошлым запускам/); assert.doesNotMatch(html, /pbar over/);
+  assert.match(C.progressBar({ status: 'working', pb: { pct: 20, label: '20% · ещё ≈40 мин', basis: 'default', overrun: true } }), /pbar over.*первая оценка/);
+  assert.equal(C.progressBar({ status: 'idle', pb: w.pb }), ''); assert.equal(C.progressBar({ status: 'working' }), '');
+  assert.doesNotMatch(C.progressBar({ status: 'working', pb: { pct: 5, label: '<img src=x>', basis: 'none' } }), /<img/);
+});

@@ -47,6 +47,7 @@ h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)
 .st.working{background:#FFF1CC;color:var(--accent-ink)}.st.waiting{background:#E7F0FE;color:var(--info)}.st.error{background:#FDE7E7;color:var(--err)}
 .role{font-size:12px;color:var(--mut)}.task{margin-top:2px;word-break:break-word}
 .bar{height:5px;border-radius:9px;background:#EFEAE0;margin-top:8px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
+.pbar{position:relative;height:20px;border-radius:10px;background:#EFEAE0;margin-top:8px;overflow:hidden}.pbar i{position:absolute;left:0;top:0;bottom:0;background:#F6C970;transition:width .8s}.pbar span{position:relative;display:block;text-align:center;font:700 11px/20px system-ui,sans-serif;color:#2b2418;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 8px}.pbar.over i{background:#F2A65A}
 .clips{margin-top:16px}
 .clip{display:flex;justify-content:space-between;gap:10px;padding:10px 2px;border-top:1px solid var(--line)}.clip span{color:var(--mut);white-space:nowrap}
 

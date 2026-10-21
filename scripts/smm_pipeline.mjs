@@ -24,6 +24,7 @@ import { cleanReport } from '../server/lib_text.mjs';
 import { checkTitle, checkTags, buildMessage, titleTagsFrom, composeTitle, BRAND_TAG } from '../server/lib_pack.mjs';
 import { gate, markFormatA } from './video_gate.mjs';
 import { novelty, regenBlock, archiveScript, loadHistory, hookCatalog, LIMITS } from './script_novelty.mjs';
+import { watchVideoProgress } from './video_progress.mjs';
 import { styleIssues, styleFeedback, bridgeIssues, verdictIssues, cleanFillerOpeners } from './script_style.mjs';
 import { craftIssues, craftFeedback, craftSummary } from './script_craft.mjs';
 import { evidenceIssues, evidenceFeedback, ledgerPath } from './agent_skills.mjs';
@@ -316,13 +317,16 @@ async function produce(id, comment) {
   await agent('captain_smm', 'working', `Монтаж: «${v.title}»`, 60, 'Сценарий утверждён, передал Кириллу');
   await scene('captain_smm', 'video', `Кирилл, сценарий утверждён: «${v.title}». Озвучка, субтитры, монтаж.`);
   await yieldToPriority('video');          // идут правки другого ролика: один монтажёр, у правок приоритет
-  await agent('video', 'working', 'Озвучка, субтитры, монтаж (Opus 5.5)', 20, 'Начал сборку ролика');
+  await agent('video', 'working', 'Озвучка, субтитры, монтаж (Opus 5.5)', 3, 'Начал сборку ролика', undefined, { real: true });
   const videoStartedAt = Date.now();
+  // настоящий процент по файлам проекта: дашборд показывает «N% · ещё ~M мин» (video_progress.mjs)
+  const stopWatch = watchVideoProgress(proj, n, videoStartedAt, (pct, step) => agent('video', 'working', undefined, pct, `Монтаж: ${step} (${pct}%)`, undefined, { real: true }));
   const { spawn } = await import('node:child_process');
   const code = await new Promise((resolve) => {
     const p = hermesSpawn(['-p', 'video', 'chat', '--query-file', bf, '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: ROOT, windowsHide: true, stdio: ['ignore', fs.openSync(path.join(abs, '_video_log.txt'), 'w'), 'ignore'] });
     p.on('exit', resolve);
   });
+  stopWatch();
   const mp4 = path.join(proj, 'final', `dosie${n}_v1.mp4`);
   if (!fs.existsSync(mp4)) {
     await agent('video', 'error', 'Ролик не собран', 0, `Нет ${mp4} (код ${code})`, 'error');

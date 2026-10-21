@@ -96,6 +96,14 @@
   // Безопасный текст в HTML: страница строится из ответов сервера, в них не должно быть исполняемой разметки.
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  const api = { parseApi, gateFor, statusText, ago, targetFor, pendingCards, normButtons, squash, threadFilter, isMine, commentMode, splitButtons, isDismiss, clearLabel, esc, STATUS };
+  // Шкала прогресса работающего сотрудника: процент и «ещё ~N мин» внутри полоски (поле pb считает сервер: server/lib_progress.mjs)
+  function progressBar(a) {
+    const pb = a && a.status === 'working' && a.pb;
+    if (!pb) return '';
+    const tip = pb.basis === 'history' ? 'по ' + pb.n + ' прошлым запускам' : pb.basis === 'default' ? 'первая оценка: истории запусков ещё нет, цифра уточнится' : 'оценки пока нет';
+    return '<div class="pbar' + (pb.overrun ? ' over' : '') + '" title="' + esc(tip) + '"><i style="width:' + (Number(pb.pct) || 0) + '%"></i><span>' + esc(pb.label) + '</span></div>';
+  }
+
+  const api = { progressBar, parseApi, gateFor, statusText, ago, targetFor, pendingCards, normButtons, squash, threadFilter, isMine, commentMode, splitButtons, isDismiss, clearLabel, esc, STATUS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MiniCore = api;
 })(typeof window !== 'undefined' ? window : globalThis);
