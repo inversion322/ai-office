@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { styleIssues, styleFeedback, bridgeIssues, verdictIssues } from '../scripts/script_style.mjs';
+import { styleIssues, styleFeedback, bridgeIssues, verdictIssues, stripFillerOpeners, fillerOpeners, cleanFillerOpeners, fillerFeedback } from '../scripts/script_style.mjs';
 
 const rules = (a) => styleIssues(a).map((x) => x.rule);
 
@@ -64,4 +64,30 @@ test('замечание Ксении про вердикт: понятно, г�
   const v = verdictIssues({ segments: ['Это миф?', 'Дальше.'], on_screen: [{ segment: 1, note: 'штамп МИФ?' }] });
   const fb = styleFeedback(v); assert.match(fb, /Вердикт \(миф это или правда\) нельзя называть в начале ролика/); assert.match(fb, /в озвучке, абзац 1/); assert.match(fb, /на экране, абзац 1/); assert.match(fb, /on_screen: headline, note, loupe/); assert.match(fb, /только в конце, перед призывом/);
   const both = styleFeedback([...styleIssues(['Улика первая. Факт.']), ...v]); assert.match(both, /служебные слова каркаса/); assert.match(both, /Вердикт \(миф/);
+});
+
+test('вводные слова в начале фразы вырезаются: пример Ника «Так что британцы пометили воду» -> «Британцы пометили воду»', () => {
+  const r = stripFillerOpeners('Так что британцы пометили воду в телах пятидесяти мужчин. Три дня те пили кофе, три дня воду.');
+  assert.equal(r.text, 'Британцы пометили воду в телах пятидесяти мужчин. Три дня те пили кофе, три дня воду.'); assert.equal(r.changed.length, 1);
+});
+test('вырезаются «Потому что / Поэтому / Так что / Итак / Значит / Получается / Выходит / Таким образом / Вот почему / Ну» и в середине абзаца, первая буква поднимается, запятая после связки уходит', () => {
+  const cases = [
+    ['Поэтому чашку кофе зря обвиняли.', 'Чашку кофе зря обвиняли.'], ['Потому что вода держится.', 'Вода держится.'], ['Но воды не убыло. Значит, вероятно, дело в ожидании.', 'Но воды не убыло. Вероятно, дело в ожидании.'],
+    ['Получается, что мамы ошиблись.', 'Мамы ошиблись.'], ['Выходит, дело не в сахаре.', 'Дело не в сахаре.'], ['Итак, вывод простой.', 'Вывод простой.'], ['А значит, зря.', 'Зря.'],
+    ['Таким образом, всё просто.', 'Всё просто.'], ['Вот почему это работает.', 'Это работает.'], ['Так вот: пятьдесят мужчин.', 'Пятьдесят мужчин.'], ['Дело в том, что опыт узкий.', 'Опыт узкий.'],
+    ['Следовательно — миф.', 'Миф.'], ['Ну, проверим.', 'Проверим.'], ['Ответ?  Так что делаем вывод.', 'Ответ?  Делаем вывод.'],
+  ];
+  for (const [from, to] of cases) assert.equal(stripFillerOpeners(from).text, to, from);
+});
+test('смысловые слова не трогаем: «Но», «Однако», «А вот», вопросы «Значит ли это…», «Так что же делать?», слова внутри фразы и в кавычках', () => {
+  for (const t of ['Но воды не убыло.', 'Однако опыт узкий.', 'А вот мочи стало больше.', 'Значит ли это, что кофе можно?', 'Так что же делать?', 'Он пил кофе, поэтому устал.', 'Тот, кто сказал «так что», не прав.', 'Нулевой результат.', 'Выходной день.', 'Значит.', 'Говорят, что кофе сушит. Правда ли это?'])
+    assert.equal(stripFillerOpeners(t).text, t, t);
+});
+test('cleanFillerOpeners правит абзацы и payoff на месте и возвращает список правок; повторный проход ничего не меняет; fillerOpeners после чистки пуст', () => {
+  const sc = { segments: ['Говорят, кофе сушит. Правда ли это?', 'Так что британцы пометили воду. Три дня те пили кофе.', 'Но воды не убыло.', 'Поэтому чашку кофе зря обвиняли.'], payoff: 'Поэтому чашку кофе зря обвиняли' };
+  assert.equal(fillerOpeners(sc.segments).length, 2); assert.deepEqual(fillerOpeners(sc.segments).map((x) => x.seg), [2, 4]);
+  const ch = cleanFillerOpeners(sc); assert.equal(ch.length, 2); assert.deepEqual(ch.map((c) => c.seg), [2, 4]);
+  assert.equal(sc.segments[1], 'Британцы пометили воду. Три дня те пили кофе.'); assert.equal(sc.segments[3], 'Чашку кофе зря обвиняли.'); assert.equal(sc.payoff, 'Чашку кофе зря обвиняли');
+  assert.equal(cleanFillerOpeners(sc).length, 0); assert.deepEqual(fillerOpeners(sc.segments), []);
+  assert.match(fillerFeedback([{ seg: 2, quote: 'Так что британцы' }]), /абзац 2: «Так что британцы»/);
 });

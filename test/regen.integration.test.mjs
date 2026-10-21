@@ -97,6 +97,10 @@ test('драматургия: «перебор фактов» без идеи, �
   assert.match(qs, /Автопроверка драматургии/); assert.match(qs, /поле chain/); assert.match(qs, /emotion_arc/); assert.match(qs, /payoff/); assert.match(qs, /SCRIPT_CRAFT\.md/);
   assert.match(card.text, /Идея: Бурю у детей/); assert.match(card.text, /Эмоция: любопытство → удивление → недоверие → ясность/); assert.match(card.text, /Связки: 1→2 но, 2→3 поэтому, 3→4 но, 4→5 поэтому/);
   assert.doesNotMatch(card.text, /Драматургию автопроверка не приняла/); assert.ok(card.buttons.flat().some((b) => b.d === 'approve:7'));
+  // Ксения вернула «Поэтому вывод…», «Значит, дело…», «Так что буря…»: код вырезает вводные слова, Ник видит сразу суть (решение 2026-10-21)
+  assert.ok(!now.segments.some((s) => /(^|[.!?…]\s+)(поэтому|значит|так что|потому что|итак)(?![а-яё])/i.test(s)), now.segments.join(' | '));
+  assert.match(card.text, /Вывод простой: на поведение детей сахар не влияет/); assert.match(card.text, /Дело в ожидании\. Буря на празднике это не сахар/); assert.doesNotMatch(card.text, /Так что буря|Поэтому вывод|Значит, дело/);
+  assert.equal(now.payoff, 'буря на празднике это не сахар, а сам праздник');
 });
 
 test('сессия Mini App может убрать карточку и сбросить ожидание сотрудника, но по-прежнему не может править промпты', { skip: !can }, async () => {

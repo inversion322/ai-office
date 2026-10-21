@@ -62,3 +62,40 @@ export function verdictIssues(script, early = VERDICT_EARLY) {
   scr.forEach((e, i) => { const n = Number(e && e.segment) || i + 1; if (n <= early) add(n, 'экран', flat([e.headline, e.note, e.loupe, e.numbers, e.text])); });
   return out;
 }
+
+// Вводные слова без смысла в начале фразы (решение Ника 2026-10-21: «так что британцы пометили воду» -> «Британцы пометили воду»).
+// «Потому что / Поэтому / Так что / Итак / Значит…» ничего не сообщают, связь держит содержание. Фраза начинается сразу с сути.
+// Контрастные «Но», «Однако», «А вот» остаются: они несут смысл. Вопросы («Значит ли это…», «Так что же делать?») не трогаем.
+const NOT_LI = '(?![а-яё])(?!\\s+ли(?![а-яё]))';
+const FILLER_SRC = [
+  `(?:а\\s+)?(?:значит|получается|выходит)${NOT_LI}(?:,?\\s+что(?![а-яё]))?`,
+  `(?:итак|следовательно|поэтому|таким\\s+образом|вот\\s+почему|вот\\s+откуда|вот\\s+и\\s+ответ|а\\s+раз\\s+так|так\\s+вот|ну|короче|в\\s+общем)${NOT_LI}`,
+  '(?:так|потому)\\s+что(?![а-яё])(?!\\s+(?:же|делать|такое)(?![а-яё]))',
+  'дело\\s+в\\s+том,?\\s+что(?![а-яё])',
+].join('|');
+const FILLER_AT_START = `(^|(?<=[.!?…][»"”)]*\\s+))(?:${FILLER_SRC})[\\s,:—–-]*([а-яёa-z0-9«"(])`;
+export const fillerRe = () => new RegExp(FILLER_AT_START, 'gi');
+const SHOW = (t, i) => String(t).slice(i, i + 60).replace(/\s+/g, ' ').trim();
+/** Какие фразы начинаются вводным словом: [{seg, quote}] (seg с 1). */
+export function fillerOpeners(segments = []) {
+  const out = [];
+  segments.forEach((seg, i) => { const t = String(seg || ''), re = fillerRe(); let m; while ((m = re.exec(t))) out.push({ seg: i + 1, rule: 'filler-open', say: 'фраза начинается вводным словом без смысла', quote: SHOW(t, m.index + m[1].length) }); });
+  return out;
+}
+/** Вырезает вводное слово и поднимает первую букву: «Так что британцы…» -> «Британцы…». Возвращает { text, changed:[{from,to}] }. */
+export function stripFillerOpeners(text) {
+  const changed = []; const re = fillerRe();
+  const t = String(text == null ? '' : text).replace(re, (m, pre, ch, off, whole) => { const to = pre + ch.toUpperCase(); changed.push({ from: SHOW(whole, off + pre.length), to: SHOW(whole.slice(0, off) + to + whole.slice(off + m.length), off + pre.length) }); return to; });
+  return { text: t, changed };
+}
+/** Чистит сценарий (script.json) на месте: абзацы и payoff. Возвращает список правок [{seg, from, to}]. */
+export function cleanFillerOpeners(script) {
+  const out = []; if (!script || !Array.isArray(script.segments)) return out;
+  script.segments = script.segments.map((s, i) => { const r = stripFillerOpeners(s); r.changed.forEach((c) => out.push({ seg: i + 1, ...c })); return r.text; });
+  if (typeof script.payoff === 'string') script.payoff = stripFillerOpeners(script.payoff).text;
+  return out;
+}
+export function fillerFeedback(issues) {
+  if (!issues.length) return '';
+  return `Фразы начинаются вводными словами без смысла (${issues.map((x) => `абзац ${x.seg}: «${x.quote}»`).join('; ')}). Решение Ника: никаких «Потому что», «Поэтому», «Так что», «Итак», «Значит», «Получается», «Выходит», «Таким образом» в начале фразы, сразу суть (что сделали, что нашли). Связь между абзацами держит содержание.`;
+}
