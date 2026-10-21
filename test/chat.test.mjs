@@ -400,3 +400,23 @@ test('«Своё название» без текста (Telegram): карточ
   const row = db.prepare('SELECT status,choice FROM messages WHERE id=?').get(id); assert.deepEqual([row.status, row.choice], ['answered', 'title:3']);
   assert.ok(db.prepare("SELECT text FROM messages WHERE sender='captain_smm' AND text LIKE 'Принято, ставлю ваше название%'").get(), 'Капитан подтвердил название');
 });
+
+
+test('«темы» в чате Капитана: поиск тем стартует сразу с пожеланием, старый список закрывается; повторная просьба при идущем поиске не запускает второй', async () => {
+  const { chat, db } = make(); const a = topics(chat);
+  const r = chat.incoming({ text: 'темы про сон и стресс', source: 'telegram' });
+  assert.equal(r.note, 'topics'); await new Promise((res) => setTimeout(res, 150));
+  const out = db.prepare("SELECT sender, text FROM messages WHERE sender='captain_smm' AND kind='text' ORDER BY id").all().map((m) => m.text).join('\n');
+  assert.match(out, /Принято, ищу темы для видео с вашим пожеланием: «темы про сон и стресс»/); assert.match(out, /(этап «topics --hint темы про сон и стресс»|topics --hint)/);
+  assert.equal(db.prepare('SELECT status, choice FROM messages WHERE id=?').get(a).choice, 'superseded', 'старая карточка выбора темы закрыта');
+  assert.deepEqual(db.prepare('SELECT stage FROM videos ORDER BY id').all().map((x) => x.stage), ['rejected', 'rejected'], 'предложенные раньше темы сняты, как при «Другие темы»');
+});
+test('«тема» без пожеланий: просто поиск; «тема 4» и «выбираем тему» по-прежнему выбор, а не поиск; в чате другого сотрудника просьба не перехватывается', async () => {
+  const { chat, db } = make(); topics(chat);
+  assert.equal(chat.incoming({ text: 'Тема', source: 'telegram' }).note, 'topics');
+  await new Promise((res) => setTimeout(res, 100));
+  assert.match(db.prepare("SELECT text FROM messages WHERE sender='captain_smm' AND kind='text' ORDER BY id DESC").all().map((m) => m.text).join('\n'), /Принято, ищу темы для видео\. Виктор соберёт/);
+  const m2 = make(); topics(m2.chat);
+  assert.equal(m2.chat.incoming({ text: 'тема 5', source: 'telegram' }).note, 'pick');
+  assert.notEqual(m2.chat.incoming({ text: 'темы', source: 'dashboard', thread: 'scriptwriter' }).note, 'topics', 'в ветке Ксении это разговор с Ксенией');
+});

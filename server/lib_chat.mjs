@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { cleanReport } from './lib_text.mjs';
-import { classifyAnswer, quickPick, topicMentioned, stripButtonTalk } from './lib_intent.mjs';
+import { topicRequest, classifyAnswer, quickPick, topicMentioned, stripButtonTalk } from './lib_intent.mjs';
 import { probeVideo, checkFormat, sendFields } from '../scripts/video_format.mjs';
 import { variantOf, groupMembers, isGroup, anchorOf, parseVariantComment, FORMATS as VFORMATS } from '../scripts/variants.mjs';
 
@@ -167,6 +167,14 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       setStage(id, 'script'); setAgent('captain_smm', 'working', `Тема выбрана: ${v.title}`, `Ник выбрал тему «${v.title}»`);
       cap(`Тема выбрана: «${v.title}».\nКсения пишет сценарий, Вера проверит каждый факт.${wish ? `\nПожелание передано Ксении: «${wish.slice(0, 200)}».` : ''} Пришлю результат сюда.`);
       spawnPipeline(['script', String(id), ...(wish ? ['--comment', wish] : [])]);
+    } else if (act === 'topics') {
+      // Просьба Ника «темы» / «подбери темы про сон» (lib_intent.topicRequest): поиск тем сразу, пожелание уходит Виктору; старый список заменяется новым, как при «Другие темы»
+      const wish = comment && comment.trim() ? comment.trim() : '';
+      if (stageRunning(['topics'])) { cap(`Поиск тем уже идёт, список пришлю сюда.${wish ? ` Ваше пожелание «${wish.slice(0, 120)}» в этот поиск уже не попадёт: напишите его ещё раз, когда придёт список.` : ''}`, false); return {}; }
+      supersede('pick:'); supersede('more:');
+      for (const o of q("SELECT id FROM videos WHERE stage='scored'")) setStage(o.id, 'rejected');
+      cap(`Принято, ищу темы для видео${wish ? ` с вашим пожеланием: «${wish.slice(0, 200)}»` : ''}. Виктор соберёт кандидатов с первоисточниками, Лев оценит, список пришлю сюда.`);
+      spawnPipeline(['topics', ...(wish ? ['--hint', wish] : [])]);
     } else if (act === 'more') {
       supersede('pick:'); supersede('more:');
       for (const o of q("SELECT id FROM videos WHERE stage='scored'")) setStage(o.id, 'rejected');
@@ -494,6 +502,9 @@ ${c.hist}
       execAction(`${AWAIT_ACT(aw.kind)}:${aw.id}`, body, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true }));
       return { ok: true, id, note: 'comment' };
     }
+    // «Тема» как просьба подобрать темы: выполняется сразу, до разбора «да/нет», чтобы «давай темы» не стало подтверждением чужой карточки
+    const tr = office === 'smm' && t === 'captain_smm' ? topicRequest(body, { scored: q("SELECT id, title FROM videos WHERE stage='scored'") }) : null;
+    if (tr) { execAction('topics:0', tr.hint, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true })); return { ok: true, id, note: 'topics' }; }
     const fast = fastAnswer(office, body, source);
     if (fast) return { ok: true, id, note: fast };
     reply(office, t, id, body).catch((e) => console.error('reply', e.message));
