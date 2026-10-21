@@ -16,10 +16,10 @@ const safe = (p) => Promise.resolve(p).catch(() => {});
 /** Название и хэштеги из пакета Тимофея: publish_meta.json (точный выбор), иначе package.json (лучший вариант). */
 export function loadPublishMeta(id) {
   const dir = path.join(ROOT, 'smm', 'runs', `package_${Number(id)}`);
-  const m = readJson(path.join(dir, 'publish_meta.json')); if (m && m.title) return { title: m.title, tags: m.tags || [], videoTitle: m.video_title || '', manual: !!m.manual };
+  const m = readJson(path.join(dir, 'publish_meta.json')); if (m && m.title) return { title: m.title, cleanTitle: m.clean_title || m.title, titleTags: m.title_tags || [], tags: m.tags || [], videoTitle: m.video_title || '', manual: !!m.manual };
   const j = readJson(path.join(dir, 'package.json')); if (!j || !Array.isArray(j.titles) || !j.titles.length) return null;
   const i = Math.max(0, Math.min(j.titles.length - 1, (Number(j.best) || 1) - 1));
-  return { title: String(j.titles[i].title || '').trim(), tags: (j.hashtags || []).slice(0, 5), videoTitle: '' };
+  const ti = String(j.titles[i].title || '').trim(); return { title: ti, cleanTitle: ti, titleTags: [], tags: (j.hashtags || []).slice(0, 5), videoTitle: '' };
 }
 const sourcesOf = (id) => { const j = readJson(path.join(ROOT, 'smm', 'runs', `video_${Number(id)}`, 'script.json')); return j && Array.isArray(j.sources_card) ? j.sources_card.slice(0, 6) : []; };
 const fileOf = (v) => (v && v.video_path ? path.resolve(ROOT, String(v.video_path).replaceAll('\\', '/')) : null);
@@ -71,6 +71,6 @@ export async function publishCard(id, { only } = {}) {
   const meta = loadPublishMeta(id), st = loadState(id), has = (p) => (st.youtube || []).find((x) => x.privacy === p);
   const row = []; if ((!only || only === 'yt') && !has('public')) row.push(['🚀 YouTube Shorts: опубликовать', `publish:${id}:yt`]); if ((!only || only === 'ytp') && !has('private') && !has('public')) row.push(['🧪 Приватная проверка', `publish:${id}:ytp`]);
   if (!row.length) return null;
-  const text = `🚀 Публикация ролика №${id} «${v.title}»\nНазвание: ${meta ? '«' + meta.title + '»' : '(пакета нет)'}${meta && meta.manual ? ' (ваше)' : ''}\nХэштеги: ${meta ? meta.tags.join(' ') : '—'}\n${has('private') ? `Приватная проверка уже загружена: ${has('private').url}\n` : ''}Ничего не публикуется без вашей кнопки. Название можно поменять кнопками ниже.`;
+  const text = `🚀 Публикация ролика №${id} «${v.title}»\nНазвание: ${meta ? '«' + meta.title + '»' : '(пакета нет)'}${meta && meta.manual ? ' (ваше)' : ''}\nХэштеги (рекомендация, уйдут в описание YouTube${meta && meta.titleTags && meta.titleTags.length ? '; в названии: ' + meta.titleTags.join(' ') : '; в названии их нет'}): ${meta ? meta.tags.join(' ') : '—'}\n${has('private') ? `Приватная проверка уже загружена: ${has('private').url}\n` : ''}Ничего не публикуется без вашей кнопки. Название можно поменять кнопками ниже.`;
   return notify(text, [row, [['✏️ Своё название', `title:${id}`], ['🔄 Перегенерировать название', `package:${id}`]]]);
 }

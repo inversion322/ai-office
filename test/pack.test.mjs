@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkTitle, checkTags, buildMessage, normTag, BRAND_TAG } from '../server/lib_pack.mjs';
+import { checkTitle, checkTags, buildMessage, normTag, BRAND_TAG, titleTagsFrom, composeTitle, askedForTitleTags } from '../server/lib_pack.mjs';
 
 const SCRIPT = 'Ребёнок съел конфету. Шестнадцать работ, двадцать три эксперимента. Сахар не влияет на поведение. Миф.';
 
@@ -80,4 +80,35 @@ test('пометка «риск: нет / лёгкий / низкий» не п�
   const m = buildMessage({ videoTitle: 'Т', title: 'Заголовок один', alternatives: [
     { title: 'Вариант А', risk: 'Нет: цифра названа в улике первой' }, { title: 'Вариант Б', risk: 'Лёгкий: авторы не исключают малый эффект' }, { title: 'Вариант В', risk: 'Низкий, ролик закрывает интригу' }, { title: 'Вариант Г', risk: 'Подаёт гипотезу как факт' }], tags: [BRAND_TAG] });
   assert.equal((m.match(/осторожно:/g) || []).length, 1); assert.match(m, /Вариант Г {2}\(осторожно: Подаёт гипотезу как факт\)/);
+});
+
+test('кликбейт-интрига проходит, но хэштеги в названии бракуются (они идут отдельной рекомендацией), своё название Ника с тегами допускается', () => {
+  assert.equal(checkTitle('Вы запиваете кофе водой зря? Один опыт всё меняет').ok, true);
+  assert.equal(checkTitle('Что на самом деле делает кофе с водой в теле? Ответ неожиданный').ok, true);
+  const r = checkTitle('Кофе и вода: что нашли #кофе #здоровье'); assert.equal(r.ok, false); assert.match(r.problems.join(' '), /хэштеги в название не ставим/);
+  assert.equal(checkTitle('Кофе и вода: что нашли #кофе', { allowTags: true }).ok, true);
+});
+test('название не раскрывает вердикт: «миф», «ложь», «фейк», «развенчиваем» убивают интригу', () => {
+  for (const t of ['Это миф: кофе не сушит организм', 'Фейк про кофе и воду', 'Ложь о кофе: проверяем', 'Развенчиваем кофе и воду', 'Миф о кофе?']) { const r = checkTitle(t); assert.equal(r.ok, false, t); assert.match(r.problems.join(' '), /раскрывает вердикт/, t); }
+  assert.equal(checkTitle('Правда ли кофе сушит? Ответ в конце').ok, true, 'вопрос без ответа допустим');
+});
+test('хэштеги в название только по просьбе Ника: названные им берутся как есть, без просьбы пусто что бы ни вернула модель, не больше трёх', () => {
+  assert.equal(askedForTitleTags('в название #кофе #здоровье'), true); assert.equal(askedForTitleTags('добавь два хэштега в название'), true);
+  assert.equal(askedForTitleTags('сделай ярче, у нас стратегия'), false, '«стратегия» не «тег»'); assert.equal(askedForTitleTags(''), false); assert.equal(askedForTitleTags(undefined), false);
+  assert.deepEqual(titleTagsFrom('в название #кофе #Здоровье #кофе', ['#x']), ['#кофе', '#Здоровье']);
+  assert.deepEqual(titleTagsFrom('сделай интереснее', ['#a', '#b']), [], 'не просил: название чистое');
+  assert.deepEqual(titleTagsFrom('добавь два хэштега в название', ['#Кофе', '#Вода', '#Сон', '#Сахар']), ['#Кофе', '#Вода', '#Сон'], 'без имён решает модель, максимум 3');
+  assert.deepEqual(titleTagsFrom('в название #fyp #кофе', []), ['#кофе'], 'накрутки не берём');
+});
+test('сборка названия: теги дописываются в конец, не влезшие отбрасываются по порядку, чистое название остаётся как есть', () => {
+  assert.deepEqual(composeTitle('Вы запиваете кофе зря?', ['#кофе', '#здоровье']), { title: 'Вы запиваете кофе зря? #кофе #здоровье', used: ['#кофе', '#здоровье'], dropped: [] });
+  const long = composeTitle('а'.repeat(95), ['#кофе', '#я']); assert.equal(long.title, 'а'.repeat(95)); assert.deepEqual(long.dropped, ['#кофе', '#я'], 'порядок Ника не нарушаем');
+  assert.deepEqual(composeTitle('Чистое название', []), { title: 'Чистое название', used: [], dropped: [] });
+});
+test('сообщение: хэштеги отдельной рекомендацией, в названии их нет; подсказка, как попросить хэштеги в название; без прежнего совета «добавьте 1-2 хэштега в название»', () => {
+  const m = buildMessage({ videoTitle: 'Кофе обезвоживает?', title: 'Вы запиваете кофе зря?', tags: ['#МедицинскийДетектив', '#Кофе'] });
+  assert.match(m, /НАЗВАНИЕ \(копируйте\):\nВы запиваете кофе зря\?\n/); assert.match(m, /рекомендация, в название они не вставлены/); assert.match(m, /название останется чистым/); assert.match(m, /в название #кофе #здоровье/);
+  assert.ok(!/в название добавьте 1-2/.test(m)); assert.ok(!m.split('\n').find((l) => l.startsWith('Вы запиваете')).includes('#'));
+  const m2 = buildMessage({ videoTitle: 'К', title: 'Вы запиваете кофе зря? #кофе', tags: ['#МедицинскийДетектив', '#Кофе'], titleTags: ['#кофе'] });
+  assert.match(m2, /хэштеги в названии, как вы просили: #кофе/); assert.ok(!/название останется чистым/.test(m2));
 });

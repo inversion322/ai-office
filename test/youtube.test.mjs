@@ -70,3 +70,10 @@ test('подключение (OAuth на ПК): ссылка со scope youtube.
   await assert.rejects(runAuth({ onUrl: (url) => { click(url, (st) => `error=access_denied&state=${st}`); } }), /access_denied/);
   assert.equal(fs.existsSync(path.join(tmp, 'youtube_token.json')), false, 'при отказе токен не создаётся');
 });
+
+test('buildMetadata: чистое название остаётся чистым, рекомендованные хэштеги уходят в описание; название с хэштегами от Ника не меняется и не дублируется', () => {
+  const clean = buildMetadata({ title: 'Вы запиваете кофе зря?', tags: ['#МедицинскийДетектив', '#Кофе'] });
+  assert.equal(clean.snippet.title, 'Вы запиваете кофе зря?'); assert.ok(!clean.snippet.title.includes('#')); assert.match(clean.snippet.description, /#МедицинскийДетектив #Кофе/);
+  const withTags = buildMetadata({ title: 'Вы запиваете кофе зря? #кофе #здоровье', tags: ['#МедицинскийДетектив', '#Кофе'] });
+  assert.equal(withTags.snippet.title, 'Вы запиваете кофе зря? #кофе #здоровье'); assert.match(withTags.snippet.description, /#МедицинскийДетектив #Кофе/);
+});

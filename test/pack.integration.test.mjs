@@ -78,3 +78,37 @@ test('страховка: тестовый режим с рабочим адре
   const res = await new Promise((resolve) => { const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'package', '8'], { cwd: ROOT, env: { ...process.env, OFFICE_NO_TG: '1', OFFICE_API: 'http://127.0.0.1:8787', HERMES_BIN: FAKE }, stdio: ['ignore', 'pipe', 'pipe'] }); let o = ''; p.stdout.on('data', (b) => (o += b)); p.stderr.on('data', (b) => (o += b)); p.on('exit', (code) => resolve({ code, out: o })); });
   assert.notEqual(res.code, 0); assert.match(res.out, /не может работать с рабочим API/);
 });
+
+const meta = () => JSON.parse(fs.readFileSync(path.join(ROOT, 'smm', 'runs', 'package_8', 'publish_meta.json'), 'utf8'));
+test('название чистое по умолчанию: хэштеги рекомендацией отдельно, и даже если модель вернула title_tags, без просьбы Ника в название ничего не дописывается', { skip: !can }, async () => {
+  fs.rmSync(path.join(ROOT, 'smm', 'runs', 'package_8'), { recursive: true, force: true });
+  const res = await runStage(['package', '8']); assert.equal(res.code, 0, res.out);
+  const m = meta(); assert.equal(m.title, 'Сахар делает детей гиперактивными? Ответ в конце'); assert.equal(m.clean_title, m.title); assert.deepEqual(m.title_tags, []); assert.equal(m.tags[0], '#МедицинскийДетектив');
+  const card = await lastCard(); const lines = card.text.split('\n'); assert.ok(!lines[lines.indexOf('НАЗВАНИЕ (копируйте):') + 1].includes('#'), 'в названии хэштегов нет');
+  assert.match(card.text, /рекомендация, в название они не вставлены/); assert.match(card.text, /название останется чистым/);
+});
+test('в правках Ник называет хэштеги: они дописываются в конец названия ровно как он назвал, рекомендация остаётся отдельной, публикатор получает название с ними', { skip: !can }, async () => {
+  fs.rmSync(path.join(ROOT, 'smm', 'runs', 'package_8'), { recursive: true, force: true });
+  const res = await runStage(['package', '8', '--comment', 'в название #кофе #Здоровье']); assert.equal(res.code, 0, res.out);
+  const m = meta(); assert.equal(m.clean_title, 'Сахар делает детей гиперактивными? Ответ в конце'); assert.equal(m.title, m.clean_title + ' #кофе #Здоровье'); assert.deepEqual(m.title_tags, ['#кофе', '#Здоровье']);
+  assert.ok(m.tags.length >= 1 && m.tags[0] === '#МедицинскийДетектив', 'рекомендация осталась отдельной');
+  const card = await lastCard(); assert.match(card.text, /Сахар делает детей гиперактивными\? Ответ в конце #кофе #Здоровье/); assert.match(card.text, /хэштеги в названии, как вы просили: #кофе #Здоровье/);
+});
+test('Ник просит «добавь хэштег в название» без имён: берётся то, что предложила модель (title_tags), не больше трёх', { skip: !can }, async () => {
+  fs.rmSync(path.join(ROOT, 'smm', 'runs', 'package_8'), { recursive: true, force: true });
+  const res = await runStage(['package', '8', '--comment', 'добавь один хэштег в название']); assert.equal(res.code, 0, res.out);
+  assert.deepEqual(meta().title_tags, ['#сахар']); assert.match(meta().title, / #сахар$/);
+});
+test('модель вставила хэштеги в название сама: автопроверка бракует, один шанс исправиться, итог чистый', { skip: !can }, async () => {
+  fs.rmSync(path.join(ROOT, 'smm', 'runs', 'package_8'), { recursive: true, force: true });
+  const res = await runStage(['package', '8'], { FAKE_PACK_MODE: 'hash_then_good' }); assert.equal(res.code, 0, res.out);
+  assert.ok(!meta().title.includes('#'));
+  const q2 = fs.readFileSync(path.join(ROOT, 'smm', 'runs', 'package_8', '_query_packageb.txt'), 'utf8'); assert.match(q2, /ПРОШЛЫЙ ВАРИАНТ ОТКЛОНЁН/); assert.match(q2, /хэштеги в название не ставим/, 'Тимофею названа причина отказа');
+});
+test('правка к названию: Тимофей получает текущее название и просьбу Ника, чтобы при «только хэштеги» оставить название прежним', { skip: !can }, async () => {
+  fs.rmSync(path.join(ROOT, 'smm', 'runs', 'package_8'), { recursive: true, force: true });
+  let res = await runStage(['package', '8']); assert.equal(res.code, 0, res.out);
+  res = await runStage(['package', '8', '--comment', 'название оставь, добавь в название #кофе']); assert.equal(res.code, 0, res.out);
+  const q = fs.readdirSync(path.join(ROOT, 'smm', 'runs', 'package_8')).filter((x) => /^_query_package/.test(x)).map((x) => fs.readFileSync(path.join(ROOT, 'smm', 'runs', 'package_8', x), 'utf8')).join('\n');
+  assert.match(q, /Текущее название: «Сахар делает детей гиперактивными\? Ответ в конце»/); assert.match(q, /оставь это название без изменений/); assert.match(q, /ХЭШТЕГИ В НАЗВАНИЕ НЕ ВСТАВЛЯЙ/); assert.match(q, /КЛИКБЕЙТ/); assert.match(q, /НЕ раскрывай вердикт/);
+});

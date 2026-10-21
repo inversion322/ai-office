@@ -10,9 +10,11 @@ if (/Тимофей Заголовков/.test(q) && /пакет публика�
     { title: 'Сахар делает детей гиперактивными? Ответ в конце', approach: 'вопрос', risk: 'нет' },
     { title: 'Все думают, что сахар шалит. Данные говорят иначе', approach: 'контраст', risk: 'нет' },
     { title: 'Конфета и шалости: что на самом деле происходит', approach: 'интрига', risk: 'слишком общее' }], best: 1, why: 'интрига закрывается приговором в ролике',
+    title_tags: ['#сахар'],
     hashtags: ['#fyp', '#МифыОЗдоровье', '#Сахар', '#ДетскоеПитание', '#сахар', '#viral', '#Здоровье', '#МедицинскийДетектив'], honesty: 'Хэштеги помогают найти ролик, а охват решает досмотр.' };
   const bad = { titles: [{ title: 'ШОК! Врачи скрывают: этот сахар вылечит всё', approach: 'шок', risk: 'нет' }], best: 1, why: 'x', hashtags: ['#fyp'] };
-  const payload = mode === 'bad_then_good' && !fs.existsSync(out + '.second') ? (fs.writeFileSync(out + '.second', '1'), bad) : mode === 'bad' ? bad : good;
+  const hashBad = { titles: [{ title: 'Сахар шалит? Ответ тут #сахар #дети', approach: 'вопрос', risk: 'нет' }], best: 1, why: 'x', hashtags: ['#МедицинскийДетектив', '#Сахар'] };   // хэштеги в названии: брак
+  const payload = (mode === 'bad_then_good' || mode === 'hash_then_good') && !fs.existsSync(out + '.second') ? (fs.writeFileSync(out + '.second', '1'), mode === 'hash_then_good' ? hashBad : bad) : mode === 'bad' ? bad : good;
   fs.writeFileSync(out, JSON.stringify(payload));
 }
 

@@ -220,7 +220,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     } else if (act === 'title' && v) {
       // Своё название вместо предложенного Тимофеем: кнопка без текста ждёт следующее сообщение Ника, с текстом сохраняет сразу
       const t = String(comment || '').replace(/\s+/g, ' ').trim();
-      if (!t) { kvSet('awaiting', JSON.stringify({ kind: 'title', id, mid: srcMsg && srcMsg.id, ts: now() })); cap('Напишите одним сообщением своё название ролика (до 100 знаков). Хэштеги останутся прежние.'); return {}; }
+      if (!t) { kvSet('awaiting', JSON.stringify({ kind: 'title', id, mid: srcMsg && srcMsg.id, ts: now() })); cap('Напишите одним сообщением своё название ролика (до 100 знаков). Хэштеги можно писать прямо в названии. Рекомендованные хэштеги уйдут в описание.'); return {}; }
       if (t.length > 100) { kvSet('awaiting', JSON.stringify({ kind: 'title', id, ts: now() })); cap(`Название длиннее 100 знаков (${t.length}): YouTube его не примет. Сократите и пришлите ещё раз.`); return {}; }
       supersede(`package:${id}"`); supersede(`title:${id}"`); supersede(`publish_go:${id}"`); supersede(`publish:${id}:`);
       cap(`Принято, ставлю ваше название: «${t}».`);

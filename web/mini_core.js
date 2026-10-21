@@ -80,8 +80,8 @@
   function commentMode(choice) {
     const act = String(choice || '').split(':')[0];
     if (act === 'rework' || act === 'revise') return { ask: true, required: true, title: 'Что исправить?', sub: act === 'rework' ? 'Кирилл учтёт это сразу, у ролика будет приоритет.' : 'Ксения исправит, Вера проверит заново.', cta: 'Отправить правки' };
-    if (act === 'title') return { ask: true, required: true, title: 'Своё название ролика', sub: 'До 100 знаков. Хэштеги останутся прежние.' };
-    if (act === 'package') return { ask: true, required: false, title: 'Какое название нужно?', sub: 'Можно без пожелания: Тимофей предложит другие варианты.', cta: 'Предложить другое' };
+    if (act === 'title') return { ask: true, required: true, title: 'Своё название ролика', sub: 'До 100 знаков. Хэштеги можно писать прямо в названии. Рекомендованные уйдут в описание.' };
+    if (act === 'package') return { ask: true, required: false, title: 'Какое название нужно?', sub: 'Можно без пожелания. Хэштеги в название по умолчанию не ставим; хотите, напишите: «в название #кофе #здоровье».', cta: 'Предложить другое' };
     return { ask: false };
   }
 
