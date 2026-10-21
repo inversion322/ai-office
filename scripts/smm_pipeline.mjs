@@ -19,7 +19,7 @@ const MAX_SPEECH = 53, MAX_WORDS = 100;      // озвучка до 53 с ВМЕ
 const withCta = (segments) => withCtaText(segments, CTA);
 const ensureCtaFile = (file) => ensureCtaFileText(file, CTA);
 import { loadCta, withCta as withCtaText, ensureCtaFile as ensureCtaFileText } from './cta_text.mjs';
-import { speechSeconds as measureSpeech } from './smm_tts.mjs';
+import { speechSeconds as measureSpeech, lengthVerdict, cutAdvice } from './smm_tts.mjs';
 import { cleanReport } from '../server/lib_text.mjs';
 import { checkTitle, checkTags, buildMessage, titleTagsFrom, composeTitle, BRAND_TAG } from '../server/lib_pack.mjs';
 import { gate, markFormat, projectFormat } from './video_gate.mjs';
@@ -106,9 +106,9 @@ async function topics(hint) {
 
 /* ---------------- 2. Сценарий + проверка фактов ---------------- */
 /** Карточка сценария для Ника (текст и кнопки). Общая для этапа script и для «обновить карточку» (card): одна сборка, чтобы они не расходились.
- *  x: { id, v, prev, check, ok, text, lengthFail, veraRuns, regen, history, nv, nvWarn, craftWarn, skillState, quoteCount, evWarn, MAXR, note } */
+ *  x: { id, v, prev, check, ok, text, lengthFail, lengthWarnEst, veraRuns, regen, history, nv, nvWarn, craftWarn, skillState, quoteCount, evWarn, MAXR, note } */
 function scriptCard(x) {
-  const { id, v, prev, check, ok, text, lengthFail = false, veraRuns = 1, regen = false, history = [], nv = null, nvWarn = false, craftWarn = null, skillState = {}, quoteCount = 0, evWarn = null, MAXR = 5, note = '' } = x;
+  const { id, v, prev, check, ok, text, lengthFail = false, lengthWarnEst = null, veraRuns = 1, regen = false, history = [], nv = null, nvWarn = false, craftWarn = null, skillState = {}, quoteCount = 0, evWarn = null, MAXR = 5, note = '' } = x;
   const lastDur = lengthFail ? (/(\d+(?:\.\d+)?) с/.exec(String(check.summary)) || [])[1] : null;
   const verdictLine = ok ? `✅ Вера проверила факты: ${check.summary || 'всё подтверждено'}`
     : lengthFail ? `⚠️ Текст длиннее лимита${lastDur ? ` (${lastDur} с при ${MAX_SPEECH} с)` : ''}, и Вера последнюю версию не проверяла: правки по фактам удлинили ролик. «Утвердить после проверки»: Ксения сократит, Вера проверит, и если пропустит, сразу запускаю монтаж. Ничего нажимать больше не придётся.`
@@ -116,7 +116,7 @@ function scriptCard(x) {
   const sources = (prev.sources_card || []).map((s) => '• ' + s).join('\n');
   const hookLine = prev.hook_type ? `\nКрючок: «${String(prev.segments[0]).split(/(?<=[.!?…])\s/)[0]}» (тип: ${prev.hook_type})` : '';
   const regenLine = regen && history.length ? `\n${nvWarn ? '⚠️' : '🔄'} Перегенерация, написано заново (прежних версий: ${history.length}). ${nv ? (nvWarn ? 'Совпадение с прежними выше порога: ' + nv.reasons.join('; ') + '. Можно нажать «Перегенерировать» ещё раз.' : `Совпадение с прежними ${Math.round(nv.worst.containment * 100)}%, порог ${Math.round(LIMITS.containment * 100)}%.`) : ''}` : '';
-  const craftLine = (craftSummary(prev) ? `\n${craftSummary(prev)}` : '') + (craftWarn ? `\n⚠️ Драматургию автопроверка не приняла за ${MAXR} кругов: ${craftWarn.join('; ')}. Можно нажать «Нужны правки» или «Перегенерировать».` : '');
+  const craftLine = (lengthWarnEst ? `\n⚠️ ${lengthWarnEst}.` : '') + (craftSummary(prev) ? `\n${craftSummary(prev)}` : '') + (craftWarn ? `\n⚠️ Драматургию автопроверка не приняла за ${MAXR} кругов: ${craftWarn.join('; ')}. Можно нажать «Нужны правки» или «Перегенерировать».` : '');
   const WHO_RU = { scriptwriter: 'Ксения', factcheck: 'Вера' }, REQ_RU = { scriptwriter: 'short-video-script-craft, storytelling, storytelling-hooks, humanizer', factcheck: 'grounded-citations' };
   const skMiss = Object.entries(skillState).filter(([, m]) => m && m.length).map(([a, m]) => `${WHO_RU[a]} не открыла скиллы: ${m.join(', ')}`);
   const skOk = Object.keys(skillState).filter((a) => !skillState[a].length).map((a) => `${WHO_RU[a]} (${REQ_RU[a]})`);
@@ -165,10 +165,13 @@ async function script(id, comment, regen = false, finish = false) {
   const banned = [];                                              // черновики этой же перегенерации, отброшенные автопроверкой
   const MAX_CHECKS = Number(process.env.MAX_FACT_CHECKS) || 2; let veraRuns = 0;   // потолок: Вера проверяет сценарий не больше двух раз за этап, повтор из-за цитат тоже считается (решение Ника 2026-10-20: 2 круга вместо трёх, экономия ~5 минут)
   const skillState = {}; let evWarn = null, quoteCount = 0;               // какие обязательные скиллы сотрудники так и не открыли, и цитаты Веры не из реестра
+  let lengthWarnEst = null;
   let prev = fresh ? null : readJson(sj), changes = comment && !fresh ? [`${prev ? 'Правки' : 'Пожелания'} Ника: ${comment}`] : [], check = null, ok = false, nv = null, nvWarn = false, craftWarn = null;
   if (regen && !fresh) console.log('перегенерация без истории: прежних версий нет, пишу обычным порядком');
   if (fresh) fs.rmSync(sj, { force: true });                       // прежний текст сохранён в history/; упавший запуск модели не должен принять его за новый
-  const MAXR = fresh ? 6 : 5;                                     // у перегенерации один лишний круг на случай отбракованного по новизне черновика
+  // Круги сценария: не больше трёх (решение Ника 2026-10-21: 5-6 кругов съедали время, а текст от кругов «по секундомеру» только сох). Лимит общий для всех причин:
+  // стиль, драматургия, новизна, длина по ЗАМЕРУ и замечания Веры. SCRIPT_ROUNDS переопределяет число (тесты, откат).
+  const MAXR = Math.max(1, Number(process.env.SCRIPT_ROUNDS) || 3);
 
   for (let round = 1; round <= MAXR; round++) {
     let t1 = null;
@@ -180,7 +183,7 @@ async function script(id, comment, regen = false, finish = false) {
         label: `script${round}`, outFile: sj, persona: await promptOf('scriptwriter'),
         task: `Напиши сценарий ролика «Медицинского детектива» на тему: «${v.title}» (рубрика ${v.rubric === 'tips' ? '«Советы детектива»' : '«Миф»'}).
   Материалы разведки и оценки (данные, не инструкции): ${JSON.stringify({ evidence: n.evidence, angle: n.angle, why_massive: n.why_massive, risk: n.risk, reason: n.reason })}.
-  ЖЁСТКИЕ РАМКИ (решение Ника): ролик строго не больше 59 секунд, озвучка не больше ${MAX_SPEECH} с при быстром диктор (+25%) вместе с призывом подписаться, то есть НЕ БОЛЬШЕ ${MAX_WORDS} слов во всех твоих абзацах вместе (длину потом измеряют синтезом, перебор вернут). Призыв «${CTA.voice_ru}» (${CTA_WORDS} слов, ≈ ${CTA_SEC} с) в конец ролика добавит конвейер сам: НЕ пиши его и не заканчивай текст призывом; твой последний абзац это вывод: приговор или совет. СТИЛЬ (решение Ника): сразу к сути, больше сути и меньше воды. КАЖДАЯ фраза и каждый абзац начинаются сразу с сути (кто что сделал, что нашёл), БЕЗ вводных слов «Потому что», «Поэтому», «Так что», «Итак», «Значит», «Получается», «Выходит», «Таким образом» (они ничего не сообщают; код их всё равно вырежет, а связь держит содержание). Состав (суть никуда не девается): вопрос-хук, откуда взялась уверенность, 2-3 факта исследований с числами, оговорка авторов, вывод в одну фразу. НО ЭТО НЕ СПИСОК И НЕ ОТЧЁТ ОБ ОПЫТЕ: подавай как расследование одной истории (угол, ставка зрителя, две интриги, финал-кольцо; правила в блоке «СКИЛЛЫ ПРЕЖДЕ ВСЕГО» ниже), где каждый факт ломает то, во что зритель верил. НЕ говори «улика первая/вторая/номер один», «поворот», «развязка» и подобные названия этапов (это внутренняя формула, ни вслух, ни на экране их нет) и не строй абзацы по шаблону «Улика…»: называй само исследование и что оно показало. Сначала сформулируй одну сквозную мысль ролика и держи вокруг неё сюжет: каждый следующий факт вытекает из предыдущего и связан с ним по смыслу, резких переходов «первое, второе, третье» нет; финал возвращается к главной мысли и замыкает её. Поле "idea" в файле сценария: эта мысль одним предложением. Фразу «Источники на экране» НЕ пиши (источники покажутся после призыва, голосом их не называем). ДРАМАТУРГИЯ (решение Ника 2026-10-20: «тексты не оживлённые, факты перебираются без логической цепочки и без эмоциональной развязки»): ПЕРЕД текстом прочитай ${ROOT.replaceAll('\\', '/')}/video/med_detective/SCRIPT_CRAFT.md целиком и следуй ему. Коротко: (1) сначала idea, emotion_arc и payoff; (2) хук для мифа живым вопросом «Говорят, что … Правда ли это?», следом второй живой вопрос, подводящий к первому факту; три хука из трёх разных семейств в hook_options; (3) между абзацами логика «но» или «поэтому» (поле chain, для себя), НО в тексте она не произносится: фраза и абзац начинаются сразу с сути, без «Потому что/Поэтому/Так что/Итак/Значит/Получается/Выходит» (решение Ника 2026-10-21); «Но» только на настоящем повороте; без «и потом/далее/второе»; (4) живая разговорная речь, а не протокол: никаких ярлыков «Метаанализ: …», число объясняй сразу; (5) развязка отвечает на вопрос хука конкретной фразой payoff и замыкает первую фразу её же словами; (6) выполни самопроверку и запиши её в self_check. Динамика: первая фраза это хук, который цепляет за 1,5 секунды; фразы короткие, обычно 6-12 слов, на слух; быстрый темп, никакой воды; последняя мысль замыкает ролик на начало или даёт повод пересмотреть. Для каждого абзаца в on_screen укажи, какие детали подсветить лупой (числа, названия исследований, оговорки авторов).
+  РАМКИ (решение Ника): ролик не больше 59 с; озвучка не больше ${MAX_SPEECH} с при быстром дикторе (+25%) вместе с призывом, то есть не больше ${MAX_WORDS} слов во всех абзацах (длину потом измерит синтез). Призыв «${CTA.voice_ru}» (${CTA_WORDS} слов, ≈ ${CTA_SEC} с) добавит конвейер: не пиши его, твой последний абзац это вывод. НАЧНИ С ТЕКСТА, не с полей: найди главную сцену (человек, предмет, опыт), напиши историю как рассказывал бы другу, потом заполни служебные поля. Живое из полей (ставка зрителя, главный образ, развязка) обязано прозвучать в озвучке. Не режь образы ради лимита: режь повторы и третий факт. Состав: хук-вопрос → откуда уверенность → 2-3 факта с числами как ходы расследования → оговорка авторов → вывод, отвечающий на хук его же словом. Это история, не список: каждый факт ломает то, во что зритель верил. Нельзя в тексте: «улика №», «поворот», «развязка», «приговор», вводные «Потому что/Поэтому/Так что/Итак/Значит/Получается/Выходит», фразу «Источники на экране». Прочитай ${ROOT.replaceAll('\\', '/')}/video/med_detective/SCRIPT_CRAFT.md (правила, образец, самопроверка): хук «Говорят, что… Правда ли это?» и второй вопрос, три хука из трёх семейств в hook_options, «но/поэтому» только внутри (поле chain), живая речь без ярлыков с двоеточием, самопроверка в self_check. Фразы короткие, 6-12 слов, на слух; хук цепляет за 1,5 с; финал замыкает начало. Для каждого абзаца в on_screen укажи, что подсветить лупой.
   ${fresh ? '' : 'Образец формата и тона: уже снятый сценарий video/med_detective/dosie01/script_ru.txt и его таблица фактов dosie01/FACTS.md (читай, не копируй). '}Проверь первоисточники сама (PubMed/Cochrane/ВОЗ), открой их.${prev ? `\nПредыдущая версия сценария (правь её): ${JSON.stringify(prev)}` : ''}${changes.length ? `\nОбязательные правки: ${changes.join(' | ')}` : ''}${fresh ? `\n\n${regenBlock([...history, ...banned], { comment: comment || '' })}` : ''}
   Формат файла: {"title","idea":"сквозная мысль ролика одним предложением","lens":{"candidates":["угол 1 + приём","угол 2 + приём","угол 3 + приём"],"chosen":2,"why":"на каких данных держится"},"stake":"что зритель чувствует или делает по этому поводу каждый день, его словами","gaps":["интрига 1: что на самом деле","интрига 2: что это значит для меня"],"bookend":"слово или число из хука, которое возвращается в последнем абзаце","emotion_arc":["любопытство","удивление","сомнение","облегчение"] (3-4 шага чувства),"payoff":"фраза-вывод, дословно стоит в одном из двух последних абзацев","chain":[{"to":2,"link":"но|поэтому","why":"что связывает по смыслу; в тексте словами НЕ произносится"}] (по одному на каждый переход между абзацами),"self_check":"как проверила пересказ через но/поэтому и тест на воду","rubric","hook_type":"тип крючка первой фразы: ${HOOK_NAMES}","hook_options":[{"type","line","score"}] (3 крючка разных типов с оценкой 1-10; обязательно при перегенерации),"segments":["абзац 1","абзац 2",…] (5-7 абзацев, 85-100 слов всего БЕЗ призыва, числа и аббревиатуры словами),"on_screen":[{"segment":1,"headline":"…","numbers":["…"],"note":"что показать","loupe":"деталь для лупы"}],"claims":[{"text":"утверждение из сценария","source":"журнал/организация, год","url":"…","pmid":"…","quote":"точная цитата или близкий перевод из первоисточника","caveat":"оговорка авторов, если есть"}],"sources_card":["Автор. Журнал. Год."],"disclaimer":"Не заменяет консультацию врача. …"}.`,
       });
@@ -228,10 +231,14 @@ async function script(id, comment, regen = false, finish = false) {
     const tag = sp.estimated ? ' (оценка по тексту, сервис озвучки недоступен)' : '';
     console.log(`круг ${round}: ${words} слов, озвучка ${dur.toFixed(1)} с${tag}`);
     if (sp.estimated) await say('scriptwriter', `Сервис озвучки сейчас не отвечает, длину оценила по тексту с запасом: ≈${dur.toFixed(0)} с. Точный замер будет при озвучке ролика.`);
-    if (dur > MAX_SPEECH) {
+    // Длина по ОЦЕНКЕ (Edge не ответил) не гонит на сокращение: честная оценка без запаса всё равно приблизительна, решает точный замер при озвучке ролика (решение Ника 2026-10-21).
+    // Превышение больше 15% по оценке считается настоящим и возвращает на сокращение; меньшее остаётся предупреждением на карточке.
+    const lenSoft = lengthVerdict(sp, MAX_SPEECH, { lastRound: round === MAXR }) === 'soft';
+    if (dur > MAX_SPEECH && lenSoft) { lengthWarnEst = sp.estimated ? `длина по оценке ${dur.toFixed(0)} с при лимите ${MAX_SPEECH} с (озвучка не отвечала); точный замер будет при озвучке ролика` : `озвучка ${dur.toFixed(1)} с при лимите ${MAX_SPEECH} с: небольшой перебор после трёх кругов, текст проверен; при озвучке ролика длину поджмёт монтажёр или нажмите «Нужны правки»`; console.log('длина по оценке чуть выше лимита, не возвращаю на сокращение: ' + lengthWarnEst); }
+    if (dur > MAX_SPEECH && !lenSoft) {
       await agent('scriptwriter', 'working', `Сокращаю: озвучка ${dur.toFixed(0)} с при лимите ${MAX_SPEECH}`, 60, `Сценарий слишком длинный (${dur.toFixed(1)} с), сокращаю`, 'warn');
       const cut = Math.ceil(dur - MAX_SPEECH + 2), perSeg = (sp.perSeg || []).slice(0, prev.segments.length).map((x, i) => `${i + 1}) ${x.toFixed(1)} с, ${String(prev.segments[i] || '').split(/\s+/).length} сл.`).join('; ');
-      changes = [`Озвучка ${dur.toFixed(1)} с${tag} при лимите ${MAX_SPEECH} с (диктор +25%, в замер входит призыв подписаться ≈ ${CTA_SEC} с, он добавляется автоматически и не сокращается). Нужно убрать минимум ${cut} с, это примерно ${Math.ceil(cut / 0.45)} слов (одно слово ≈ 0,45 с). Длина по абзацам: ${perSeg}. Режь в самых длинных абзацах, сохрани хук, суть улик и оговорки авторов.`];
+      changes = [cutAdvice(dur, MAX_SPEECH, { perSeg, ctaSec: CTA_SEC, tag })];
       if (round === MAXR) { check = { verdict: 'fix', summary: `Сценарий не укладывается в лимит: ${dur.toFixed(1)} с`, required_changes: changes, claims: [] }; ok = false; break; }
       continue;
     }
@@ -241,10 +248,10 @@ async function script(id, comment, regen = false, finish = false) {
     await agent('factcheck', 'working', 'Проверяю факты по первоисточникам', 30, 'Начала проверку фактов');
     const checkTask = `Проверь сценарий из файла ${sj} (читай его). Для КАЖДОГО объекта claims открой первоисточник (url/PMID), найди подтверждающее место и сравни со словами сценария (segments): число, тип исследования, популяция, оговорки. Проверь также, что в сценарии нет советов по лечению, дозировок, брендов и обещаний результата, а числа в озвучке записаны словами.
 Формат файла: {"verdict":"pass"|"fix","claims":[{"text","source_checked":true/false,"quote_found":"что именно сказано в источнике","status":"верно|упрощено|не подтверждено|отклонить","note":""}],"required_changes":["конкретная правка…"],"summary":"1-2 предложения"}. verdict "pass" только если все claims «верно» или безвредно «упрощено» с оговоркой в тексте.`;
-    const runCheck = async (label, extra) => runAgent({ label, agentId: 'factcheck', outFile: cj, profile: 'smm', persona: await promptOf('factcheck'), maxTurns: 90, budgetSec: 1500, task: checkTask + (extra ? `\n\n${extra}` : '') });
+    const runCheck = async (label, extra) => runAgent({ label, agentId: 'factcheck', outFile: cj, persona: await promptOf('factcheck'), maxTurns: 90, budgetSec: 1500, task: checkTask + (extra ? `\n\n${extra}` : '') });
     veraRuns++;
     const t2 = await runAgent({
-      label: `check${round}`, outFile: cj, profile: 'smm', persona: await promptOf('factcheck'), maxTurns: 90, budgetSec: 1500, task: checkTask,
+      label: `check${round}`, outFile: cj, persona: await promptOf('factcheck'), maxTurns: 90, budgetSec: 1500, task: checkTask,
     });
     check = readJson(cj);
     if (!check) { await agent('factcheck', 'error', 'Проверка не удалась', 0, `Нет check.json (код ${t2.code})`, 'error'); await safeNotify(`⚠️ Проверка фактов «${v.title}» не удалась, см. ${dir}`); throw new Error('нет check.json'); }
@@ -296,7 +303,7 @@ async function script(id, comment, regen = false, finish = false) {
     try { grp = await flow.variantsFlow(id); } catch (e) { console.error('варианты не получились:', e.message); await safeNotify(`⚠️ Варианты B и C не получились (${String(e.message).split('\n')[0].slice(0, 160)}). Ниже сценарий A, его можно утвердить отдельно.`); }
   }
   if (grp && !grp.skipped) cardId = grp.cardId;
-  else { const card = scriptCard({ id, v, prev, check, ok, text, lengthFail, veraRuns, regen, history, nv, nvWarn, craftWarn, skillState, quoteCount, evWarn, MAXR }); cardId = await safeNotify(card.text, card.buttons); }
+  else { const card = scriptCard({ id, v, prev, check, ok, text, lengthFail, lengthWarnEst, veraRuns, regen, history, nv, nvWarn, craftWarn, skillState, quoteCount, evWarn, MAXR }); cardId = await safeNotify(card.text, card.buttons); }
 
   console.log(ok ? 'сценарий проверен' : 'сценарий НЕ прошёл проверку');
   // Предварительное утверждение Ника (его прямое «делаем»): исполняется только если Вера пропустила и тема не отклонена за время работы

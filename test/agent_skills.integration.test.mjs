@@ -38,7 +38,7 @@ after(async () => { try { server && server.kill(); } catch {} await sleep(600); 
 test('задания сотрудников несут блоки скиллов: Ксения (script-craft, humanizer), Вера (реестр в папке сценария, команды sources.py), у каждого запуска своя метка', { skip: !can }, async () => {
   const { RUN } = await run('evidence_retry');
   const q1 = fs.readFileSync(path.join(RUN, '_query_script1.txt'), 'utf8'), q2 = fs.readFileSync(path.join(RUN, '_query_check1.txt'), 'utf8');
-  assert.match(q1, /СКИЛЛЫ ПРЕЖДЕ ВСЕГО/); assert.match(q1, /short-video-script-craft/); assert.match(q1, /humanizer/); assert.match(q1, /storytelling-hooks/); assert.match(q1, /"lens"/); assert.match(q1, /ЭТО НЕ СПИСОК И НЕ ОТЧЁТ ОБ ОПЫТЕ/); assert.match(q1, /\[метка запуска, служебная: RUN-script1-/);
+  assert.match(q1, /СКИЛЛЫ ПРЕЖДЕ ВСЕГО/); assert.match(q1, /short-video-script-craft/); assert.match(q1, /humanizer/); assert.match(q1, /storytelling-hooks/); assert.match(q1, /"lens"/); assert.match(q1, /НАЧНИ С ТЕКСТА, не с полей/); assert.match(q1, /Это история, не список/); assert.match(q1, /Ты Ксения Сюжетова/);   // персону сервер берёт из БД (в тестовой копии она старая), её содержание проверяет script_quality.test.mjs по сиду assert.match(q1, /\[метка запуска, служебная: RUN-script1-/);
   assert.match(q2, /grounded-citations/); assert.match(q2, /ledger\.json/); assert.match(q2, /sources\.py/); assert.match(q2, /\[метка запуска, служебная: RUN-check1-/);
 });
 
@@ -62,6 +62,6 @@ test('потолок проверок Веры: повтор из-за цита�
   assert.ok(!fs.existsSync(path.join(RUN, '_query_check1ev.txt'))); assert.match(card.text, /⚠️ У Веры не у всех фактов цитата из реестра/);
 });
 
-test('Ксении в задании назван бюджет слов по реальному синтезу (88-100 слов, призыв ≈ 8,4 с), без цифр, выведенных из оценки при выключенной озвучке', () => {
-  return import('../scripts/agent_skills.mjs').then(({ skillsBlock }) => { const b = skillsBlock('scriptwriter', { dir: 'C:/x' }); assert.match(b, /БЮДЖЕТ СЛОВ/); assert.match(b, /88-100 слов без призыва/); assert.match(b, /≈ 8,4 с/); assert.ok(!/76-84/.test(b)); });
+test('Ксении в задании назван бюджет слов по реальному синтезу (80-100 слов, призыв ≈ 8,4 с), без цифр, выведенных из оценки при выключенной озвучке', () => {
+  return import('../scripts/agent_skills.mjs').then(({ skillsBlock }) => { const b = skillsBlock('scriptwriter', { dir: 'C:/x' }); assert.match(b, /БЮДЖЕТ СЛОВ/); assert.match(b, /80-100 слов без призыва/); assert.match(b, /без запаса/); assert.match(b, /≈ 8,4 с/); assert.ok(!/76-84/.test(b)); });
 });

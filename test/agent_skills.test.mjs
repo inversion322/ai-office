@@ -25,7 +25,7 @@ test('скиллы лежат в профиле smm, из которого ра�
 
 test('блок Ксении: оба скилла, ограничение пунктов humanizer (31 и 32 запрещены), нельзя трогать числа, связки и строки Ника', () => {
   const b = skillsBlock('scriptwriter', { dir: 'C:/x/video_9' });
-  assert.match(b, /skill_view\('short-video-script-craft'\)/); assert.match(b, /skill_view\('humanizer'\)/); assert.match(b, /storytelling/); assert.match(b, /storytelling-hooks/); assert.match(b, /ИСТОРИЯ ДО ТЕКСТА/); assert.match(b, /lens/); assert.match(b, /bookend/); assert.match(b, /НЕ берёшь: выдуманные личные истории/); assert.match(b, /НЕ применяй 31 и 32/); assert.match(b, /Не трогай числа.*связки «но\/поэтому».*дословно/s); assert.match(b, /blocked-page-recovery/);
+  assert.match(b, /skill_view\('short-video-script-craft'\)/); assert.match(b, /skill_view\('humanizer'\)/); assert.match(b, /storytelling/); assert.match(b, /storytelling-hooks/); assert.match(b, /ИСТОРИЯ \(решение Ника 2026-10-21/); assert.match(b, /Сначала в уме выбери главную сцену/); assert.match(b, /lens/); assert.match(b, /bookend/); assert.match(b, /НЕ берёшь: выдуманные личные истории/); assert.match(b, /НЕ применяй 31 и 32/); assert.match(b, /Не трогай числа.*связки «но\/поэтому».*дословно/s); assert.match(b, /blocked-page-recovery/);
 });
 
 test('блок Веры: реестр лежит в папке сценария, команды с --ledger, PubMed через efetch в файл, цитату принимает только quote, в check.json поля source/ledger_id/quote_found', () => {

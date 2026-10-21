@@ -102,8 +102,14 @@ export async function sendVideoFile(file, caption, buttons) {
 /* ---------- запуск агента Hermes: персона из БД + задача; результат агент пишет в JSON ---------- */
 // Проверка «какие скиллы открыл запуск»: вынесена в объект, чтобы тест мог подменить базу сессий.
 export const skillCheck = { fn: skillsOpenedByRun };
-export async function runAgent({ profile = 'smm', persona, task, outFile, maxTurns = 80, budgetSec = 1500, label, agentId }) {
+/** Профиль Hermes (а значит и модель) по сотруднику. Сценарист и фактчекер на отдельном профиле `writer`: Opus 5.5 на средних усилиях
+ *  (решение Ника 2026-10-21: «тексты ужасные», Sonnet режет живое под лимит). Остальной отдел остаётся на `smm` (Sonnet).
+ *  Переопределение: env WRITER_PROFILE=smm возвращает Ксению и Веру на прежний профиль (откат без правки кода). */
+export const PROFILE_OF = { scriptwriter: 'writer', factcheck: 'writer' };
+export const profileFor = (agentId, env = process.env) => (PROFILE_OF[agentId] ? (env.WRITER_PROFILE || PROFILE_OF[agentId]) : 'smm');
+export async function runAgent({ profile, persona, task, outFile, maxTurns = 80, budgetSec = 1500, label, agentId }) {
   const who = agentId || WHO_BY_LABEL[String(label).replace(/\d+$/, '')] || 'captain_smm';
+  profile = profile || profileFor(who);                           // явно заданный профиль главнее таблицы
   await yieldToPriority(who);
   const dir = path.dirname(outFile); fs.mkdirSync(dir, { recursive: true });
   const required = process.env.SKILL_GATE === 'off' ? [] : requiredFor(who), block = skillsBlock(who, { dir });

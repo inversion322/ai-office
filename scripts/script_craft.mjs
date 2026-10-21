@@ -61,7 +61,7 @@ export function craftIssues(sc, { rubric = 'myth' } = {}) {
   }
   const hooks = Array.isArray(sc.hook_options) ? sc.hook_options : [];
   if (new Set(hooks.map((h) => String(h && h.type || '').toLowerCase()).filter(Boolean)).size < 3) add('hooks', 'hook_options: нужны 3 хука из 3 разных семейств (слух, откуда, эксперимент, контраст, цифра, история) с оценкой');
-  if (rubric === 'myth' && !/\?/.test(String(seg[0]).slice(0, 140))) add('hook-question', 'для мифа хук задаёт живой вопрос зрителю: «Говорят, что … Правда ли это?»');
+  if (rubric === 'myth' && !/\?/.test(String(seg[0]).slice(0, 140))) add('hook-question', 'для мифа в первых словах нужен вопрос зрителю, а за ним удар: неожиданный образ или противоречие, ответ на которое прозвучит только в конце (например «Говорят, что … Правда ли это?», если сам слух неожиданный)');
   return { ok: issues.length === 0, issues };
 }
 export function craftFeedback(issues) {

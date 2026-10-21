@@ -77,7 +77,7 @@ test('слишком похожий черновик отклоняется ав
 test('если новизны так и не вышло за все круги, Нику честно сказано об этом, а кнопка «Перегенерировать» остаётся', { skip: !can }, async () => {
   const { card } = await regen('always_similar');
   assert.match(card.text, /⚠️ Перегенерация/); assert.match(card.text, /выше порога/); assert.ok(card.buttons.flat().some((b) => b.d === 'regen:7'));
-  assert.equal(fs.readFileSync(path.join(RUN, 'script.json.calls'), 'utf8').trim(), '6', 'шесть кругов при перегенерации (было четыре) и ни одним больше');
+  assert.equal(fs.readFileSync(path.join(RUN, 'script.json.calls'), 'utf8').trim(), '3', 'три круга при перегенерации и ни одним больше (решение Ника 2026-10-21; раньше шесть)');
 });
 
 test('служебные слова в тексте («улика первая», «поворот», «приговор», «источники на экране») автоматически возвращаются Ксении, Нику приходит уже чистый сценарий', { skip: !can }, async () => {

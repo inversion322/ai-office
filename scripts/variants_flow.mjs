@@ -8,13 +8,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { styleIssues, styleFeedback, bridgeIssues, verdictIssues, cleanFillerOpeners, VERDICT_RE } from './script_style.mjs';
 import { craftIssues, craftFeedback } from './script_craft.mjs';
+import { lengthVerdict, cutAdvice } from './smm_tts.mjs';
 import { archiveScript, loadHistory } from './script_novelty.mjs';
 import { FORMATS, LETTERS, GAP_MIN, variantOf, formatOf, groupMembers, isGroup, enabledFormats, publishOrder, compareVariants, unknownNumbers, variantBrief, summaryRows, anchorOf, isDropped } from './variants.mjs';
 
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const NOTE = (v) => { try { return JSON.parse((v && v.notes) || '{}') || {}; } catch { return {}; } };
 const first = (t) => String(t || '').split(/(?<=[.!?…])\s/)[0];
-const MAXV = 4;                                       // кругов на один вариант (запись, проверки, исправления)
+const MAXV = Math.max(1, Number(process.env.SCRIPT_ROUNDS) || 3);   // кругов на один вариант (запись, проверки, исправления); как у сценария A: три (решение Ника 2026-10-21)
 
 export function makeFlow(deps) {
   const { ROOT, api, videos, getVideo, setVideo, runAgent, promptOf, agent, say, scene, safeNotify, speechSeconds, withCta, MAX_SPEECH, MAX_WORDS, ledgerPath, log = console.log } = deps;
@@ -65,7 +66,7 @@ export function makeFlow(deps) {
         label: `variant_${letter}_${round}`, outFile: sj, persona: await promptOf('scriptwriter'), maxTurns: 80, budgetSec: 1500, agentId: 'scriptwriter',
         task: `Напиши сценарий ролика «Медицинского детектива» (рубрика ${rubric === 'tips' ? '«Советы детектива»' : '«Миф»'}), тема: «${title}».
 ${brief}
-${history.length ? `Прежние версии этого варианта лежат в ${rel(path.join(dir, 'history'))}: новая версия не должна на них походить.\n` : ''}ЖЁСТКИЕ РАМКИ (те же, что у варианта A): озвучка не больше ${MAX_SPEECH} с при быстром диктор (+25%) вместе с призывом подписаться, то есть НЕ БОЛЬШЕ ${MAX_WORDS} слов в сценарии (призыв добавляет конвейер, сама его не пиши); в начале фраз нет «Потому что / Поэтому / Так что / Итак / Значит / Получается / Выходит / Таким образом / Вот почему / Дело в том / Ну / Короче»; слов «улика», «поворот», «развязка», «приговор», «заявление» и номеров улик нет; вердикт (миф или правда) звучит только в конце перед призывом, в хуке и заголовке его нет.
+${history.length ? `Прежние версии этого варианта лежат в ${rel(path.join(dir, 'history'))}: новая версия не должна на них походить.\n` : ''}ГЛАВНОЕ: это история со сценой, а не конспект. Каждый абзац можно нарисовать (человек, предмет, действие), ставка зрителя звучит вслух его словами, образы не режь ради лимита (режь повторы и третий факт); прочитай video/med_detective/SCRIPT_CRAFT.md, раздел «Сцена, а не тезис». Текст напиши раньше служебных полей. РАМКИ (те же, что у варианта A): озвучка не больше ${MAX_SPEECH} с при быстром диктор (+25%) вместе с призывом подписаться, то есть НЕ БОЛЬШЕ ${MAX_WORDS} слов в сценарии (призыв добавляет конвейер, сама его не пиши); в начале фраз нет «Потому что / Поэтому / Так что / Итак / Значит / Получается / Выходит / Таким образом / Вот почему / Дело в том / Ну / Короче»; слов «улика», «поворот», «развязка», «приговор», «заявление» и номеров улик нет; вердикт (миф или правда) звучит только в конце перед призывом, в хуке и заголовке его нет.
 Факты и источники только из ${rel(factsA)} и из файла варианта A; claims и источники бери оттуда, новых не придумывай.
 Формат файла и ВСЕ его поля ТОЧНО как в ${rel(sjA)} (прочитай его первым: title, idea, lens, stake, gaps, bookend, hook_type, chain, segments, claims, sources_card и остальные), запиши результат в ${rel(sj)}.${letter === 'C' ? '\nДля формата «Диалог» добавь поле «skeptic»: JSON-массив реплик Скептика, по одной на каждый абзац segments (без призыва).' : ''}
 ${prev && comment ? `Текущий текст варианта (правь его, а не пиши заново): ${rel(sj)}.\n` : ''}${changes.length ? `Что исправить в этом круге: ${changes.join(' ')}` : ''}`,
@@ -92,7 +93,7 @@ ${prev && comment ? `Текущий текст варианта (правь ег
         else if (sk.some((x) => VERDICT_RE.test(x))) bad.push('В реплике Скептика прозвучал вердикт (миф, ложь, фейк, правда как ярлык): вердикт только в конце, у утки.');
       }
       let sp = null; try { sp = await speechSeconds(withCta(cur.segments)); } catch (e) { warnings.push('длину не измерили: ' + String(e.message).split('\n')[0]); }
-      if (sp && sp.sec > MAX_SPEECH) bad.push(`Озвучка ${sp.sec.toFixed(1)} с при лимите ${MAX_SPEECH} с (в замер входит призыв подписаться ≈ 8 с, он добавляется сам): сократи текст.`);
+      if (sp && lengthVerdict(sp, MAX_SPEECH, { lastRound: round === MAXV }) === 'cut') bad.push(cutAdvice(sp.sec, MAX_SPEECH, { tag: sp.estimated ? ' (оценка по тексту)' : '' }));
       log(`вариант ${letter}, круг ${round}: ${cur.segments.join(' ').split(/\s+/).length} слов${sp ? `, озвучка ${sp.sec.toFixed(1)} с` : ''}${bad.length ? `, замечаний ${bad.length}` : ', чисто'}`);
       if (!bad.length) { prev = cur; return { ok: true, segments: cur.segments, hook_type: cur.hook_type, script: cur, warnings, sec: sp && sp.sec, skills: lastSkills }; }
       if (round === MAXV) { warnings.push(...bad.map((b) => b.split('\n')[0].slice(0, 220))); return { ok: true, segments: cur.segments, hook_type: cur.hook_type, script: cur, warnings, sec: sp && sp.sec, skills: lastSkills, soft: true }; }
@@ -109,7 +110,7 @@ ${prev && comment ? `Текущий текст варианта (правь ег
     await agent('factcheck', 'working', 'Сверяю варианты с проверенными фактами', 40, 'Сверка вариантов B и C с проверенными фактами');
     await scene('captain_smm', 'factcheck', 'Вера, сверь, пожалуйста, варианты с уже проверенными фактами.');
     await runAgent({
-      label: 'variants_check', agentId: 'factcheck', profile: 'smm', persona: await promptOf('factcheck'), maxTurns: 40, budgetSec: 900, outFile: out,
+      label: 'variants_check', agentId: 'factcheck', persona: await promptOf('factcheck'), maxTurns: 40, budgetSec: 900, outFile: out,
       task: `Сверка вариантов сценария по теме «${title}» с УЖЕ проверенными фактами. Первоисточники заново проходить не нужно, если утверждение покрыто проверкой варианта A.
 Проверенное: сценарий A ${rel(path.join(dirA, 'script.json'))}, твоя проверка ${rel(path.join(dirA, 'check.json'))}, таблица ${rel(path.join(dirA, 'FACTS.md'))}. Варианты на сверку: ${files}.
 Для КАЖДОГО варианта найди: (1) утверждения, которых нет среди проверенных; (2) искажение смысла (усилили вывод: «доказано» вместо «в исследовании на 50 мужчинах», обобщили на всех людей, убрали оговорку авторов); (3) числа, имена и годы не из проверенного. Мелочи подачи и разные формулировки одного и того же факта не считай ошибкой.
@@ -160,6 +161,8 @@ ${prev && comment ? `Текущий текст варианта (правь ег
         }
       }
     }
+    // после правок по замечаниям Веры writeVariant снова ставил Ксению «работает», и назад её не возвращал никто: в офисе она висела рабочей часами (21.10 с 19:59). Возвращаем явно.
+    await agent('scriptwriter', 'idle', 'Варианты готовы', 100, `Варианты готовы: ${ready.map((r) => r.letter).join(', ')}`);
     for (const r of ready.filter((x) => x.letter !== 'A')) await setVideo(r.id, { stage: 'checked', script_path: rel(path.join(runDir(r.id), 'script_ru.txt')) });
     const note = failed.length ? `⚠️ ${failed.map((f) => `Вариант ${f.letter} не получился (${f.why.slice(0, 120)})`).join('; ')}: идём тем, что есть.` : '';
     const cardId = await groupCard(id, { note, vera, ready });

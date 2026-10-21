@@ -90,7 +90,7 @@ test('вариант не получился (нет файла за все кр
     assert.deepEqual(r.ready, ['A', 'B']); assert.equal(r.failed.length, 1); assert.equal(r.failed[0].letter, 'C');
     assert.equal(db.find((v) => v.id === 3).stage, 'rejected'); const { text, buttons } = notified[0];
     assert.match(text, /Варианты сценария \(A, B\)/); assert.match(text, /Вариант C не получился/); assert.equal(buttons.flat()[0][0], 'Утвердить оба'); assert.doesNotMatch(buttons.flat().map((b) => b[1]).join(), /vdrop:3/);
-    assert.equal(calls.filter((c) => c.label.startsWith('variant_C')).length, 4, 'четыре круга и отказ');
+    assert.equal(calls.filter((c) => c.label.startsWith('variant_C')).length, 3, 'три круга и отказ (решение Ника 2026-10-21)');
   } finally { done(); }
 });
 
@@ -102,6 +102,8 @@ test('Вера нашла расхождение в варианте B: Ксен
     assert.equal(calls.filter((c) => c.label === 'variants_check').length, 2); const fix = calls.filter((c) => c.label.startsWith('variant_B')).pop();
     assert.match(fix.task, /Фактчекер просит исправить: вывод усилен/); assert.equal(calls.filter((c) => c.label.startsWith('variant_C')).length, 1, 'C не трогали');
     assert.match(fs.readFileSync(path.join(ROOT, 'smm', 'runs', 'video_2', 'script_ru.txt'), 'utf8'), /пятидесяти мужчинах/); assert.match(notified[0].text, /Вера сверила варианты.*теперь чисто/);
+    // регрессия 21.10: после правки по замечаниям Веры Ксения оставалась «работает» (часами). Последний её статус обязан быть idle.
+    const ks = statuses.filter((s) => s[0] === 'scriptwriter'); assert.ok(ks.some((s) => s[1] === 'working'), 'во время правки она работала'); assert.equal(ks[ks.length - 1][1], 'idle', 'после всех правок Ксения свободна: ' + JSON.stringify(ks.slice(-3)));
   } finally { done(); }
 });
 
