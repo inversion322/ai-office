@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const REQUIRED_SKILLS = ['hyperframes-animation', 'hyperframes-registry', 'vertical-video-editing'];
+// vizavi-motion добавлен 2026-10-21 (метод: раскадровка с вариантами, камера/глубина, доработка после первой сборки). Его умолчания (1920×1080, 60 к/с, музыка и звуки) НЕ действуют: правила канала важнее, это прописано в брифе.
+export const REQUIRED_SKILLS = ['hyperframes-animation', 'hyperframes-registry', 'vertical-video-editing', 'vizavi-motion'];
 const profileDb = (profile = 'video') => path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'hermes', 'profiles', profile, 'state.db');
 
 function collectSkills(db, sess) {

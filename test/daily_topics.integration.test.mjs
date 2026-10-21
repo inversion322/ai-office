@@ -11,12 +11,14 @@ import { copyLiveDb } from './fixtures/copy_db.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REAL = path.join(ROOT, 'server', 'data');
 const can = fs.existsSync(path.join(REAL, 'office.db')) && fs.existsSync(path.join(REAL, 'config.json'));
-const PORT = 9600 + (process.pid % 90), API = `http://127.0.0.1:${PORT}`;
+const PORT = 9800 + (process.pid % 90), API = `http://127.0.0.1:${PORT}`;
 const FAKE = path.join(ROOT, 'test', 'fixtures', 'fake_agent.mjs');
 let tmp, server, token, feedFile;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const api = async (p, body) => (await fetch(API + p, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json();
 const run = (extra = {}) => new Promise((resolve) => { const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'daily_topics.mjs'), '--channel', 'med_detective'], { cwd: ROOT, env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE, CHANNEL_FEED_FILE: feedFile, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] }); let out = ''; p.stdout.on('data', (b) => (out += b)); p.stderr.on('data', (b) => (out += b)); p.on('exit', (code) => resolve({ code, out })); });
+const RUNS = path.join(ROOT, 'smm', 'runs'), isDaily = (d) => /_daily_med_detective$/.test(d);
+let keep = new Set();      // настоящие подборки (их создаёт cron) тест не трогает: по ним считаются повторы
 const chat = async () => (await api('/api/chat?office=smm')).messages;
 const vids = async () => (await api('/api/state?office=smm')).videos;
 const newer = async (maxId) => (await vids()).filter((v) => v.id > maxId);     // API отдаёт список не по порядку добавления: новые = id больше прежнего максимума
@@ -24,6 +26,7 @@ const maxId = async () => Math.max(0, ...(await vids()).map((v) => v.id));
 
 before(async () => {
   if (!can) return;
+  keep = new Set(fs.readdirSync(RUNS).filter(isDaily));      // без try: если защита не сработала, тест должен упасть, а не удалить настоящие подборки
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'daily-test-')); copyLiveDb(REAL, tmp);
   feedFile = path.join(tmp, 'feed.json');      // «лента канала»: тема, которой нет в БД офиса, но она уже опубликована
   fs.writeFileSync(feedFile, JSON.stringify({ posts: [{ id: 1, title: 'Утренний кофе натощак вреден для желудка?' }] }));
@@ -31,7 +34,7 @@ before(async () => {
   server = spawn(process.execPath, [path.join(ROOT, 'server', 'server.mjs')], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', PORT: String(PORT) }, stdio: 'ignore' });
   for (let i = 0; i < 50; i++) { try { if ((await fetch(API + '/health')).ok) break; } catch {} await sleep(200); }
 });
-after(() => { try { server && server.kill(); } catch {} try { for (const d of fs.readdirSync(path.join(ROOT, 'smm', 'runs'))) if (/_daily_med_detective$/.test(d)) fs.rmSync(path.join(ROOT, 'smm', 'runs', d), { recursive: true, force: true }); } catch {} });
+after(() => { try { server && server.kill(); } catch {} try { for (const d of fs.readdirSync(RUNS)) if (isDaily(d) && !keep.has(d)) fs.rmSync(path.join(RUNS, d), { recursive: true, force: true }); } catch {} });
 
 test('подборка: повторы (офис, лента канала, прежние подборки) отсеяны, темы без первоисточника не берутся, приходит одна карточка с кнопками «Тема N» и «Другие темы»', { skip: !can }, async () => {
   await api('/api/video', { title: 'Нужно ходить ровно десять тысяч шагов в день?', stage: 'approved', score: 80, notes: '{}' });

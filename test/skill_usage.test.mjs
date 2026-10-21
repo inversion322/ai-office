@@ -28,8 +28,9 @@ test('читает вызовы skill_view только сессий, начат
 test('регрессия: сессия Кирилла только с core/keyframes/notes (как 2026-10-19..20) даёт предупреждение с нужными скиллами', () => {
   const { dir, file } = makeDb([{ id: 'k', t: T0 / 1000, skills: [['nick-hyperframes-notes'], ['hyperframes-core'], ['hyperframes-keyframes']] }]);
   try {
-    const note = skillUsageNote(T0 - 1000, file); assert.match(note, /не открыл обязательные скиллы: hyperframes-animation, hyperframes-registry, vertical-video-editing/);
-    assert.deepEqual(missingSkills(new Set(['hyperframes-animation', 'hyperframes-registry', 'vertical-video-editing'])), []);
+    const note = skillUsageNote(T0 - 1000, file); assert.match(note, /не открыл обязательные скиллы: hyperframes-animation, hyperframes-registry, vertical-video-editing, vizavi-motion/);
+    assert.deepEqual(missingSkills(new Set(['hyperframes-animation', 'hyperframes-registry', 'vertical-video-editing', 'vizavi-motion'])), []);
+    assert.deepEqual(missingSkills(new Set(['hyperframes-animation', 'hyperframes-registry', 'vertical-video-editing'])), ['vizavi-motion'], 'без vizavi-motion повтор запрашивается');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

@@ -27,12 +27,13 @@ async function boot(mode) {
   for (let i = 0; i < 40; i++) { try { if ((await fetch(API + '/health')).ok) return; } catch {} await sleep(300); }
 }
 const reset = () => { fs.rmSync(RUN, { recursive: true, force: true }); fs.mkdirSync(RUN, { recursive: true }); fs.writeFileSync(path.join(RUN, 'script.json'), JSON.stringify({ title: 'Сахар', segments: OLD, hook_type: 'сцена' })); };
+// Ищем только карточки новее своей (id > cid): в копии боевого чата лежит настоящая открытая карточка сценария.
 async function regen(mode) {
   await boot(mode); reset();
   await api('/api/video', { id: 7, title: 'Сахар делает детей гиперактивными?', stage: 'checked', rubric: 'myth' });
   const cid = (await api('/api/chat/post', { office: 'smm', thread: 'captain_smm', sender: 'captain_smm', text: 'Сценарий', buttons: [[['Утвердить сценарий', 'approve:7'], ['Нужны правки', 'revise:7']], [['🔄 Перегенерировать', 'regen:7'], ['Отклонить тему', 'reject:7']]], mirror: false })).id;
   const r = await api('/api/chat/answer', { id: cid, choice: 'regen:7', via: 'dashboard' }); assert.equal(r.ok, true);
-  for (let i = 0; i < 90; i++) { await sleep(1000); const m = (await api('/api/chat?office=smm')).messages.filter((x) => x.kind === 'action' && x.status === 'open' && /Сценарий: «/.test(x.text)); if (m.length) return { card: m[m.length - 1], all: (await api('/api/chat?office=smm')).messages }; }
+  for (let i = 0; i < 90; i++) { await sleep(1000); const m = (await api('/api/chat?office=smm')).messages.filter((x) => x.id > cid && x.kind === 'action' && x.status === 'open' && /Сценарий: «/.test(x.text)); if (m.length) return { card: m[m.length - 1], all: (await api('/api/chat?office=smm')).messages }; }
   throw new Error('карточка нового сценария не пришла за 90 с');
 }
 before(() => { if (!can) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'regen-test-')); copyLiveDb(REAL, tmp); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token; });
@@ -62,7 +63,7 @@ test('обычные «Нужны правки» по-прежнему прав�
   for (let i = 0; i < 90 && !fs.existsSync(path.join(RUN, '_query_script1.txt')); i++) await sleep(1000);
   const q = fs.readFileSync(path.join(RUN, '_query_script1.txt'), 'utf8');
   assert.match(q, /Предыдущая версия сценария \(правь её\)/); assert.match(q, /Правки Ника: Сделай концовку короче/); assert.ok(!/ПЕРЕГЕНЕРАЦИЯ/.test(q));
-  for (let i = 0; i < 90; i++) { await sleep(1000); if ((await api('/api/chat?office=smm')).messages.some((m) => m.kind === 'action' && m.status === 'open' && /Сценарий: «/.test(m.text))) break; }
+  for (let i = 0; i < 90; i++) { await sleep(1000); if ((await api('/api/chat?office=smm')).messages.some((m) => m.id > cid && m.kind === 'action' && m.status === 'open' && /Сценарий: «/.test(m.text))) break; }
 });
 
 test('слишком похожий черновик отклоняется автопроверкой, Ксения пишет заново, и итог уже новый', { skip: !can }, async () => {
