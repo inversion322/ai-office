@@ -1,4 +1,5 @@
 // Конвейер Nick G SMM.   node scripts/smm_pipeline.mjs topics [--hint "пожелание"]
+//                         node scripts/smm_pipeline.mjs card <id>   (обновить карточку сценария без запросов к моделям)
 //                         node scripts/smm_pipeline.mjs script <id> [--comment "правки"] [--regen] [--finish]   (--regen: написать заново, не правя прежний; --finish: довести текущий текст до длины и проверки Веры; если в video_N есть PREAPPROVED и Вера пропустила, сценарий сразу уходит в монтаж)
 //                         node scripts/smm_pipeline.mjs produce <id> [--comment "правки"]
 // topics: Виктор ищет кандидатов -> Лев оценивает -> бот присылает Нику темы кнопками (точка участия №1).
@@ -96,6 +97,52 @@ async function topics(hint) {
 }
 
 /* ---------------- 2. Сценарий + проверка фактов ---------------- */
+/** Карточка сценария для Ника (текст и кнопки). Общая для этапа script и для «обновить карточку» (card): одна сборка, чтобы они не расходились.
+ *  x: { id, v, prev, check, ok, text, lengthFail, veraRuns, regen, history, nv, nvWarn, craftWarn, skillState, quoteCount, evWarn, MAXR, note } */
+function scriptCard(x) {
+  const { id, v, prev, check, ok, text, lengthFail = false, veraRuns = 1, regen = false, history = [], nv = null, nvWarn = false, craftWarn = null, skillState = {}, quoteCount = 0, evWarn = null, MAXR = 5, note = '' } = x;
+  const lastDur = lengthFail ? (/(\d+(?:\.\d+)?) с/.exec(String(check.summary)) || [])[1] : null;
+  const verdictLine = ok ? `✅ Вера проверила факты: ${check.summary || 'всё подтверждено'}`
+    : lengthFail ? `⚠️ Текст длиннее лимита${lastDur ? ` (${lastDur} с при ${MAX_SPEECH} с)` : ''}, и Вера последнюю версию не проверяла: правки по фактам удлинили ролик. «Утвердить после проверки»: Ксения сократит, Вера проверит, и если пропустит, сразу запускаю монтаж. Ничего нажимать больше не придётся.`
+    : `⚠️ Вера НЕ пропустила (проверок Веры: ${veraRuns}): ${(check.required_changes || []).join('; ')}\n«Утвердить после проверки»: Ксения учтёт замечания, Вера проверит заново, и если пропустит, сразу запускаю монтаж.`;
+  const sources = (prev.sources_card || []).map((s) => '• ' + s).join('\n');
+  const hookLine = prev.hook_type ? `\nКрючок: «${String(prev.segments[0]).split(/(?<=[.!?…])\s/)[0]}» (тип: ${prev.hook_type})` : '';
+  const regenLine = regen && history.length ? `\n${nvWarn ? '⚠️' : '🔄'} Перегенерация, написано заново (прежних версий: ${history.length}). ${nv ? (nvWarn ? 'Совпадение с прежними выше порога: ' + nv.reasons.join('; ') + '. Можно нажать «Перегенерировать» ещё раз.' : `Совпадение с прежними ${Math.round(nv.worst.containment * 100)}%, порог ${Math.round(LIMITS.containment * 100)}%.`) : ''}` : '';
+  const craftLine = (craftSummary(prev) ? `\n${craftSummary(prev)}` : '') + (craftWarn ? `\n⚠️ Драматургию автопроверка не приняла за ${MAXR} кругов: ${craftWarn.join('; ')}. Можно нажать «Нужны правки» или «Перегенерировать».` : '');
+  const WHO_RU = { scriptwriter: 'Ксения', factcheck: 'Вера' }, REQ_RU = { scriptwriter: 'short-video-script-craft, storytelling, storytelling-hooks, humanizer', factcheck: 'grounded-citations' };
+  const skMiss = Object.entries(skillState).filter(([, m]) => m && m.length).map(([a, m]) => `${WHO_RU[a]} не открыла скиллы: ${m.join(', ')}`);
+  const skOk = Object.keys(skillState).filter((a) => !skillState[a].length).map((a) => `${WHO_RU[a]} (${REQ_RU[a]})`);
+  const skillLine = (skMiss.length ? `\n⚠️ ${skMiss.join('; ')}, даже после повтора: этот текст проверьте внимательнее.` : '') + (skOk.length ? `\n📚 Скиллы открыты: ${skOk.join('; ')}${quoteCount && skillState.factcheck && !skillState.factcheck.length ? `; цитат в реестре источников: ${quoteCount}` : ''}.` : '') + (evWarn ? `\n⚠️ У Веры не у всех фактов цитата из реестра: ${evWarn.slice(0, 3).join('; ')}.` : '');
+  return {
+    text: `📝 Сценарий: «${prev.title || v.title}»${note ? `\n${note}` : ''}${regenLine}${hookLine}${craftLine}${skillLine}\n\n${text}\n${verdictLine}\n\nИсточники:\n${sources}\n\nФайлы: smm/runs/video_${id}/ (script_ru.txt, FACTS.md)`,
+    buttons: ok ? [[['Утвердить сценарий', `approve:${id}`], ['Нужны правки', `revise:${id}`]], [['🔄 Перегенерировать', `regen:${id}`], ['Отклонить тему', `reject:${id}`]]]
+       : [[['Утвердить после проверки', `approve:${id}`], ['Нужны правки', `revise:${id}`]], [['🔄 Перегенерировать', `regen:${id}`], ['Отклонить тему', `reject:${id}`]]],
+  };
+}
+
+/** Обновить карточку сценария БЕЗ новых запросов к моделям: тот же сценарий и тот же вердикт Веры, но с актуальным текстом (убраны вводные слова), актуальной подписью скиллов и живыми кнопками.
+ *  Старая открытая карточка закрывается сервером сама («superseded»: те же кнопки). Только для сценария, который Вера уже пропустила. */
+async function recard(id) {
+  const v = await getVideo(id); if (!v) throw new Error('нет ролика #' + id);
+  if (v.stage !== 'checked') throw new Error(`ролик на этапе «${v.stage}»: карточка сценария нужна только пока он ждёт утверждения`);
+  const dir = path.join(ROOT, 'smm', 'runs', `video_${id}`), sj = path.join(dir, 'script.json'), cj = path.join(dir, 'check.json');
+  const prev = readJson(sj), check = readJson(cj);
+  if (!prev || !Array.isArray(prev.segments)) throw new Error('нет script.json');
+  if (!check || check.verdict !== 'pass') throw new Error('Вера этот сценарий не пропускала: карточку обновлять рано, нужен обычный этап script');
+  const cut = cleanFillerOpeners(prev);                                        // идемпотентно: если уже чисто, ничего не меняет
+  if (cut.length) fs.writeFileSync(sj, JSON.stringify(prev, null, 1), 'utf8');
+  const text = withCta(prev.segments).join('\n\n') + '\n';
+  fs.writeFileSync(path.join(dir, 'script_ru.txt'), text, 'utf8');
+  const latest = (re) => fs.readdirSync(dir).filter((f) => re.test(f)).map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs })).sort((a, b) => b.t - a.t)[0];
+  const skillState = {}; for (const [agent, re] of [['scriptwriter', /^_skills_script.*\.json$/], ['factcheck', /^_skills_check.*\.json$/]]) { const f = latest(re), j = f && readJson(path.join(dir, f.f)); if (j && j.checked) skillState[agent] = j.missing || []; }
+  const ledger = readJson(ledgerPath(dir)), quoteCount = ((ledger && ledger.sources) || []).reduce((s, x) => s + (x.quotes || []).length, 0);
+  const ev = process.env.EVIDENCE_GATE === 'off' ? { ok: true } : evidenceIssues(check, ledger);
+  const note = cut.length ? `🔁 Карточка обновлена: убраны вводные слова в начале фраз («${[...new Set(cut.map((c) => c.word))].join('», «')}»). Факты и числа те же, Вера уже проверила их.` : '🔁 Карточка обновлена: текст прежний, вердикт Веры прежний.';
+  const card = scriptCard({ id, v, prev, check, ok: true, text, skillState, quoteCount, evWarn: ev.ok ? null : ev.issues, note });
+  const cardId = await safeNotify(card.text, card.buttons);
+  console.log(cut.length ? 'убраны вводные слова: ' + cut.map((c) => `абз.${c.seg}`).join(', ') : 'текст без изменений', '| карточка', cardId);
+}
+
 async function script(id, comment, regen = false, finish = false) {
   const v = await getVideo(id); if (!v) throw new Error('нет ролика #' + id);
   const n = NOTE(v);
@@ -234,22 +281,10 @@ async function script(id, comment, regen = false, finish = false) {
   fs.writeFileSync(path.join(dir, 'FACTS.md'), facts, 'utf8');
   await setVideo(id, { stage: ok ? 'checked' : 'script', script_path: path.join('smm', 'runs', `video_${id}`, 'script_ru.txt'), notes: JSON.stringify({ ...n, check: { verdict: check.verdict, summary: check.summary, required_changes: check.required_changes } }) });
   await agent('captain_smm', 'waiting', ok ? 'Ждёт утверждения сценария Ником' : 'Вера не пропустила сценарий', 0, ok ? `Сценарий «${v.title}» проверен, нужен ответ Ника` : 'Сценарий не прошёл проверку');
-  const lastDur = lengthFail ? (/(\d+(?:\.\d+)?) с/.exec(String(check.summary)) || [])[1] : null;
-  const verdictLine = ok ? `✅ Вера проверила факты: ${check.summary || 'всё подтверждено'}`
-    : lengthFail ? `⚠️ Текст длиннее лимита${lastDur ? ` (${lastDur} с при ${MAX_SPEECH} с)` : ''}, и Вера последнюю версию не проверяла: правки по фактам удлинили ролик. «Утвердить после проверки»: Ксения сократит, Вера проверит, и если пропустит, сразу запускаю монтаж. Ничего нажимать больше не придётся.`
-    : `⚠️ Вера НЕ пропустила (проверок Веры: ${veraRuns}): ${(check.required_changes || []).join('; ')}\n«Утвердить после проверки»: Ксения учтёт замечания, Вера проверит заново, и если пропустит, сразу запускаю монтаж.`;
-  const sources = (prev.sources_card || []).map((s) => '• ' + s).join('\n');
-  const hookLine = prev.hook_type ? `\nКрючок: «${String(prev.segments[0]).split(/(?<=[.!?…])\s/)[0]}» (тип: ${prev.hook_type})` : '';
-  const regenLine = regen && history.length ? `\n${nvWarn ? '⚠️' : '🔄'} Перегенерация, написано заново (прежних версий: ${history.length}). ${nv ? (nvWarn ? 'Совпадение с прежними выше порога: ' + nv.reasons.join('; ') + '. Можно нажать «Перегенерировать» ещё раз.' : `Совпадение с прежними ${Math.round(nv.worst.containment * 100)}%, порог ${Math.round(LIMITS.containment * 100)}%.`) : ''}` : '';
-  const craftLine = (craftSummary(prev) ? `\n${craftSummary(prev)}` : '') + (craftWarn ? `\n⚠️ Драматургию автопроверка не приняла за ${MAXR} кругов: ${craftWarn.join('; ')}. Можно нажать «Нужны правки» или «Перегенерировать».` : '');
-  const WHO_RU = { scriptwriter: 'Ксения', factcheck: 'Вера' }, REQ_RU = { scriptwriter: 'short-video-script-craft, humanizer', factcheck: 'grounded-citations' };
-  const skMiss = Object.entries(skillState).filter(([, m]) => m && m.length).map(([a, m]) => `${WHO_RU[a]} не открыла скиллы: ${m.join(', ')}`);
-  const skOk = Object.keys(skillState).filter((a) => !skillState[a].length).map((a) => `${WHO_RU[a]} (${REQ_RU[a]})`);
-  const skillLine = (skMiss.length ? `\n⚠️ ${skMiss.join('; ')}, даже после повтора: этот текст проверьте внимательнее.` : '') + (skOk.length ? `\n📚 Скиллы открыты: ${skOk.join('; ')}${quoteCount && skillState.factcheck && !skillState.factcheck.length ? `; цитат в реестре источников: ${quoteCount}` : ''}.` : '') + (evWarn ? `\n⚠️ У Веры не у всех фактов цитата из реестра: ${evWarn.slice(0, 3).join('; ')}.` : '');
   const preApproved = fs.existsSync(PRE);
-  const cardId = await safeNotify(`📝 Сценарий: «${prev.title || v.title}»${regenLine}${hookLine}${craftLine}${skillLine}\n\n${text}\n${verdictLine}\n\nИсточники:\n${sources}\n\nФайлы: smm/runs/video_${id}/ (script_ru.txt, FACTS.md)`,
-    ok ? [[['Утвердить сценарий', `approve:${id}`], ['Нужны правки', `revise:${id}`]], [['🔄 Перегенерировать', `regen:${id}`], ['Отклонить тему', `reject:${id}`]]]
-       : [[['Утвердить после проверки', `approve:${id}`], ['Нужны правки', `revise:${id}`]], [['🔄 Перегенерировать', `regen:${id}`], ['Отклонить тему', `reject:${id}`]]]);
+  const card = scriptCard({ id, v, prev, check, ok, text, lengthFail, veraRuns, regen, history, nv, nvWarn, craftWarn, skillState, quoteCount, evWarn, MAXR });
+  const cardId = await safeNotify(card.text, card.buttons);
+
   console.log(ok ? 'сценарий проверен' : 'сценарий НЕ прошёл проверку');
   // Предварительное утверждение Ника (его прямое «делаем»): исполняется только если Вера пропустила и тема не отклонена за время работы
   if (preApproved) {
@@ -501,6 +536,7 @@ const [cmd, a1, ...rest] = process.argv.slice(2);
 const opt = (name, from) => { const i = from.indexOf(name); return i >= 0 ? from[i + 1] : ''; };
 const all = [a1, ...rest];
 const runOnce = () => cmd === 'topics' ? topics(opt('--hint', all))
+  : cmd === 'card' ? recard(a1)
   : cmd === 'script' ? script(a1, opt('--comment', rest), all.includes('--regen'), all.includes('--finish'))
   : cmd === 'produce' ? produce(a1, opt('--comment', rest))
   : cmd === 'rework' ? rework(a1, opt('--comment', rest))

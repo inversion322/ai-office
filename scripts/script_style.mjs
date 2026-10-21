@@ -85,7 +85,7 @@ export function fillerOpeners(segments = []) {
 /** Вырезает вводное слово и поднимает первую букву: «Так что британцы…» -> «Британцы…». Возвращает { text, changed:[{from,to}] }. */
 export function stripFillerOpeners(text) {
   const changed = []; const re = fillerRe();
-  const t = String(text == null ? '' : text).replace(re, (m, pre, ch, off, whole) => { const to = pre + ch.toUpperCase(); changed.push({ from: SHOW(whole, off + pre.length), to: SHOW(whole.slice(0, off) + to + whole.slice(off + m.length), off + pre.length) }); return to; });
+  const t = String(text == null ? '' : text).replace(re, (m, pre, ch, off, whole) => { const to = pre + ch.toUpperCase(); changed.push({ word: m.slice(pre.length, m.length - ch.length).replace(/[\s,:—–-]+$/, ''), from: SHOW(whole, off + pre.length), to: SHOW(whole.slice(0, off) + to + whole.slice(off + m.length), off + pre.length) }); return to; });
   return { text: t, changed };
 }
 /** Чистит сценарий (script.json) на месте: абзацы и payoff. Возвращает список правок [{seg, from, to}]. */

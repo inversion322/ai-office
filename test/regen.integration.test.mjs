@@ -103,6 +103,24 @@ test('драматургия: «перебор фактов» без идеи, �
   assert.equal(now.payoff, 'буря на празднике это не сахар, а сам праздник');
 });
 
+test('«обновить карточку» (card): тот же сценарий и вердикт Веры без запросов к моделям, вводные слова убраны, старая карточка закрыта, новая с живыми кнопками', { skip: !can }, async () => {
+  const { card: old } = await regen('craft');
+  const f = path.join(RUN, 'script.json'), sc = JSON.parse(fs.readFileSync(f, 'utf8'));
+  sc.segments[1] = 'Так что ' + sc.segments[1][0].toLowerCase() + sc.segments[1].slice(1); sc.segments[sc.segments.length - 1] = 'Поэтому ' + sc.segments[sc.segments.length - 1][0].toLowerCase() + sc.segments[sc.segments.length - 1].slice(1);
+  fs.writeFileSync(f, JSON.stringify(sc, null, 1));
+  const qBefore = fs.statSync(path.join(RUN, 'script.json.queries')).size, checkBefore = fs.readFileSync(path.join(RUN, 'check.json'), 'utf8');
+  const res = await new Promise((resolve) => { const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'card', '7'], { cwd: ROOT, env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE, OFFICE_DATA_DIR: tmp, SMM_TTS_ESTIMATE_ONLY: '1' }, stdio: ['ignore', 'pipe', 'pipe'] }); let o = ''; p.stdout.on('data', (b) => (o += b)); p.stderr.on('data', (b) => (o += b)); p.on('exit', (code) => resolve({ code, out: o })); });
+  assert.equal(res.code, 0, res.out); assert.match(res.out, /убраны вводные слова: абз\.2, абз\.\d/);
+  assert.equal(fs.statSync(path.join(RUN, 'script.json.queries')).size, qBefore, 'к модели Ксении новых запросов нет'); assert.equal(fs.readFileSync(path.join(RUN, 'check.json'), 'utf8'), checkBefore, 'вердикт Веры не тронут');
+  const msgs = (await api('/api/chat?office=smm')).messages, fresh = msgs.filter((x) => x.id > old.id && x.kind === 'action' && x.status === 'open' && /Сценарий: «/.test(x.text)).pop();
+  assert.ok(fresh, 'новой карточки нет'); assert.match(fresh.text, /Карточка обновлена: убраны вводные слова/); assert.ok(fresh.buttons.flat().some((b) => b.d === 'approve:7') && fresh.buttons.flat().some((b) => b.d === 'regen:7'));
+  assert.match(fresh.text.split('\n')[1], /«Так что», «Поэтому»/); assert.doesNotMatch(fresh.text.split('\n').slice(2).join('\n'), /Так что |Поэтому /); assert.match(fresh.text, /Вера проверила факты/);
+  const was = msgs.find((x) => x.id === old.id); assert.equal(was.status, 'answered'); assert.equal(was.choice, 'superseded', 'старая карточка закрыта сервером');
+  assert.doesNotMatch(fs.readFileSync(path.join(RUN, 'script_ru.txt'), 'utf8'), /Так что |Поэтому /);
+  const again = await new Promise((resolve) => { const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'card', '7'], { cwd: ROOT, env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE, OFFICE_DATA_DIR: tmp }, stdio: ['ignore', 'pipe', 'pipe'] }); let o = ''; p.stdout.on('data', (b) => (o += b)); p.on('exit', (code) => resolve({ code, out: o })); });
+  assert.equal(again.code, 0); assert.match(again.out, /текст без изменений/, 'повтор идемпотентен');
+});
+
 test('сессия Mini App может убрать карточку и сбросить ожидание сотрудника, но по-прежнему не может править промпты', { skip: !can }, async () => {
   const { signInitData } = await import('../server/lib_tgauth.mjs');
   const bot = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).smmBotToken;
