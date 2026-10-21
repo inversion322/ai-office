@@ -77,3 +77,22 @@ if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   if (mode !== 'no_plan') fs.writeFileSync(proj + '/LIBRARY_PLAN.json', refPlan);
   fs.writeFileSync(proj + '/RESULT.md', '# Результат\nГотово (имитация).' + (mode === 'no_plan' ? '' : '\n\n## Использовано из библиотеки\n- iris-reveal, caption-highlight (имитация)'));
 }
+
+// ---- Ежедневные темы (Виктор и Лев). FAKE_DAILY_MODE: ok | all_dups (всё повторы) | dups_then_new (1 круг повторы, 2 новые)
+if (/кандидатов на тему следующего ролика канала/.test(q) && /УЖЕ ЕСТЬ, НЕ ПОВТОРЯТЬ/.test(q)) {
+  const out = /Формат файла (.+?\.json)/.exec(q)[1].trim(), mode = process.env.FAKE_DAILY_MODE || 'ok';
+  const cnt = out + '.calls'; const n = (fs.existsSync(cnt) ? Number(fs.readFileSync(cnt, 'utf8')) : 0) + 1; fs.writeFileSync(cnt, String(n));
+  const ev = [{ source: 'PubMed', url: 'https://pubmed.ncbi.nlm.nih.gov/1/', pmid: '1', finding: 'ответ однозначный' }];
+  const mk = (title, extra = {}) => ({ title, rubric: 'myth', why_massive: 'массовый и сезонный', evidence: ev, clear_answer: true, detective_angle: 'откуда миф', competitors: '-', ...extra });
+  const DUPS = [mk('Нужно ходить ровно десять тысяч шагов в день?'), mk('Антибиотики помогают от простуды и ОРВИ?'), mk('Сахар делает детей гиперактивными?')];
+  const NEW = [mk('Правда ли, что мокрые волосы на холоде вызывают простуду?'), mk('Магний от судорог ночью: работает ли?'), mk('Утренний кофе натощак вредит желудку?'), mk('Холодный душ укрепляет иммунитет?'), mk('Пить воду во время еды вредно для пищеварения?'), mk('Мёд лучше сахара при диабете?'), mk('Бабушкина горчица в носках лечит кашель?'), mk('Нужно ли пить пробиотики после антибиотиков?'), mk('Фрукты вечером превращаются в жир?'), mk('Лишний вес только от переедания?'), mk('Блюдо без Е-добавок всегда безопаснее?'),
+    mk('Тема без источника', { evidence: [] })];
+  const NEW2 = [mk('Правда ли, что от жвачки болит живот?'), mk('Чеснок защищает от вирусов осенью?'), mk('Нужна ли детоксикация организма смузи?'), mk('Лимон с водой по утрам щелочит организм?')];
+  const payload = mode === 'all_dups' ? DUPS : mode === 'dups_then_new' ? (n === 1 ? DUPS : NEW2) : mode === 'ok' ? [...DUPS.slice(0, 1), ...NEW] : NEW;
+  fs.writeFileSync(out, JSON.stringify(payload));
+}
+if (/Оцени кандидатов из файла/.test(q) && /daily_fresh\.json/.test(q)) {
+  const out = /Формат файла (.+?\.json)/.exec(q)[1].trim(), inp = /кандидатов из файла (.+?\.json)/.exec(q)[1].trim();
+  const cands = JSON.parse(fs.readFileSync(inp, 'utf8'));
+  fs.writeFileSync(out, JSON.stringify(cands.map((c, i) => ({ title: c.title, rubric: 'myth', gates_passed: true, scores: { reach: 8 }, total: 90 - i * 3, confidence: 'medium', data_sources: ['PubMed'], main_risk: '-', recommendation: 'снимать', reason: 'массовый вопрос, ответ однозначный' }))));
+}
