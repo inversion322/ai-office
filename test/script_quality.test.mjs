@@ -6,6 +6,8 @@ import { profileFor, PROFILE_OF } from '../scripts/smm_lib.mjs';
 import { lengthVerdict, cutAdvice, ESTIMATE_BIAS, ESTIMATE_MARGIN, SOFT_OVER, LAST_ROUND_OVER } from '../scripts/smm_tts.mjs';
 import { EXTRA_AGENTS, CRAFT_MARK, FORMAT_MARK, RULES_MARK, STORY_MARK, VERDICT_MARK, STYLE_MARK } from '../server/lib_extra_agents.mjs';
 import { SOURCES_PY } from '../scripts/agent_skills.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { ensureExtraAgents } from '../server/lib_extra_agents.mjs';
 
 test('Ксения и Вера идут на профиль writer (Opus 5.5 medium), остальной отдел на smm; WRITER_PROFILE=smm откатывает', () => {
   assert.equal(profileFor('scriptwriter', {}), 'writer'); assert.equal(profileFor('factcheck', {}), 'writer');
@@ -59,4 +61,20 @@ test('подсказка на сокращение: секунды по абза
   const m = cutAdvice(56.4, 53, { perSeg: '1) 6.9 с, 13 сл.; 2) 8.3 с, 16 сл.' });
   assert.match(m, /Нужно убрать около 5 с/); assert.match(m, /Секунды, не слова/); assert.match(m, /РЕЖЬ: повторы/); assert.match(m, /НЕ РЕЖЬ: сцену/); assert.match(m, /1\) 6\.9 с/);
   assert.doesNotMatch(m, /≈ 0,4\d с/, 'константы секунд на слово больше нет: она гуляет от 0,40 до 0,59'); assert.doesNotMatch(m, /примерно \d+ слов/); assert.doesNotMatch(m, /улик/i, 'слова «улика» в подсказке нет: оно под запретом');
+});
+
+test('новая редакция персоны Ксении реально попадает в БД, где старая уже стояла (маркер в kv одноразовый, нужен promptRev); повторный старт не плодит версий', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE agents (id TEXT PRIMARY KEY, name TEXT, role TEXT, team TEXT, model TEXT, status TEXT, task TEXT, progress INT, color TEXT, desk INT, look TEXT, updated_at INT, office TEXT);
+    CREATE TABLE prompts (agent_id TEXT PRIMARY KEY, body TEXT, version INT, updated_at INT); CREATE TABLE prompt_history (agent_id TEXT, version INT, body TEXT, ts INT);
+    CREATE TABLE skills (id TEXT PRIMARY KEY, name TEXT, description TEXT); CREATE TABLE agent_skills (agent_id TEXT, skill_id TEXT, PRIMARY KEY (agent_id, skill_id));
+    CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT); CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INT, agent_id TEXT, level TEXT, message TEXT);`);
+  // состояние боевой БД до сегодня: Ксения есть, старая персона из семи блоков, базовый маркер уже стоит
+  db.prepare("INSERT INTO agents (id,name,role,team,model,status,task,progress,color,desk,look,updated_at,office) VALUES ('scriptwriter','Ксения','Scriptwriter','content','claude-sonnet-5-5','idle','',0,'#000',2,'pen',0,'smm')").run();
+  db.prepare("INSERT INTO prompts VALUES ('scriptwriter','СТАРАЯ ПЕРСОНА ДРАМАТУРГИЯ (решение Ника 2026-10-20',11,0)").run(); db.prepare("INSERT INTO kv VALUES ('office-smm-v2:scriptwriter','1')").run();
+  ensureExtraAgents(db);
+  const p = db.prepare("SELECT body, version FROM prompts WHERE agent_id='scriptwriter'").get();
+  assert.match(p.body, /можно ли его нарисовать/); assert.doesNotMatch(p.body, /СТАРАЯ ПЕРСОНА/); assert.equal(p.version, 12);
+  assert.equal(db.prepare("SELECT model FROM agents WHERE id='scriptwriter'").get().model, 'claude-opus-5-5', 'модель в карточке тоже обновилась');
+  ensureExtraAgents(db); assert.equal(db.prepare("SELECT version FROM prompts WHERE agent_id='scriptwriter'").get().version, 12, 'второй старт: ничего не меняет');
 });

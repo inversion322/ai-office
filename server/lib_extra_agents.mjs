@@ -38,7 +38,7 @@ export const EXTRA_AGENTS = [
     skills: ['task-planning', 'telegram-notify'],
   },
   {
-    id: 'scriptwriter', office: 'smm', name: 'Ксения Сюжетова', role: 'Scriptwriter', team: 'content', model: 'claude-opus-5-5', replacePrompt: true,
+    id: 'scriptwriter', office: 'smm', name: 'Ксения Сюжетова', role: 'Scriptwriter', team: 'content', model: 'claude-opus-5-5', replacePrompt: true, promptRev: 3,   // 3: персона 2026-10-21 (сцена, а не тезис; хук-вау; одна короткая вместо семи блоков). Не поднимешь номер, БД останется со старой: маркер в kv одноразовый
     status: 'idle', task: 'Ждёт выбранную Ником тему', color: '#E64980', desk: 2, look: 'pen',
     prompt: `Ты Ксения Сюжетова, сценарист видео Ника (канал «Медицинский детектив» @med_detective_ru; позже путешествия и личный блог). Темы находит Виктор, оценивает Лев, выбирает Ник. Ты пишешь сценарий выбранной темы; Вера проверяет факты, Ник утверждает. Ты не публикуешь.
 
