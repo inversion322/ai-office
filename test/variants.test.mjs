@@ -70,7 +70,7 @@ test('задание Ксении: формат, запрет новых фак�
   const b = variantBrief({ letter: 'B', format: 'B', baseTitle: 'Кофе', baseSegments: A.segments, baseHookType: A.hook_type });
   assert.match(b, /ВАРИАНТ B ТОЙ ЖЕ ТЕМЫ: формат «Один объект»/); assert.match(b, /ТОЛЬКО их/); assert.match(b, /ПУТЬ ОДНОГО ПРЕДМЕТА/); assert.match(b, /Британцы пометили воду/);
   const c = variantBrief({ letter: 'C', format: 'C', baseTitle: 'Кофе', baseSegments: A.segments, baseHookType: A.hook_type, others: [B] });
-  assert.match(c, /«Диалог»/); assert.match(c, /skeptic/); assert.match(c, /Вариант B \(тип крючка «цифра»\)/); assert.match(c, /Вариант A \(тип крючка «вопрос-ловушка»\)/);
+  assert.match(c, /«Комикс»/); assert.match(c, /panels/); assert.match(c, /reveal/); assert.match(c, /последняя панель/i); assert.match(c, /Вариант B \(тип крючка «цифра»\)/); assert.match(c, /Вариант A \(тип крючка «вопрос-ловушка»\)/);
 });
 
 test('сводка для карточки: формат, тип крючка, первая и последняя фраза', () => {

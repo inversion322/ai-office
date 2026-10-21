@@ -14,7 +14,7 @@ import { checkVerdictLabels } from './check_verdict_label.mjs';
 
 const fmtFile = (proj) => path.join(proj, 'format.json');
 const FORMATS_OK = ['A', 'B', 'C'];
-/** Формат проекта по format.json (A «Лента», B «Один объект», C «Диалог») или null: у принятых роликов старого формата метки нет. */
+/** Формат проекта по format.json (A «Лента», B «Один объект», C «Комикс») или null: у принятых роликов старого формата метки нет. */
 export const projectFormat = (proj) => { try { const f = JSON.parse(fs.readFileSync(fmtFile(proj), 'utf8')).format; return FORMATS_OK.includes(f) ? f : null; } catch { return null; } };
 export const hasFormat = (proj) => !!projectFormat(proj);
 export const isFormatA = (proj) => projectFormat(proj) === 'A';

@@ -321,8 +321,14 @@ async function script(id, comment, regen = false, finish = false) {
 }
 
 /* ---------------- 3. Озвучка и монтаж (Кирилл, Opus 5.5, high) ---------------- */
-// Реплики «Скептика» формата C: лежат рядом со сценарием (skeptic.json), монтажёру передаются в задании дословно
-function skepticLine(dir) { try { const a = JSON.parse(fs.readFileSync(path.join(dir, 'skeptic.json'), 'utf8')); return Array.isArray(a) && a.length ? a.map((t, i) => `[${i + 1}] ${t}`).join(' ') : ''; } catch { return ''; } }
+// Панели формата C «Комикс» (panels.json: сцена и подпись на каждый абзац; reveal.txt: что проявится в последней пустой панели): монтажёру передаются в задании дословно
+function panelsLine(dir) {
+  try {
+    const a = JSON.parse(fs.readFileSync(path.join(dir, 'panels.json'), 'utf8')); if (!Array.isArray(a) || !a.length) return '';
+    let reveal = ''; try { reveal = fs.readFileSync(path.join(dir, 'reveal.txt'), 'utf8').trim(); } catch {}
+    return a.map((t, i) => `Панель ${i + 1}: ${String(t.scene || '').trim()}${t.caption ? ` (подпись: «${String(t.caption).trim()}»)` : ''}`).join('\n') + `\nПоследняя панель (пустая с «?» весь ролик, проявляется только на развязке): ${reveal || 'см. reveal в script.json'}`;
+  } catch { return ''; }
+}
 async function produce(id, comment) {
   const v = await getVideo(id); if (!v) throw new Error('нет ролика #' + id);
   const ed = editorOf(v), fmt = formatOf(v), vr = variantOf(v), tag = vr ? ` · вариант ${vr.letter} «${FORMATS[fmt].name}»` : '';   // монтажёр и формат по метке варианта; одиночный ролик: Кирилл, формат A
@@ -332,7 +338,7 @@ async function produce(id, comment) {
   const proj = path.join(ROOT, 'video', `dosie${n}`);
   const tpl = fs.readFileSync(path.join(ROOT, 'smm', 'brief_template.md'), 'utf8');
   const brief = tpl.replaceAll('{{N}}', n).replaceAll('{{ID}}', String(id)).replaceAll('{{TITLE}}', v.title).replaceAll('{{SCRIPT}}', path.join(abs, 'script_ru.txt').replaceAll('\\', '/'))
-    .replaceAll('{{FACTS}}', path.join(abs, 'FACTS.md').replaceAll('\\', '/')).replaceAll('{{PROJ}}', proj.replaceAll('\\', '/')).replaceAll('{{VIDEO}}', ROOT.replaceAll('\\', '/') + '/video').replaceAll('{{SCRIPTS}}', ROOT.replaceAll('\\', '/') + '/scripts').replaceAll('{{COMMENT}}', comment || 'нет').replaceAll('{{RENDER_RULES}}', renderRules({ proj, scripts: path.join(ROOT, 'scripts') })).replaceAll('{{FORMAT_SECTION}}', formatSection(fmt, ROOT, { skeptic: skepticLine(abs) })).replaceAll('Ты Кирилл Кадров, Video Editor', `Ты ${ed.name}, Video Editor`);
+    .replaceAll('{{FACTS}}', path.join(abs, 'FACTS.md').replaceAll('\\', '/')).replaceAll('{{PROJ}}', proj.replaceAll('\\', '/')).replaceAll('{{VIDEO}}', ROOT.replaceAll('\\', '/') + '/video').replaceAll('{{SCRIPTS}}', ROOT.replaceAll('\\', '/') + '/scripts').replaceAll('{{COMMENT}}', comment || 'нет').replaceAll('{{RENDER_RULES}}', renderRules({ proj, scripts: path.join(ROOT, 'scripts') })).replaceAll('{{FORMAT_SECTION}}', formatSection(fmt, ROOT, { panels: panelsLine(abs) })).replaceAll('Ты Кирилл Кадров, Video Editor', `Ты ${ed.name}, Video Editor`);
   if (ensureCtaFile(path.join(abs, 'script_ru.txt'))) console.log('в сценарий добавлен призыв подписаться (video/cta.json)');
   const bf = path.join(abs, 'BRIEF.md'); fs.writeFileSync(bf, brief, 'utf8');
 
@@ -388,7 +394,7 @@ function reworkBrief({ id, n, ver, cur, title, comment, proj, editor = { name: '
 
 Ты ${editor.name}, Video Editor AI-офиса Ника (Claude Opus 5.5, высокие усилия). Отвечай и пиши отчёт по-русски. Публиковать ничего нельзя: результат уходит Нику на приёмку. **У этой работы приоритет над всем остальным: остальные этапы конвейера ждут, поэтому делай сразу и без пауз.**
 
-${formatSection(fmt, ROOT, { skeptic: skepticLine(path.join(ROOT, 'smm', 'runs', `video_${id}`)) })}## Что просит Ник (дословно; это закон)
+${formatSection(fmt, ROOT, { panels: panelsLine(path.join(ROOT, 'smm', 'runs', `video_${id}`)) })}## Что просит Ник (дословно; это закон)
 «${comment}»
 
 ## База

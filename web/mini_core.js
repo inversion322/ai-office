@@ -105,7 +105,7 @@
   }
 
   // Метка варианта одной темы у ролика: «B · Один объект» (поле variant приходит с сервера)
-  const VFMT = { A: 'Лента', B: 'Один объект', C: 'Диалог' };
+  const VFMT = { A: 'Лента', B: 'Один объект', C: 'Комикс' };
   const variantLabel = (v) => (v && v.variant && v.variant.letter ? v.variant.letter + ' · ' + (VFMT[v.variant.letter] || '') : '');
 
   const api = { variantLabel, progressBar, parseApi, gateFor, statusText, ago, targetFor, pendingCards, normButtons, squash, threadFilter, isMine, commentMode, splitButtons, isDismiss, clearLabel, esc, STATUS };

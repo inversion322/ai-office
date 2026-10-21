@@ -34,7 +34,7 @@ function seedA(id = 1, rotationFromPrev = false) {
   const d = path.join(ROOT, 'smm', 'runs', `video_${id}`); fs.mkdirSync(d, { recursive: true });
   fs.writeFileSync(path.join(d, 'script.json'), J(mk(SA, 'вопрос-ловушка'))); fs.writeFileSync(path.join(d, 'FACTS.md'), 'Killer 2014, 50 мужчин, 3 дня, PMID 24416202'); fs.writeFileSync(path.join(d, 'check.json'), J({ verdict: 'pass' })); fs.writeFileSync(path.join(d, 'ledger.json'), '{"sources":[]}');
 }
-beforeEach(() => { ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vflow-')); db = []; nextId = 2; notified = []; statuses = []; calls = []; veraPlan = []; plans = { B: [mk(SB, 'цифра')], C: [mk(SC, 'контраст', { skeptic: ['Кофе же сушит?', 'И что, никто не проверял?', 'Но моча же светлеет?', 'Значит, можно пить?'] })] }; delete process.env.VARIANT_FORMATS; delete process.env.VARIANT_VERA; });
+beforeEach(() => { ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vflow-')); db = []; nextId = 2; notified = []; statuses = []; calls = []; veraPlan = []; plans = { B: [mk(SB, 'цифра')], C: [mk(SC, 'контраст', { panels: [{ scene: 'Мужчина в белом халате ставит на весы чашку кофе', caption: 'Кофе сушит?' }, { scene: 'Учёные в лаборатории наливают воду в пробирки', caption: 'Опыт на пятидесяти' }, { scene: 'Три дня подряд по очереди кофе и вода', caption: '' }, { scene: 'Утка-детектив смотрит в лупу на график', caption: 'Вровень' }], reveal: 'Кофе воду не отнимает' })] }; delete process.env.VARIANT_FORMATS; delete process.env.VARIANT_VERA; });
 const done = () => fs.rmSync(ROOT, { recursive: true, force: true });
 
 test('счастливый путь: записи B и C с метками, сценарии и призыв, реплики скептика, материалы скопированы, ОДНА карточка с кнопками', async () => {
@@ -46,12 +46,12 @@ test('счастливый путь: записи B и C с метками, сц
     assert.equal(B.stage, 'checked'); assert.equal(C.stage, 'checked'); assert.equal(B.title, 'Кофе');
     const dB = path.join(ROOT, 'smm', 'runs', 'video_2'), dC = path.join(ROOT, 'smm', 'runs', 'video_3');
     assert.match(fs.readFileSync(path.join(dB, 'script_ru.txt'), 'utf8'), /Пятьдесят мужчин[\s\S]*Ставь лайк и подписывайся\.\n$/); assert.ok(fs.existsSync(path.join(dB, 'FACTS.md')), 'факты скопированы'); assert.ok(fs.existsSync(path.join(dB, 'ledger.json')));
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dC, 'skeptic.json'), 'utf8')).length, 4); assert.equal(fs.existsSync(path.join(dB, 'skeptic.json')), false, 'скептик только у C');
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dC, 'panels.json'), 'utf8')).length, 4); assert.equal(fs.readFileSync(path.join(dC, 'reveal.txt'), 'utf8').trim(), 'Кофе воду не отнимает'); assert.equal(fs.existsSync(path.join(dB, 'panels.json')), false, 'панели только у C');
     assert.equal(calls.filter((c) => c.label.startsWith('variant_B')).length, 1, 'B принят с первого круга'); assert.equal(calls.filter((c) => c.label.startsWith('variant_C')).length, 1, 'C принят с первого круга');
     assert.doesNotMatch(notified[0]?.text || '', /Автопроверки не приняли до конца/);
     assert.equal(notified.length, 1, 'одна карточка на группу');
     const { text, buttons } = notified[0]; const flat = buttons.flat();
-    assert.match(text, /Варианты сценария \(A, B, C\)/); assert.match(text, /Вариант A · «Лента»/); assert.match(text, /Вариант B · «Один объект» · крючок «цифра»/); assert.match(text, /Вариант C · «Диалог»/); assert.match(text, /💬 Скептик: «Кофе же сушит\?»/);
+    assert.match(text, /Варианты сценария \(A, B, C\)/); assert.match(text, /Вариант A · «Лента»/); assert.match(text, /Вариант B · «Один объект» · крючок «цифра»/); assert.match(text, /Вариант C · «Комикс»/); assert.match(text, /🖼 Панель 1: Мужчина в белом халате ставит на весы чашку кофе \(«Кофе сушит\?»\)/); assert.match(text, /❓ Последняя панель, ответ: Кофе воду не отнимает/);
     assert.match(text, /Порядок выхода: A → B → C, интервал 30 минут/); assert.match(text, /Вера сверила варианты/); assert.match(text, /Различия между вариантами проверены кодом/);
     assert.deepEqual(flat.map((b) => b[1]), ['approve:1', 'revise:1', 'vregen:1', 'reject:1', 'vdrop:1', 'vdrop:2', 'vdrop:3']); assert.equal(flat[0][0], 'Утвердить все три');
   } finally { done(); }
@@ -74,12 +74,24 @@ test('новые числа, которых нет в проверенных ф�
   } finally { done(); }
 });
 
-test('формат C без реплик скептика не принимается, с вердикт-словом в реплике тоже', async () => {
+test('формат C «Комикс»: без panels не принимается, вердикт-слово в сценах и подписях до развязки отбраковывается; после трёх кругов вариант отклонён', async () => {
   try {
-    seedA(); const noSk = mk(SC, 'контраст'); const verdict = mk(SC, 'контраст', { skeptic: ['Это миф, да?', 'И что?', 'А доказательства?', 'Ну ладно?'] });
-    plans.C = [noSk, verdict, mk(SC, 'контраст', { skeptic: ['Кофе же сушит?', 'И что, никто не проверял?', 'Но моча же светлеет?', 'Значит, можно пить?'] })];
+    seedA(); const good = { panels: [{ scene: 'Мужчина в белом халате ставит на весы чашку кофе', caption: 'Кофе сушит?' }, { scene: 'Учёные в лаборатории наливают воду в пробирки', caption: 'Опыт на пятидесяти' }, { scene: 'Три дня подряд по очереди кофе и вода', caption: '' }, { scene: 'Утка-детектив смотрит в лупу на график', caption: 'Вровень' }], reveal: 'Кофе воду не отнимает' };
+    const noPanels = mk(SC, 'контраст'), verdict = mk(SC, 'контраст', { ...good, panels: good.panels.map((p, k) => (k === 1 ? { ...p, caption: 'Это миф, да?' } : p)) }), noReveal = mk(SC, 'контраст', { ...good, reveal: '' }), shortScene = mk(SC, 'контраст', { ...good, panels: good.panels.map((p, k) => (k === 0 ? { ...p, scene: 'Кофе' } : p)) });
+    plans.C = [noPanels, verdict];
+    let flow = mkFlow(); await flow.variantsFlow(1); let c = calls.filter((c) => c.label.startsWith('variant_C'));
+    assert.equal(c.length, 3, 'три круга и отказ: без panels, с вердиктом, снова с вердиктом'); assert.match(c[1].task, /нужно поле «panels»: ровно 4 объектов/); assert.match(c[2].task, /вердикт/);
+    assert.equal(db.find((v) => v.id === 3).stage, 'rejected', 'после трёх кругов вариант C отклонён, A и B идут дальше');
+  } finally { done(); }
+});
+
+test('формат C «Комикс»: без reveal и с короткой сценой Ксению возвращают на правку; исправленный на третьем круге вариант принимается', async () => {
+  try {
+    seedA(); const good = { panels: [{ scene: 'Мужчина в белом халате ставит на весы чашку кофе', caption: '' }, { scene: 'Учёные в лаборатории наливают воду', caption: '' }, { scene: 'Три дня подряд по очереди кофе и вода', caption: '' }, { scene: 'Утка-детектив смотрит в лупу на график', caption: '' }], reveal: 'Кофе воду не отнимает' };
+    plans.C = [mk(SC, 'контраст', { ...good, reveal: '' }), mk(SC, 'контраст', { ...good, panels: good.panels.map((p, k) => (k === 0 ? { ...p, scene: 'Кофе' } : p)) }), mk(SC, 'контраст', good)];
     const flow = mkFlow(); await flow.variantsFlow(1); const c = calls.filter((c) => c.label.startsWith('variant_C'));
-    assert.equal(c.length, 3); assert.match(c[1].task, /ровно 4 непустых реплик/); assert.match(c[2].task, /вердикт/);
+    assert.equal(c.length, 3); assert.match(c[1].task, /Нужно поле «reveal»/); assert.match(c[2].task, /не короче четырёх слов/);
+    assert.equal(db.find((v) => v.id === 3).stage, 'checked', 'третий круг принят: панели и развязка на месте');
   } finally { done(); }
 });
 
@@ -142,7 +154,7 @@ test('карточка группы по состоянию: убранный в
     seedA(); const flow = mkFlow(); await flow.variantsFlow(1); const n0 = calls.length;
     db.find((v) => v.id === 3).stage = 'rejected'; await flow.groupCard(1, { note: '🗑 Вариант C убран.' });
     assert.equal(calls.length, n0, 'моделей не вызывали'); const { text, buttons } = notified[1]; assert.match(text, /Варианты сценария \(A, B\)/); assert.match(text, /Вариант C убран/); assert.doesNotMatch(text, /Вариант C ·/); assert.equal(buttons.flat()[0][0], 'Утвердить оба');
-    db.find((v) => v.id === 2).stage = 'rejected'; await flow.groupCard(1); assert.equal(notified[2].buttons.flat()[0][0], 'Утвердить сценарий'); assert.doesNotMatch(notified[2].text, /Скептик|Вариант B ·/);
+    db.find((v) => v.id === 2).stage = 'rejected'; await flow.groupCard(1); assert.equal(notified[2].buttons.flat()[0][0], 'Утвердить сценарий'); assert.doesNotMatch(notified[2].text, /Панель|Вариант B ·/);
     db.find((v) => v.id === 1).stage = 'rejected'; await assert.rejects(flow.groupCard(1), /нет сценариев на утверждение/);
   } finally { done(); }
 });

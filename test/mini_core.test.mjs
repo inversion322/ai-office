@@ -91,6 +91,6 @@ test('шкала прогресса: только у работающего, п�
 });
 
 test('метка варианта в списке роликов: «B · Один объект», у обычного ролика пусто, неизвестная буква без названия', () => {
-  assert.equal(C.variantLabel({ variant: { group: 1, letter: 'B', format: 'B' } }), 'B · Один объект'); assert.equal(C.variantLabel({ variant: { letter: 'C' } }), 'C · Диалог'); assert.equal(C.variantLabel({ variant: { letter: 'A' } }), 'A · Лента');
+  assert.equal(C.variantLabel({ variant: { group: 1, letter: 'B', format: 'B' } }), 'B · Один объект'); assert.equal(C.variantLabel({ variant: { letter: 'C' } }), 'C · Комикс'); assert.equal(C.variantLabel({ variant: { letter: 'A' } }), 'A · Лента');
   assert.equal(C.variantLabel({ variant: null }), ''); assert.equal(C.variantLabel({}), ''); assert.equal(C.variantLabel(null), ''); assert.equal(C.variantLabel({ variant: { letter: 'Z' } }), 'Z · ');
 });

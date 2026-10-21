@@ -60,9 +60,9 @@ test('variants: появляются записи B и C с метками, ОД
   const [A, B, C] = [await video(G1), await ofLetter(G1, 'B'), await ofLetter(G1, 'C')]; assert.ok(B && C, 'записи B и C созданы: ' + fs.readFileSync(path.join(tmp, 'pipe_1_variants.log'), 'utf8').slice(-800) + JSON.stringify((await state()).videos.filter((v) => v.id >= 90000).map((v) => [v.id, v.stage, v.notes && v.notes.slice(0, 80)])));
   assert.deepEqual([A, B, C].map((v) => notesOf(v).variant.letter), ['A', 'B', 'C']); assert.ok([B, C].every((v) => notesOf(v).variant.group === G1)); assert.deepEqual([B, C].map((v) => v.stage), ['checked', 'checked']);
   assert.equal(JSON.parse(fs.readFileSync(path.join(runDir(G1), 'script.json'), 'utf8')).segments[0], SA[0], 'A не тронут');
-  assert.match(fs.readFileSync(path.join(runDir(B.id), 'script_ru.txt'), 'utf8'), /Пятьдесят мужчин/); assert.equal(JSON.parse(fs.readFileSync(path.join(runDir(C.id), 'skeptic.json'), 'utf8')).length, 4);
+  assert.match(fs.readFileSync(path.join(runDir(B.id), 'script_ru.txt'), 'utf8'), /Пятьдесят мужчин/); assert.equal(JSON.parse(fs.readFileSync(path.join(runDir(C.id), 'panels.json'), 'utf8')).length, 4); assert.equal(fs.readFileSync(path.join(runDir(C.id), 'reveal.txt'), 'utf8').trim(), 'Кофе воду не отнимает');
   const cs = await cards(new RegExp(`approve:${G1}`)); assert.equal(cs.length, 1, 'одна карточка'); const btn = JSON.stringify(cs[0].buttons);
-  for (const d of [`approve:${G1}`, `revise:${G1}`, `vregen:${G1}`, `reject:${G1}`, `vdrop:${G1}`, `vdrop:${B.id}`, `vdrop:${C.id}`]) assert.ok(btn.includes(d), 'нет кнопки ' + d); assert.match(cs[0].text, /Варианты сценария \(A, B, C\)/); assert.match(cs[0].text, /Скептик: «Кофе же сушит\?»/);
+  for (const d of [`approve:${G1}`, `revise:${G1}`, `vregen:${G1}`, `reject:${G1}`, `vdrop:${G1}`, `vdrop:${B.id}`, `vdrop:${C.id}`]) assert.ok(btn.includes(d), 'нет кнопки ' + d); assert.match(cs[0].text, /Варианты сценария \(A, B, C\)/); assert.match(cs[0].text, /🖼 Панель 1: Мужчина в белом халате ставит на весы чашку кофе/); assert.match(cs[0].text, /❓ Последняя панель, ответ: Кофе воду не отнимает/);
   assert.match(fs.readFileSync(path.join(runDir(B.id), 'script.json.queries'), 'utf8'), /ВАРИАНТ B ТОЙ ЖЕ ТЕМЫ/);
 });
 
@@ -73,12 +73,12 @@ test('«Утвердить все три»: три монтажа стартую
   assert.ok(done, 'все три ролика должны дойти до приёмки: ' + JSON.stringify((await state()).videos.filter((v) => v.id >= 90000).map((v) => [v.id, v.stage])));
   const spans = ids.map((id) => JSON.parse(fs.readFileSync(path.join(projDir(id), '_fake_span.json'), 'utf8')));
   assert.deepEqual(spans.map((s) => s.profile), ['video', 'video_b', 'video_c']); assert.deepEqual(spans.map((s) => s.format), ['A', 'B', 'C']); assert.deepEqual(spans.map((s) => s.editor), ['Кирилл Кадров', 'Матвей Склеев', 'Роман Ракурсов']);
-  assert.deepEqual(spans.map((s) => s.skeptic), [false, false, true], 'реплики скептика только в задании для C'); assert.ok(spans.every((s) => s.rules), 'в каждом задании правила кругов и очереди рендера');
+  assert.deepEqual(spans.map((s) => s.panels), [false, false, true], 'панели комикса только в задании для C'); assert.ok(spans.every((s) => s.rules), 'в каждом задании правила кругов и очереди рендера');
   assert.ok(Math.max(...spans.map((s) => s.start)) < Math.min(...spans.map((s) => s.end)), 'монтажи шли одновременно: ' + JSON.stringify(spans.map((s) => [s.start % 100000, s.end % 100000])));
   assert.deepEqual(ids.map((id) => JSON.parse(fs.readFileSync(path.join(projDir(id), 'format.json'), 'utf8')).format), ['A', 'B', 'C']);
   const ag = (await state()).agents; assert.deepEqual(['video', 'video_b', 'video_c'].map((id) => ag.find((a) => a.id === id).status), ['idle', 'idle', 'idle']);
   const msgs = (await api('/api/chat?office=smm')).messages; const acc = msgs.filter((m) => m.kind === 'action' && /accept:/.test(JSON.stringify(m.buttons)) && ids.some((id) => JSON.stringify(m.buttons).includes(`accept:${id}`)));
-  assert.equal(acc.length, 3, 'три карточки приёмки'); assert.ok(acc.some((m) => /вариант B «Один объект»/.test(m.text))); assert.ok(acc.some((m) => /вариант C «Диалог»/.test(m.text)));
+  assert.equal(acc.length, 3, 'три карточки приёмки'); assert.ok(acc.some((m) => /вариант B «Один объект»/.test(m.text))); assert.ok(acc.some((m) => /вариант C «Комикс»/.test(m.text)));
 });
 
 test('«Убрать вариант»: вариант не воскресает, карточка пересобирается без моделей; последний убрать нельзя', { skip: !can }, async () => {

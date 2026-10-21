@@ -68,7 +68,7 @@ export function makeFlow(deps) {
 ${brief}
 ${history.length ? `Прежние версии этого варианта лежат в ${rel(path.join(dir, 'history'))}: новая версия не должна на них походить.\n` : ''}ГЛАВНОЕ: это история со сценой, а не конспект. Каждый абзац можно нарисовать (человек, предмет, действие), ставка зрителя звучит вслух его словами, образы не режь ради лимита (режь повторы и третий факт); прочитай video/med_detective/SCRIPT_CRAFT.md, раздел «Сцена, а не тезис». Текст напиши раньше служебных полей. РАМКИ (те же, что у варианта A): озвучка не больше ${MAX_SPEECH} с при быстром диктор (+25%) вместе с призывом подписаться, то есть НЕ БОЛЬШЕ ${MAX_WORDS} слов в сценарии (призыв добавляет конвейер, сама его не пиши); в начале фраз нет «Потому что / Поэтому / Так что / Итак / Значит / Получается / Выходит / Таким образом / Вот почему / Дело в том / Ну / Короче»; слов «улика», «поворот», «развязка», «приговор», «заявление» и номеров улик нет; вердикт (миф или правда) звучит только в конце перед призывом, в хуке и заголовке его нет.
 Факты и источники только из ${rel(factsA)} и из файла варианта A; claims и источники бери оттуда, новых не придумывай.
-Формат файла и ВСЕ его поля ТОЧНО как в ${rel(sjA)} (прочитай его первым: title, idea, lens, stake, gaps, bookend, hook_type, chain, segments, claims, sources_card и остальные), запиши результат в ${rel(sj)}.${letter === 'C' ? '\nДля формата «Диалог» добавь поле «skeptic»: JSON-массив реплик Скептика, по одной на каждый абзац segments (без призыва).' : ''}
+Формат файла и ВСЕ его поля ТОЧНО как в ${rel(sjA)} (прочитай его первым: title, idea, lens, stake, gaps, bookend, hook_type, chain, segments, claims, sources_card и остальные), запиши результат в ${rel(sj)}.${letter === 'C' ? '\nДля формата «Комикс» добавь поле «panels»: JSON-массив объектов {"scene","caption"}, по одному на каждый абзац segments (без призыва), и поле «reveal»: что проявится в последней пустой панели с вопросительным знаком (развязка одной фразой).' : ''}
 ${prev && comment ? `Текущий текст варианта (правь его, а не пиши заново): ${rel(sj)}.\n` : ''}${changes.length ? `Что исправить в этом круге: ${changes.join(' ')}` : ''}`,
       });
       lastSkills = t && t.skills;
@@ -86,16 +86,23 @@ ${prev && comment ? `Текущий текст варианта (правь ег
       const oldHist = history.map((h) => ({ label: 'прежняя версия', segments: h.segments, hook_type: h.hook_type }));
       if (oldHist.length && !comment) { const { novelty } = await import('./script_novelty.mjs'); const nv = novelty({ segments: cur.segments, hook_type: cur.hook_type }, oldHist); if (!nv.ok) bad.push(nv.feedback); }
       const extra = unknownNumbers(cur.segments.join(' '), ...trusted); if (extra.length) bad.push(`В тексте есть числа, которых нет в проверенных фактах: ${extra.join(', ')}. Новых цифр добавлять нельзя: оставь только те, что есть в FACTS.md и в варианте A.`);
+      const hard = [];       // структурные требования формата: без них монтировать нечего, на последнем круге их НЕ пропускаем «с пометкой»
       if (letter === 'C') {
-        const sk = Array.isArray(cur.skeptic) ? cur.skeptic.map((x) => String(x || '').trim()) : [];
-        if (sk.length !== cur.segments.length || sk.some((x) => !x)) bad.push(`Для формата «Диалог» нужно поле «skeptic»: ровно ${cur.segments.length} непустых реплик (по одной на абзац), сейчас ${sk.length}.`);
-        else if (sk.some((x) => x.split(/\s+/).length > 12)) bad.push('Реплика Скептика длиннее 12 слов: сократи до 9.');
-        else if (sk.some((x) => VERDICT_RE.test(x))) bad.push('В реплике Скептика прозвучал вердикт (миф, ложь, фейк, правда как ярлык): вердикт только в конце, у утки.');
+        const nBefore = bad.length;
+        // формат «Комикс» (решение Ника 2026-10-22, вместо «Диалога»): панели-сцены по абзацам и скрытая развязка
+        const pn = Array.isArray(cur.panels) ? cur.panels : [], n = cur.segments.length;
+        const sceneOf = (p) => String(p && p.scene || '').trim(), capOf = (p) => String(p && p.caption || '').trim();
+        if (pn.length !== n || pn.some((p) => sceneOf(p).split(/\s+/).filter(Boolean).length < 4)) bad.push(`Для формата «Комикс» нужно поле «panels»: ровно ${n} объектов {scene, caption} (по одному на абзац), в каждом scene не короче четырёх слов: кто, где, что делает. Сейчас ${pn.length}.`);
+        else if (pn.some((p) => capOf(p).split(/\s+/).filter(Boolean).length > 8)) bad.push('Подпись панели длиннее 8 слов: сократи до 6.');
+        else if (pn.some((p, k) => k < n - 1 && VERDICT_RE.test(`${sceneOf(p)} ${capOf(p)}`))) bad.push('В сценах и подписях панелей до последней прозвучал вердикт (миф, ложь, фейк, правда как ярлык): вердикт только в развязке, в последней панели.');
+        else if (String(cur.reveal || '').trim().split(/\s+/).filter(Boolean).length < 3) bad.push('Нужно поле «reveal»: что проявится в последней пустой панели с вопросительным знаком (ответ-развязка одной фразой, не короче трёх слов).');
+        hard.push(...bad.slice(nBefore));
       }
       let sp = null; try { sp = await speechSeconds(withCta(cur.segments)); } catch (e) { warnings.push('длину не измерили: ' + String(e.message).split('\n')[0]); }
       if (sp && lengthVerdict(sp, MAX_SPEECH, { lastRound: round === MAXV }) === 'cut') bad.push(cutAdvice(sp.sec, MAX_SPEECH, { tag: sp.estimated ? ' (оценка по тексту)' : '' }));
       log(`вариант ${letter}, круг ${round}: ${cur.segments.join(' ').split(/\s+/).length} слов${sp ? `, озвучка ${sp.sec.toFixed(1)} с` : ''}${bad.length ? `, замечаний ${bad.length}` : ', чисто'}`);
       if (!bad.length) { prev = cur; return { ok: true, segments: cur.segments, hook_type: cur.hook_type, script: cur, warnings, sec: sp && sp.sec, skills: lastSkills }; }
+      if (round === MAXV && hard.length) { warnings.push(...hard.map((b) => b.split('\n')[0].slice(0, 220))); return { ok: false, warnings }; }       // нет panels/reveal: вариант не получился, группа идёт без него
       if (round === MAXV) { warnings.push(...bad.map((b) => b.split('\n')[0].slice(0, 220))); return { ok: true, segments: cur.segments, hook_type: cur.hook_type, script: cur, warnings, sec: sp && sp.sec, skills: lastSkills, soft: true }; }
       changes = bad; prev = cur;
     }
@@ -126,7 +133,7 @@ ${prev && comment ? `Текущий текст варианта (правь ег
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'script.json'), JSON.stringify(s, null, 1), 'utf8');
     fs.writeFileSync(path.join(dir, 'script_ru.txt'), withCta(s.segments).join('\n\n') + '\n', 'utf8');
-    if (rec.letter === 'C') fs.writeFileSync(path.join(dir, 'skeptic.json'), JSON.stringify(s.skeptic || [], null, 1), 'utf8');
+    if (rec.letter === 'C') { fs.writeFileSync(path.join(dir, 'panels.json'), JSON.stringify(s.panels || [], null, 1), 'utf8'); fs.writeFileSync(path.join(dir, 'reveal.txt'), String(s.reveal || '').trim() + '\n', 'utf8'); fs.rmSync(path.join(dir, 'skeptic.json'), { force: true }); }
   }
 
   async function variantsFlow(id, { regen = false } = {}) {
@@ -179,11 +186,11 @@ ${prev && comment ? `Текущий текст варианта (правь ег
     const rot = (variantOf(a) || {}).rotation || 0, letters = live.map((m) => (variantOf(m) || { letter: 'A' }).letter), order = publishOrder(rot).filter((l) => letters.includes(l));
     const items = live.map((m) => {
       const d = runDir(m.id), s = readJson(path.join(d, 'script.json')) || {}, L = (variantOf(m) || { letter: 'A' }).letter;
-      return { m, L, s, sk: L === 'C' ? readJson(path.join(d, 'skeptic.json')) || s.skeptic || [] : [], segments: s.segments || [], hook_type: s.hook_type, format: L };
+      return { m, L, s, sk: L === 'C' ? readJson(path.join(d, 'panels.json')) || s.panels || [] : [], segments: s.segments || [], hook_type: s.hook_type, format: L };
     });
     const cmp = items.length > 1 ? compareVariants(items.map((x) => ({ letter: x.L, segments: x.segments, hook_type: x.hook_type }))) : { ok: true, problems: [] };
     const blocks = items.map((x) => {
-      const rows = x.L === 'C' && x.sk.length ? x.segments.map((p, i) => `${x.sk[i] ? `💬 Скептик: «${x.sk[i]}»\n` : ''}🦆 ${p}`).join('\n') : x.segments.join('\n');
+      const rows = x.L === 'C' && x.sk.length ? x.segments.map((p, i) => `${x.sk[i] && x.sk[i].scene ? `🖼 Панель ${i + 1}: ${String(x.sk[i].scene).trim()}${x.sk[i].caption ? ` («${String(x.sk[i].caption).trim()}»)` : ''}\n` : ''}🎙 ${p}`).join('\n') + (x.s.reveal ? `\n❓ Последняя панель, ответ: ${String(x.s.reveal).trim()}` : '') : x.segments.join('\n');
       return `━━ Вариант ${x.L} · «${FORMATS[x.L].name}»${x.hook_type ? ` · крючок «${x.hook_type}»` : ''}\n${rows}`;
     });
     const sources = ((readJson(path.join(runDir(Aid), 'script.json')) || {}).sources_card || (items[0] && items[0].s.sources_card) || []).map((s) => '• ' + s).join('\n');
