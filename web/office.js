@@ -14,11 +14,12 @@ const OFFICE_LAYOUTS = {
     agentRoom: { captain: 'cap', scout: 'jobs', sender: 'jobs', analyst: 'jobs', writer: 'jobs' } },
   // Студия SMM шире (3 колонки), кабинет Капитана справа. Цепочка: research -> virality -> scriptwriter -> factcheck -> video.
   smm: { dept: 'Студия SMM', cap: 'Кабинет руководителя',
-    rooms: { jobs: { x: 6, y: 43, w: 196, h: 130, door: { in: [190, 126], out: [208, 126] } },
-             cap:  { x: 214, y: 52, w: 74, h: 98, door: { in: [251, 138], out: [251, 160] } } },
-    plants: [[300, 150], [300, 100], [4, 176]],
-    desks: { captain_smm: [78.4, 56.7], research: [14, 47], virality: [31, 47], scriptwriter: [48, 47], factcheck: [48, 80.6], video: [31, 80.6], packager: [65, 80.6], publisher: [14, 80.6] },
-    agentRoom: { captain_smm: 'cap', research: 'jobs', virality: 'jobs', scriptwriter: 'jobs', factcheck: 'jobs', video: 'jobs', packager: 'jobs', publisher: 'jobs' } },
+    // Пять колонок столов (с трёх монтажёров A, B, C: Кирилл, Матвей, Роман): студия шире, кабинет Капитана уже; подписи и двери считаются из этих чисел
+    rooms: { jobs: { x: 6, y: 43, w: 232, h: 130, door: { in: [226, 126], out: [244, 126] } },
+             cap:  { x: 250, y: 52, w: 66, h: 98, door: { in: [283, 138], out: [283, 160] } } },
+    plants: [[306, 160], [4, 176], [169, 150]],
+    desks: { captain_smm: [88.4, 56.7], research: [10.6, 47], virality: [24.7, 47], scriptwriter: [38.75, 47], factcheck: [52.8, 47], packager: [66.9, 47], video: [10.6, 80.6], video_b: [24.7, 80.6], video_c: [38.75, 80.6], publisher: [66.9, 80.6] },
+    agentRoom: { captain_smm: 'cap', research: 'jobs', virality: 'jobs', scriptwriter: 'jobs', factcheck: 'jobs', video: 'jobs', video_b: 'jobs', video_c: 'jobs', packager: 'jobs', publisher: 'jobs' } },
 };
 let OFFICE_DESKS, AGENT_ROOM, PLANTS;
 function applyOffice(id) {

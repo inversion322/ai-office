@@ -50,10 +50,10 @@ export function skillsOpenedByRun(token, { profile = 'smm', dbFile } = {}) {
   return withDbCopy(file, (db) => db.prepare("SELECT DISTINCT session_id AS id FROM messages WHERE role = 'user' AND content LIKE ?").all(`%${String(token).replace(/[%_]/g, '')}%`).map((r) => r.id));
 }
 export function missingSkills(used, required = REQUIRED_SKILLS) { return required.filter((s) => !used.has(s)); }
-export function skillUsageNote(sinceMs, dbFile) {
+export function skillUsageNote(sinceMs, dbFile, { profile = 'video', name = 'Кирилл' } = {}) {
   if (process.env.SKILL_GATE === 'off') return '';
-  const u = skillsOpenedSince(sinceMs, dbFile);
+  const u = skillsOpenedSince(sinceMs, dbFile || profileDb(profile));
   if (!u.checked || !u.sessions) return '';                       // не смогли проверить: молчим, а не обвиняем
   const miss = missingSkills(u.used);
-  return miss.length ? `⚠️ Кирилл не открыл обязательные скиллы: ${miss.join(', ')}. Анимации и переходы собраны вручную, без готовых правил и блоков (вероятен однотипный вид).` : '';
+  return miss.length ? `⚠️ ${name} не открыл обязательные скиллы: ${miss.join(', ')}. Анимации и переходы собраны вручную, без готовых правил и блоков (вероятен однотипный вид).` : '';
 }

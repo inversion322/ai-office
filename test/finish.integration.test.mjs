@@ -9,6 +9,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { copyLiveDb } from './fixtures/copy_db.mjs';
+process.env.VARIANTS = 'off';          // эти тесты проверяют одиночный сценарий; варианты B и C покрыты в variants*.test.mjs
 
 process.env.CRAFT_GATE = 'off';   // эти тесты проверяют довод до конца и длину, драматургия проверяется в regen.integration и script_craft.test
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

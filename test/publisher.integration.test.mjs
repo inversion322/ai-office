@@ -43,7 +43,7 @@ after(async () => { try { server && server.kill(); } catch {} try { g && await g
 
 test('сотрудник «Пётр Выкладов» есть в офисе SMM на своём столе, свободен', { skip: !can }, async () => {
   const a = (await api('/api/state?office=smm')).agents.find((x) => x.id === 'publisher'); assert.ok(a, 'нет сотрудника publisher'); assert.equal(a.name, 'Пётр Выкладов'); assert.equal(a.desk, 7); assert.equal(a.status, 'idle');
-  assert.match(fs.readFileSync(path.join(ROOT, 'web', 'office.js'), 'utf8'), /publisher: \[14, 80\.6\]/, 'стол в офисе');
+  assert.match(fs.readFileSync(path.join(ROOT, 'web', 'office.js'), 'utf8'), /publisher: \[66\.9, 80\.6\]/, 'стол в офисе');
 });
 
 test('YouTube не подключён: загрузки нет, Нику понятно, что сделать', { skip: !can }, async () => {

@@ -89,3 +89,8 @@ test('шкала прогресса: только у работающего, п�
   assert.equal(C.progressBar({ status: 'idle', pb: w.pb }), ''); assert.equal(C.progressBar({ status: 'working' }), '');
   assert.doesNotMatch(C.progressBar({ status: 'working', pb: { pct: 5, label: '<img src=x>', basis: 'none' } }), /<img/);
 });
+
+test('метка варианта в списке роликов: «B · Один объект», у обычного ролика пусто, неизвестная буква без названия', () => {
+  assert.equal(C.variantLabel({ variant: { group: 1, letter: 'B', format: 'B' } }), 'B · Один объект'); assert.equal(C.variantLabel({ variant: { letter: 'C' } }), 'C · Диалог'); assert.equal(C.variantLabel({ variant: { letter: 'A' } }), 'A · Лента');
+  assert.equal(C.variantLabel({ variant: null }), ''); assert.equal(C.variantLabel({}), ''); assert.equal(C.variantLabel(null), ''); assert.equal(C.variantLabel({ variant: { letter: 'Z' } }), 'Z · ');
+});

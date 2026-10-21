@@ -7,10 +7,11 @@ import { spawn } from 'node:child_process';
 import { cleanReport } from './lib_text.mjs';
 import { classifyAnswer, quickPick, topicMentioned, stripButtonTalk } from './lib_intent.mjs';
 import { probeVideo, checkFormat, sendFields } from '../scripts/video_format.mjs';
+import { variantOf, groupMembers, isGroup, anchorOf, parseVariantComment, FORMATS as VFORMATS } from '../scripts/variants.mjs';
 
 const OWNER = 323028999;
-const NAMES = { капитан: 'captain_smm', кряк: 'captain_smm', виктор: 'research', ксения: 'scriptwriter', лев: 'virality', вера: 'factcheck', кирилл: 'video', тимофей: 'packager' };
-const REPLY_PROFILE = { video: 'video' };     // Кирилл отвечает на Opus 5.5, остальные SMM на профиле smm
+const NAMES = { капитан: 'captain_smm', кряк: 'captain_smm', виктор: 'research', ксения: 'scriptwriter', лев: 'virality', вера: 'factcheck', кирилл: 'video', матвей: 'video_b', роман: 'video_c', тимофей: 'packager' };
+const REPLY_PROFILE = { video: 'video', video_b: 'video_b', video_c: 'video_c' };     // Кирилл отвечает на Opus 5.5, остальные SMM на профиле smm
 const STAGE_LABEL = { idea: 'идея', scored: 'оценена, ждёт выбора', script: 'сценарий пишется/проверяется', checked: 'сценарий проверен, ждёт утверждения', editing: 'монтаж', produced: 'ролик готов, ждёт приёма', approved: 'принят', rejected: 'отклонена', published: 'опубликован' };
 
 export function setupChat({ db, ROOT, DATA_DIR }) {
@@ -147,6 +148,9 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     const [act, idStr, mode] = String(data).split(':'); const id = Number(idStr);
     const v = act === 'confirm' || act === 'cancel' ? null : (id ? q('SELECT * FROM videos WHERE id=?', id)[0] : null);
     const cap = (text, mirrorTg = true) => post({ thread: 'captain_smm', sender: 'captain_smm', text, mirrorTg });
+    const members = (x) => groupMembers(q('SELECT * FROM videos'), x);          // участники группы вариантов (для одиночного ролика одна запись)
+    const letterOf = (x) => (variantOf(x) || { letter: 'A' }).letter;
+    const markDropped = (x) => { let n = {}; try { n = JSON.parse(x.notes || '{}') || {}; } catch {} run('UPDATE videos SET notes=?, updated_at=? WHERE id=?', JSON.stringify({ ...n, dropped: true }), now(), x.id); };
     if (act === 'confirm') {
       const m = q('SELECT * FROM messages WHERE id=?', id)[0]; const ref = m && m.ref && JSON.parse(m.ref);
       if (!ref) return { note: 'нет предложения' };
@@ -178,14 +182,50 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       cap(`Принято, сценарий «${v.title}» утверждён.\nСейчас его текст ещё не прошёл проверку Веры (длина и правки по фактам). Ксения доведёт его, Вера проверит. Если пропустит, сразу запущу Кирилла на монтаж, вопрос повторять не буду. Если нет, напишу вам и объясню почему.`);
       spawnPipeline(['script', String(id), '--finish']);
     } else if (act === 'approve' && v) {
-      supersede(`approve:${id}`); supersede(`revise:${id}`); clearPre(id);
-      setStage(id, 'editing');
-      cap(`Сценарий утверждён: «${v.title}».\nКирилл Кадров (Opus 5.5) озвучивает и монтирует, обычно около часа. Пришлю готовый ролик.`);
-      spawnPipeline(['produce', String(id)]);
+      supersede(`approve:${id}`); supersede(`revise:${id}`); supersede('vregen:'); supersede('vdrop:'); clearPre(id);
+      const mem = members(v), live = mem.filter((m) => m.stage === 'checked');
+      if (isGroup(mem) && live.length > 1) {
+        // варианты одной темы: все живые уходят в монтаж СРАЗУ, у каждого свой монтажёр и формат; рендер ставится в очередь на два слота
+        for (const m of live) { setStage(m.id, 'editing'); spawnPipeline(['produce', String(m.id)]); }
+        const names = live.map((m) => `${letterOf(m)} «${VFORMATS[letterOf(m)].name}»`).join(', ');
+        cap(`Сценарии утверждены: ${names}.\nМонтируют параллельно: ${live.map((m) => { const ed = VFORMATS[letterOf(m)].editor; return ed === 'video' ? 'Кирилл' : ed === 'video_b' ? 'Матвей' : 'Роман'; }).join(', ')} (Opus 5.5). Рендер идёт в очереди на два слота, кругов не больше трёх, обычно 40-60 минут. Каждый ролик придёт отдельной карточкой приёмки.`);
+      } else {
+        const m = live[0] || v, ed = VFORMATS[letterOf(m)].editor;
+        setStage(m.id, 'editing');
+        cap(`Сценарий утверждён: «${v.title}»${variantOf(m) ? ` (вариант ${letterOf(m)} «${VFORMATS[letterOf(m)].name}»)` : ''}.\n${ed === 'video' ? 'Кирилл Кадров' : ed === 'video_b' ? 'Матвей Склеев' : 'Роман Ракурсов'} (Opus 5.5) озвучивает и монтирует, обычно около часа. Пришлю готовый ролик.`);
+        spawnPipeline(['produce', String(m.id)]);
+      }
+    } else if (act === 'vdrop' && v) {
+      // «Убрать вариант»: он не монтируется и не публикуется; остальные идут дальше. Последний оставшийся убрать нельзя: для этого есть «Отклонить тему».
+      const mem = members(v), live = mem.filter((m) => m.stage === 'checked');
+      if (v.stage !== 'checked') { cap(`Вариант ${letterOf(v)} уже не ждёт утверждения.`, false); return {}; }
+      if (live.length <= 1) { cap('Это последний вариант: чтобы отказаться от темы целиком, нажмите «Отклонить тему».', false); return {}; }
+      supersede(`vdrop:${id}`); markDropped(v); setStage(id, 'rejected');
+      cap(`Вариант ${letterOf(v)} «${VFORMATS[letterOf(v)].name}» убран. Остаются: ${live.filter((m) => m.id !== id).map((m) => letterOf(m)).join(', ')}. Обновляю карточку.`);
+      spawnPipeline(['group-card', String(id)]);
+    } else if (act === 'vregen' && v) {
+      // «Перегенерировать варианты»: Ксения пишет B и C заново (A остаётся); убранные варианты не возвращаются
+      const mem = members(v), a = mem.find((m) => letterOf(m) === 'A') || v, gid = (variantOf(v) || { group: v.id }).group;
+      supersede(`approve:${id}`); supersede(`revise:${id}`); supersede('vregen:'); supersede('vdrop:');
+      for (const m of mem) if (m.stage === 'checked' && letterOf(m) !== 'A') setStage(m.id, 'script');
+      setAgent('captain_smm', 'working', `Варианты заново: ${v.title}`, `Ник просит новые варианты «${v.title}»`);
+      cap(`Перегенерирую варианты «${v.title}»: Ксения напишет B и C заново (другие хуки и концовки), Вера сверит факты. Вариант A остаётся. Пришлю одну карточку.`);
+      spawnPipeline(['variants', String(gid), '--regen']);
+      void a;
     } else if (act === 'revise' && v) {
       clearPre(id);
-      if (comment && comment.trim()) { supersede(`approve:${id}`); supersede(`revise:${id}`); cap('Передала Ксении: исправит, Вера проверит заново.'); spawnPipeline(['script', String(id), '--comment', comment.trim()]); }
-      else { kvSet('awaiting', JSON.stringify({ kind: 'script', id, mid: srcMsg && srcMsg.id, ts: now() })); cap('Напишите одним сообщением, что поправить в сценарии (здесь или в Telegram). Ксения исправит и Вера проверит заново.'); }
+      const mem = members(v), grouped = isGroup(mem);
+      const pc = grouped ? parseVariantComment(comment) : { letter: null, text: String(comment || '').trim() };
+      if (grouped && pc.text) {
+        // Правка к группе: «B: …» идёт варианту B, «C: …» варианту C, без буквы это вариант A (пока он жив)
+        const target = pc.letter ? mem.find((m) => letterOf(m) === pc.letter && m.stage === 'checked') : mem.find((m) => letterOf(m) === 'A' && m.stage === 'checked');
+        if (!target) { cap(pc.letter ? `Варианта ${pc.letter} нет среди ждущих утверждения. Напишите правку с буквой существующего варианта, например «${letterOf(anchorOf(mem) || v)}: …».` : 'Вариант A убран: начните правку с буквы существующего варианта, например «B: …».', false); return {}; }
+        supersede(`approve:${id}`); supersede(`revise:${id}`); supersede('vregen:'); supersede('vdrop:');
+        if (letterOf(target) === 'A') { setStage(target.id, 'script'); cap(`Передала Ксении правку к варианту A: исправит, Вера проверит заново, потом обновлю карточку со всеми вариантами.`); spawnPipeline(['script', String(target.id), '--comment', pc.text]); }
+        else { cap(`Передала Ксении правку к варианту ${letterOf(target)} «${VFORMATS[letterOf(target)].name}»: исправит, Вера сверит с фактами, остальные варианты не трогаю.`); setAgent('captain_smm', 'working', `Правка варианта ${letterOf(target)}`, `Правка Ника к варианту ${letterOf(target)}`); spawnPipeline(['variant-revise', String(target.id), '--comment', pc.text]); }
+      }
+      else if (comment && comment.trim()) { supersede(`approve:${id}`); supersede(`revise:${id}`); cap('Передала Ксении: исправит, Вера проверит заново.'); spawnPipeline(['script', String(id), '--comment', comment.trim()]); }
+      else { kvSet('awaiting', JSON.stringify({ kind: 'script', id, mid: srcMsg && srcMsg.id, ts: now() })); cap(grouped ? 'Напишите одним сообщением, что поправить. Если правка к варианту B или C, начните с буквы: «B: …». Без буквы правка пойдёт в вариант A.' : 'Напишите одним сообщением, что поправить в сценарии (здесь или в Telegram). Ксения исправит и Вера проверит заново.'); }
     } else if (act === 'rework' && v) {
       if (comment && comment.trim()) {
         const short = comment.trim().replace(/\s+/g, ' ').slice(0, 90);
@@ -210,12 +250,12 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       cap('Запустила Кирилла заново: он продолжит по сохранённым файлам. Ход работы виден справа в «Сейчас в работе».');
     } else if (act === 'publish' && v) {
       // Публикация только по кнопке и только принятого ролика; одну и ту же карточку второй раз не исполняем
-      if (!['yt', 'ytp'].includes(mode)) { cap('Не понял, куда публиковать.', false); return {}; }
+      if (!['yt', 'ytp', 'yts'].includes(mode)) { cap('Не понял, куда публиковать.', false); return {}; }
       if (v.stage !== 'approved') { cap(`Ролик «${v.title}» ещё не принят, публиковать рано.`, false); return {}; }
       supersede(`publish:${id}:${mode}`);
       if (stageRunning(['publish', String(id)])) { cap(`Публикатор уже загружает ролик «${v.title}». Второй раз не запускаю.`, false); return {}; }
       setAgent('publisher', 'working', `Публикация ролика №${id}`, `Ник нажал «${mode === 'yt' ? 'опубликовать в YouTube Shorts' : 'приватная проверка в YouTube'}»`);
-      cap(`Принято. Пётр Выкладов загружает «${v.title}» в YouTube ${mode === 'yt' ? 'публично' : 'как приватный (виден только вам)'}. Пришлю ссылку.`);
+      cap(mode === 'yts' ? `Принято. Пётр Выкладов загружает «${v.title}» сейчас, а выложит его YouTube сам по слоту очереди вариантов (интервал 30 минут). Пришлю ссылку.` : `Принято. Пётр Выкладов загружает «${v.title}» в YouTube ${mode === 'yt' ? 'публично' : 'как приватный (виден только вам)'}. Пришлю ссылку.`);
       spawnPipeline(['publish', String(id), '--target', mode]);
     } else if (act === 'title' && v) {
       // Своё название вместо предложенного Тимофеем: кнопка без текста ждёт следующее сообщение Ника, с текстом сохраняет сразу
@@ -244,8 +284,9 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       spawnPipeline(['script', String(id), '--regen', ...(comment && comment.trim() ? ['--comment', comment.trim()] : [])]);
     } else if (act === 'reject' && v) {
       clearPre(id);
-      supersede(`approve:${id}`); supersede(`revise:${id}`); supersede(`regen:${id}`);
-      setStage(id, 'rejected'); cap('Тема отклонена.');
+      supersede(`approve:${id}`); supersede(`revise:${id}`); supersede(`regen:${id}`); supersede('vregen:'); supersede('vdrop:');
+      const grp = members(v); for (const m of grp) if (['script', 'checked'].includes(m.stage)) setStage(m.id, 'rejected');      // отклонена тема: отклоняются и все её варианты
+      setStage(id, 'rejected'); cap(grp.length > 1 ? 'Тема отклонена вместе со всеми вариантами.' : 'Тема отклонена.');
       settleWaiting('smm', ['captain_smm', 'scriptwriter', 'factcheck']);      // раньше Капитан так и оставался «ждёт: Вера не пропустила сценарий»
     } else return { note: 'неизвестное действие' };
     return {};

@@ -17,6 +17,15 @@ export const THRESHOLDS = {
   sameShare: 0.25,       // не более четверти времени картинка отличается от бывшей секунду назад меньше чем на 10 % площади (ролики №1 и №2: 55-60 %)
   brightRange: 14,       // медиана размаха яркости в окне 2 с
 };
+// Профили по форматам (решение Ника 2026-10-21: три формата на одну тему). A это THRESHOLDS выше. Нужен ли «цветной фон» и «резкие смены» зависит от формата:
+//  B «Один объект»: светлый спокойный ролик без склеек, камера плавно наезжает; цветные поля допустимы только в финале (вердикт и призыв),
+//     резких смен немного (≤ 0,8 на 10 с), фон в основном бумажный (цветной ≤ 35 %). Пороги по теории формата, УТОЧНИТЬ по первому готовому ролику B.
+//  C «Диалог»: реплика скептика и ответ утки на своих цветных полях, смена каждые 3-5 с (реже, чем в A). Пороги так же уточнить по первому ролику C.
+export const FORMAT_PROFILES = {
+  A: THRESHOLDS,
+  B: { nonBaseBg: 0, maxNonBaseBg: 0.35, hues: 1, beatsPer10s: 0, maxBeatsPer10s: 0.8, maxBeatGap: 99, sameShare: 0.40, brightRange: 0 },
+  C: { nonBaseBg: 0.30, hues: 3, beatsPer10s: 0.8, maxBeatGap: 6.5, sameShare: 0.30, brightRange: 12 },
+};
 const BASE = [245, 243, 238];
 
 export function decodeFrames(file) {
@@ -52,6 +61,8 @@ export function measure(frames) {
 export function judge(m, t = THRESHOLDS) {
   const bad = [];
   if (m.nonBaseBg < t.nonBaseBg) bad.push(`цветной фон на весь экран занимает ${(m.nonBaseBg * 100).toFixed(0)} % времени, нужно не меньше ${t.nonBaseBg * 100} %`);
+  if (t.maxNonBaseBg != null && m.nonBaseBg > t.maxNonBaseBg) bad.push(`цветной фон на весь экран занимает ${(m.nonBaseBg * 100).toFixed(0)} % времени, для этого формата не больше ${t.maxNonBaseBg * 100} % (светлый спокойный ролик)`);
+  if (t.maxBeatsPer10s != null && m.beatsPer10s > t.maxBeatsPer10s) bad.push(`резких смен кадра ${m.beats} (${m.beatsPer10s.toFixed(1)} на 10 с), для этого формата не больше ${t.maxBeatsPer10s} на 10 с (камера ведёт один объект без склеек)`);
   if (m.hues < t.hues) bad.push(`оттенков фона ${m.hues}, нужно не меньше ${t.hues}`);
   if (m.beatsPer10s < t.beatsPer10s) bad.push(`резких смен кадра ${m.beats} (${m.beatsPer10s.toFixed(1)} на 10 с), нужно не меньше ${t.beatsPer10s} на 10 с`);
   if (m.maxBeatGap > t.maxBeatGap) bad.push(`самая длинная пауза без резкой смены ${m.maxBeatGap.toFixed(1)} с, не больше ${t.maxBeatGap} с`);

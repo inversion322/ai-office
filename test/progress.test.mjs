@@ -27,6 +27,8 @@ test('вид работы определяется по сотруднику и 
   assert.equal(kindOf('captain_smm', 'Сценарий: «Кофе»'), 'script');
   assert.equal(kindOf('captain_smm', 'Запускаю поиск тем'), 'topics');
   assert.equal(kindOf('scriptwriter', 'Пишу сценарий'), 'run');
+  assert.equal(kindOf('video_b', 'Озвучка, субтитры, монтаж (Opus 5.5)'), 'produce'); assert.equal(kindOf('video_c', 'Правки ролика №4'), 'rework');
+  assert.ok(DEFAULT_SEC['video_b:produce'] < DEFAULT_SEC['video:produce'], 'у B и C три круга, оценка по умолчанию короче');
 });
 
 test('median и форматирование времени', () => {

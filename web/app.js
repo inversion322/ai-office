@@ -67,11 +67,19 @@ function setStatusClasses(agents) {
   });
 }
 /* постоянная подпись над сотрудником: над чем работает прямо сейчас (виден ход работы, а не только жесты утки) */
+const VFMT = { A: 'Лента', B: 'Один объект', C: 'Диалог' };      // форматы вариантов одной темы (метка у ролика в списке)
 /* шкала прогресса: процент и «ещё ~N мин» внутри полоски (решение Ника 2026-10-21); цифры считает сервер, поле pb */
 function pbarHTML(a) {
   const pb = a && a.status === 'working' && a.pb; if (!pb) return '';
   const tip = pb.basis === 'history' ? `Оценка по ${pb.n} прошлым запускам этой работы` : pb.basis === 'default' ? 'Первая оценка: истории запусков этой работы ещё нет, цифра уточнится' : 'Оценки пока нет';
   return `<div class="pbar${pb.overrun ? ' over' : ''}" title="${esc(tip)}"><i style="width:${Number(pb.pct) || 0}%"></i><span>${esc(pb.label)}</span></div>`;
+}
+/* ширина плашки «работает»: не шире шага между столами в этом ряду (в студии SMM столов пять в ряд), в пределах 100–150 px */
+function badgeMaxW(id, layer) {
+  const me = (OFFICE_DESKS || {})[id]; if (!me) return 150;
+  const gaps = Object.keys(OFFICE_DESKS).filter((k) => k !== id && Math.abs(OFFICE_DESKS[k][1] - me[1]) < 6).map((k) => Math.abs(OFFICE_DESKS[k][0] - me[0])).filter((d) => d > 0);
+  const pitch = gaps.length ? Math.min(...gaps) : 100;
+  return Math.max(100, Math.min(150, Math.round(layer.clientWidth * pitch / 100 - 4)));
 }
 function updateBadge(a, walking) {
   const layer = $('bubbles'); if (!layer) return;
@@ -84,7 +92,8 @@ function updateBadge(a, walking) {
   const short = String(a.task).replace(/\s*\(дело[^)]*\)/i, '').replace(/\s*⏱.*$/, '');
   const mins = (/⏱\s*([^]*)$/.exec(a.task) || [])[1];
   b.style.left = (x + 1) + '%'; b.style.top = (y + 2.5) + '%'; b.title = a.task; b.classList.add('side');
-  b.innerHTML = `<small>⚙ работает${mins ? ' · ' + esc(mins) : ''}</small>${esc(short.length > 46 ? short.slice(0, 44) + '…' : short)}${pbarHTML(a) || (pr ? `<i style="width:${pr}%"></i>` : '')}`;
+  const mw = badgeMaxW(a.id, layer); b.style.maxWidth = mw + 'px'; b.classList.toggle('narrow', mw < 140);   // плашки соседних столов в одном ряду не налезают друг на друга; в узкой плашке задачи нет (она в подсказке и в панели «Сейчас в работе»)
+  b.innerHTML = `<small>⚙ работает${mins ? ' · ' + esc(mins) : ''}</small>${mw < 140 ? '' : esc(short.length > 46 ? short.slice(0, 44) + '…' : short)}${pbarHTML(a) || (pr ? `<i style="width:${pr}%"></i>` : '')}`;
 }
 
 /* ---------- сцены: диалоги и выдача задач ---------- */
@@ -206,7 +215,7 @@ function render(s) {
 
   $('tasks').innerHTML = s.tasks.map((t) => `<li>${t.status === 'running' ? '▶' : '⏱'} ${esc(t.title)}<small>${esc(t.agent_name || '')}</small></li>`).join('') || '<li>Пока пусто</li>';
   $('jobs').innerHTML = (isSmm
-    ? (s.videos || []).slice(0, 12).map((v) => `<li>${NEED_NICK.includes(v.stage) ? '👉 ' : ''}${esc(v.title)}<small>${v.rubric === 'tips' ? 'Советы' : 'Миф'} · ${esc(VSTAGE_NAME[v.stage] || v.stage)} · балл ${v.score ?? '—'}</small></li>`)
+    ? (s.videos || []).slice(0, 12).map((v) => `<li>${NEED_NICK.includes(v.stage) ? '👉 ' : ''}${esc(v.title)}${v.variant ? ` <b class="vtag" title="Вариант одной темы: свой формат, хук и концовка">${esc(v.variant.letter)} · ${esc(VFMT[v.variant.letter] || '')}</b>` : ''}<small>${v.rubric === 'tips' ? 'Советы' : 'Миф'} · ${esc(VSTAGE_NAME[v.stage] || v.stage)} · балл ${v.score ?? '—'}</small></li>`)
     : s.jobs.slice(0, 12).map((j) => `<li>${esc(j.title)}<small>${esc(j.company)} · ${esc(j.salary)} · ${esc(j.format)} · ${esc(j.stage)}</small></li>`)).join('') || '<li>Пока пусто</li>';
   $('events').innerHTML = s.events.map((e) => `<li>${new Date(e.ts).toLocaleTimeString('ru')} ${esc(e.agent_name || '')}: ${esc(e.message)}</li>`).join('');
   renderDetail();

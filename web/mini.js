@@ -117,7 +117,7 @@
     put($('crew'), prio + S.state.agents.map(agentHtml).join(''), 'crew');
     $('crew').querySelectorAll('[data-duck]').forEach((el) => { if (!el.firstChild) { const a = S.state.agents.find((x) => x.id === el.dataset.duck); el.innerHTML = duckSVG(a, { size: 56 }); } });
     const v = (S.state.videos || []).slice(0, 4);
-    put($('clips'), v.length ? '<h2>Ролики</h2>' + v.map((x) => `<div class="clip"><b>${C.esc(x.title || 'Ролик ' + x.id)}</b><span>${C.esc(stageName(x.stage))}</span></div>`).join('') : '', 'clips');
+    put($('clips'), v.length ? '<h2>Ролики</h2>' + v.map((x) => `<div class="clip"><b>${C.esc(x.title || 'Ролик ' + x.id)}${C.variantLabel(x) ? ` <i class="vtag">${C.esc(C.variantLabel(x))}</i>` : ''}</b><span>${C.esc(stageName(x.stage))}</span></div>`).join('') : '', 'clips');
   }
   function stageName(s) { return ({ idea: 'идея', scored: 'оценена', script: 'сценарий', checked: 'факты проверены', produced: 'смонтирован', accepted: 'принят', published: 'опубликован' })[s] || s || ''; }
   function agentHtml(a) {

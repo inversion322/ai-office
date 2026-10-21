@@ -104,6 +104,10 @@
     return '<div class="pbar' + (pb.overrun ? ' over' : '') + '" title="' + esc(tip) + '"><i style="width:' + (Number(pb.pct) || 0) + '%"></i><span>' + esc(pb.label) + '</span></div>';
   }
 
-  const api = { progressBar, parseApi, gateFor, statusText, ago, targetFor, pendingCards, normButtons, squash, threadFilter, isMine, commentMode, splitButtons, isDismiss, clearLabel, esc, STATUS };
+  // Метка варианта одной темы у ролика: «B · Один объект» (поле variant приходит с сервера)
+  const VFMT = { A: 'Лента', B: 'Один объект', C: 'Диалог' };
+  const variantLabel = (v) => (v && v.variant && v.variant.letter ? v.variant.letter + ' · ' + (VFMT[v.variant.letter] || '') : '');
+
+  const api = { variantLabel, progressBar, parseApi, gateFor, statusText, ago, targetFor, pendingCards, normButtons, squash, threadFilter, isMine, commentMode, splitButtons, isDismiss, clearLabel, esc, STATUS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MiniCore = api;
 })(typeof window !== 'undefined' ? window : globalThis);

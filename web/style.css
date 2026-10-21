@@ -287,3 +287,9 @@ details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-weight:700;f
 .act-btns .act-dismiss{background:transparent;border-color:transparent;color:var(--mut);font-weight:700;margin-left:auto}
 .act-btns .act-dismiss:hover{color:var(--err);filter:none}
 .clear-wait{margin-top:8px}
+
+/* метка варианта одной темы в списке роликов: «B · Один объект» */
+.vtag{display:inline-block;font:700 10px/16px 'JetBrains Mono',monospace;padding:0 6px;border-radius:8px;background:#EEF0FF;color:#364FC7;border:1px solid #C9D2FF;vertical-align:1px;font-style:normal}
+
+/* узкая плашка «работает» (столы стоят плотно): только метка и шкала, ширина по шагу между столами */
+.work-badge.narrow{padding:3px 6px 5px;min-width:96px}.work-badge.narrow small{margin-bottom:0}.work-badge.narrow .pbar{margin:3px -2px -1px}.work-badge.narrow .pbar span{font-size:8.5px;letter-spacing:-.2px;padding:0 1px}

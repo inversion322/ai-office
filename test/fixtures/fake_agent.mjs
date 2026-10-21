@@ -29,7 +29,21 @@ const NEW_SEGMENTS = ['Сорок процентов родителей не в�
   'Журнал JAMA, шестнадцать работ. Вывод простой: на поведение детей сахар не влияет.',
   'Откуда же буря? Праздник, друзья, музыка. Сладкое просто приходит туда, где и так шумно.',
   'Зубам и весу сахар вреден: ВОЗ советует меньше десяти процентов калорий. Но гиперактивность тут ни при чём.'];
-if (/Напиши сценарий ролика/.test(q)) {
+// ---- Варианты одной темы (Ксения пишет B и C, Вера сверяет). FAKE_VARIANT_MODE: ok | no_file (вариант не получается)
+const VAR_B = { hook_type: 'цифра', segments: ['Пятьдесят мужчин, шесть дней и один вопрос про утреннюю чашку.', 'Исследователи делили дни на кофейные и водные и измеряли, сколько жидкости остаётся в теле.', 'Итог по приборам удивил самих авторов: разница между напитками почти не видна на графике.', 'Утренний кофе вы можете оставить, график это позволяет.'] };
+const VAR_C = { hook_type: 'контраст', segments: ['Мне сказали, что кофе сушит, а я не поверил.', 'Учёные поспорили с этой байкой и провели собственный опыт.', 'Выяснилось, что по общему балансу воды кофе и вода идут вровень.', 'Пейте спокойно: чашка кофе потерей воды не станет.'], skeptic: ['Кофе же сушит?', 'И что, никто не проверял?', 'Но моча же светлеет?', 'Значит, можно пить?'] };
+const isVariant = /ТОЙ ЖЕ ТЕМЫ/.test(q);
+if (isVariant && /Напиши сценарий ролика/.test(q)) {
+  const L = /ВАРИАНТ ([BC]) ТОЙ ЖЕ ТЕМЫ/.exec(q)[1], out = /запиши результат в (\S+?script\.json)/.exec(q)[1].replace(/\.$/, '');
+  const file = path.isAbsolute(out) ? out : path.join(process.env.FAKE_ROOT || process.cwd(), out);
+  fs.appendFileSync(file + '.queries', q.replace(/\n/g, ' ') + '\n---\n');
+  if (process.env.FAKE_VARIANT_MODE !== 'no_file') { const v = L === 'B' ? VAR_B : VAR_C; fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify({ title: 'Кофе обезвоживает?', rubric: 'myth', ...v, on_screen: [], claims: [], sources_card: ['Killer. 2014.'], disclaimer: 'Не заменяет консультацию врача.' })); }
+}
+if (/Сверка вариантов сценария/.test(q)) {
+  const out = /Запиши JSON в (\S+?variants_check\.json)/.exec(q)[1].replace(/\.$/, ''); const file = path.isAbsolute(out) ? out : path.join(process.env.FAKE_ROOT || process.cwd(), out);
+  fs.writeFileSync(file, JSON.stringify({ verdict: 'pass', summary: 'новых утверждений нет (имитация)', items: [] }));
+}
+if (/Напиши сценарий ролика/.test(q) && !isVariant) {
   const out = /Итог запиши строго в файл (.+?) \(валидный JSON/.exec(q)[1].trim();
   const mode = process.env.FAKE_SCRIPT_MODE || 'ok', regen = /ПЕРЕГЕНЕРАЦИЯ/.test(q);
   try { const ch = /Обязательные правки: (.*?)(?:\n|$)/s.exec(q); fs.appendFileSync(out + '.queries', (ch ? ch[1] : '(без замечаний)').slice(0, 1800) + '\n---\n'); } catch {}
@@ -46,7 +60,7 @@ if (/Напиши сценарий ролика/.test(q)) {
     hook_options: [{ type: 'цифра', line: segments[0], score: 9 }, { type: 'сцена', line: 'x', score: 6 }, { type: 'парадокс', line: 'y', score: 7 }],
     segments, ...(craftOk ? CRAFT_FIELDS : {}), on_screen: [], claims: [], sources_card: ['Wolraich. JAMA. 1995.'], disclaimer: 'Не заменяет консультацию врача.' }));
 }
-if (/Проверь сценарий из файла/.test(q)) {
+if (/Проверь сценарий из файла/.test(q) && !isVariant) {
   const out = /Итог запиши строго в файл (.+?) \(валидный JSON/.exec(q)[1].trim();
   if (process.env.FAKE_DELAY_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_DELAY_MS)));
   const bad = process.env.FAKE_CHECK_MODE === 'fail';
@@ -66,6 +80,8 @@ if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   const proj = /Создай проект `?([^`\s:]+(?::[^`\s:]+)?)`?:/.exec(q)[1].replace(/\\/g, '/'); const n = /dosie(\d+)_v1\.mp4/.exec(q)[1];
   const { spawnSync } = await import('node:child_process'); const path = await import('node:path');
   const ff = process.env.TEST_FFMPEG; const mode = process.env.FAKE_VIDEO_MODE || 'good';
+  const span = { start: Date.now(), profile: process.argv[process.argv.indexOf('-p') + 1], brief: q.length, format: (/ФОРМАТ ЭТОГО РОЛИКА: ([BC])/.exec(q) || [])[1] || 'A', editor: (/Ты ([А-Яа-яЁё]+ [А-Яа-яЁё]+), Video Editor/.exec(q) || [])[1], skeptic: /Реплики «Скептика»/.test(q), rules: /КРУГИ МОНТАЖА И РЕНДЕР/.test(q) };
+  if (process.env.FAKE_VIDEO_DELAY_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_VIDEO_DELAY_MS)));
   fs.mkdirSync(proj + '/final', { recursive: true }); fs.mkdirSync(proj + '/compositions', { recursive: true });
   const { makeClip } = await import('./make_clip.mjs');
   makeClip(ff, `${proj}/final/dosie${n}_v1.mp4`, mode === 'bad_format' ? 'horizontal' : mode === 'static' ? 'static' : 'dynamic');
@@ -80,6 +96,7 @@ if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   // vizavi-motion: эталонные раскадровка и журнал правок; режим no_vizavi имитирует Кирилла, который скилл не применил
   const mdir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'video', 'med_detective');
   if (mode !== 'no_vizavi') { fs.copyFileSync(path.join(mdir, 'STORYBOARD_REFERENCE.json'), proj + '/STORYBOARD.json'); fs.copyFileSync(path.join(mdir, 'REVIEW_LOG_REFERENCE.json'), proj + '/REVIEW_LOG.json'); }
+  fs.writeFileSync(proj + '/_fake_span.json', JSON.stringify({ ...span, end: Date.now() }));
   fs.writeFileSync(proj + '/RESULT.md', '# Результат\nГотово (имитация).' + (mode === 'no_plan' ? '' : '\n\n## Использовано из библиотеки\n- iris-reveal, caption-highlight (имитация)') + (mode === 'no_vizavi' ? '' : '\n\n## Использовано из vizavi-motion\n- раскадровка с вариантами (имитация)'));
 }
 

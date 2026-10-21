@@ -9,7 +9,7 @@
 
 const MIN = 60;
 export const DEFAULT_SEC = {
-  'video:produce': 50 * MIN, 'video:rework': 20 * MIN, 'captain_smm:produce': 50 * MIN, 'captain_smm:rework': 20 * MIN,
+  'video:produce': 50 * MIN, 'video:rework': 20 * MIN, 'video_b:produce': 45 * MIN, 'video_b:rework': 20 * MIN, 'video_c:produce': 45 * MIN, 'video_c:rework': 20 * MIN, 'captain_smm:produce': 50 * MIN, 'captain_smm:rework': 20 * MIN,
   'captain_smm:script': 20 * MIN, 'captain_smm:topics': 12 * MIN,
   'scriptwriter:run': 5 * MIN, 'factcheck:run': 3 * MIN, 'research:run': 6 * MIN, 'virality:run': 4 * MIN,
   'packager:run': 3 * MIN, 'publisher:run': 2 * MIN,
@@ -21,7 +21,7 @@ const REAL_FRESH_MS = 120000;               // «настоящий» прогр
 /** Вид работы: по сотруднику и тексту задачи в момент старта. Определяет, с чем сравнивать длительность. */
 export function kindOf(agentId, task) {
   const t = String(task || '').toLowerCase();
-  if (agentId === 'video') return /правк/.test(t) ? 'rework' : 'produce';
+  if (agentId === 'video' || agentId === 'video_b' || agentId === 'video_c') return /правк/.test(t) ? 'rework' : 'produce';
   if (agentId === 'captain_smm') return /правк/.test(t) ? 'rework' : /монтаж/.test(t) ? 'produce' : /сценар/.test(t) ? 'script' : /тем|поиск/.test(t) ? 'topics' : 'run';
   return 'run';
 }

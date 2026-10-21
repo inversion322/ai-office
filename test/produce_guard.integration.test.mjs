@@ -35,7 +35,7 @@ async function produce(mode) {
   const before = (await api('/api/chat?office=smm')).messages.length;
   const code = await new Promise((resolve) => {
     const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'produce', String(id)], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE, TEST_FFMPEG: FF, FAKE_VIDEO_MODE: mode } });
-    p.on('exit', resolve); setTimeout(() => { p.kill(); resolve('timeout'); }, 90000);
+    p.on('exit', resolve); setTimeout(() => { p.kill(); resolve('timeout'); }, 180000);     // 90 с хватало вне нагрузки; в полном прогоне рядом идут ffmpeg-тесты других файлов
   });
   const st = await api('/api/state?office=smm'), msgs = (await api('/api/chat?office=smm')).messages.slice(before);
   return { code, st, msgs, stage: st.videos.find((v) => v.id === id).stage, agent: st.agents.find((a) => a.id === 'video') };
