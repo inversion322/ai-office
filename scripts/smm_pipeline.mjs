@@ -30,6 +30,7 @@ import { editorOf, formatOf, variantOf, groupMembers, enabledFormats, titleClash
 import { makeFlow } from './variants_flow.mjs';
 import { formatSection } from './format_spec.mjs';
 import { roundsInfo, roundsNote } from './render_slot.mjs';
+import { resumeBlock, classifyGate, canContinueShort, shortContinueBrief } from './produce_resume.mjs';
 import { styleIssues, styleFeedback, bridgeIssues, verdictIssues, cleanFillerOpeners } from './script_style.mjs';
 import { craftIssues, craftFeedback, craftSummary } from './script_craft.mjs';
 import { evidenceIssues, evidenceFeedback, ledgerPath } from './agent_skills.mjs';
@@ -340,7 +341,9 @@ async function produce(id, comment, { finishOnly = false, sendAnyway = false } =
   const brief = tpl.replaceAll('{{N}}', n).replaceAll('{{ID}}', String(id)).replaceAll('{{TITLE}}', v.title).replaceAll('{{SCRIPT}}', path.join(abs, 'script_ru.txt').replaceAll('\\', '/'))
     .replaceAll('{{FACTS}}', path.join(abs, 'FACTS.md').replaceAll('\\', '/')).replaceAll('{{PROJ}}', proj.replaceAll('\\', '/')).replaceAll('{{VIDEO}}', ROOT.replaceAll('\\', '/') + '/video').replaceAll('{{SCRIPTS}}', ROOT.replaceAll('\\', '/') + '/scripts').replaceAll('{{COMMENT}}', comment || 'нет').replaceAll('{{RENDER_RULES}}', renderRules({ proj, scripts: path.join(ROOT, 'scripts') })).replaceAll('{{FORMAT_SECTION}}', formatSection(fmt, ROOT, { panels: panelsLine(abs) })).replaceAll('Ты Кирилл Кадров, Video Editor', `Ты ${ed.name}, Video Editor`);
   if (ensureCtaFile(path.join(abs, 'script_ru.txt'))) console.log('в сценарий добавлен призыв подписаться (video/cta.json)');
-  const bf = path.join(abs, 'BRIEF.md'); fs.writeFileSync(bf, brief, 'utf8');
+  const resume = finishOnly ? '' : resumeBlock(proj, n);          // проект уже собран частично (оборвалась прошлая сессия): продолжаем, а не начинаем с нуля
+  if (resume) console.log('проект уже собран частично: монтажёр получает задание на ПРОДОЛЖЕНИЕ, а не на новую сборку');
+  const bf = path.join(abs, 'BRIEF.md'); fs.writeFileSync(bf, resume ? brief.replace('## Шаги\n', resume + '## Шаги\n') : brief, 'utf8');
 
   await agent('captain_smm', 'working', `Монтаж: «${v.title}»${tag}`, 60, `Сценарий утверждён, передал ${ed.name}${tag}`);
   let videoStartedAt = Date.now() - 4 * 3600e3, code = 'finish', stopWatch = () => {};          // finishOnly: смотрим логи скиллов за последние 4 часа (когда монтажёр работал)
@@ -365,7 +368,25 @@ async function produce(id, comment, { finishOnly = false, sendAnyway = false } =
     await safeNotify(`⚠️ Ролик «${v.title}»${tag} не собран, смотрите ${proj}/RESULT.md`);
     throw new Error('нет mp4');
   }
-  const gt = gate(mp4, proj, { dynamics: true, format: fmt });        // формат, шляпа и динамика проверяются конвейером по профилю формата ролика (A, B или C), а не только словами в задании
+  let gt = gate(mp4, proj, { dynamics: true, format: fmt });        // формат, шляпа и динамика проверяются конвейером по профилю формата ролика (A, B или C), а не только словами в задании
+  // Ворота ругаются ТОЛЬКО на отчётные артефакты (монтажёр не успел записать журнал просмотра): ролик не бракуем и в тупик не ставим.
+  // Один раз даём короткое продолжение (20-25 минут вместо новых 90) на дописание отчёта; журнал код сам не пишет: он свидетельствует, что кадры смотрели.
+  const cls = classifyGate(gt.problems), shortMark = path.join(abs, '_short_continue.json');
+  if (!gt.ok && !sendAnyway && !finishOnly && cls.onlyArtifacts && !fs.existsSync(shortMark) && process.env.SHORT_CONTINUE !== 'off') {
+    const cc = canContinueShort(proj, n);
+    if (cc.ok) {
+      fs.writeFileSync(shortMark, JSON.stringify({ ts: Date.now(), artifacts: cls.artifacts, rounds: cc.state.rounds }));          // метка: короткое продолжение даётся один раз, цикла нет
+      console.log('ворота ругаются только на отчётные артефакты: короткое продолжение монтажёра:', cls.artifacts.join('; '));
+      await agent(ed.id, 'working', 'Дописывает отчёт о просмотре (короткое продолжение)', 70, `Ролик собран, не хватает отчёта о просмотре: ${cls.artifacts[0]}. Монтажёр дописывает (20-25 мин), не заново`, undefined, { real: true });
+      const bf2 = path.join(abs, 'BRIEF_continue.md');
+      fs.writeFileSync(bf2, shortContinueBrief({ proj, n, title: v.title, editorName: ed.name, artifacts: cls.artifacts, state: cc.state, render: renderRules({ proj, scripts: path.join(ROOT, 'scripts') }) }), 'utf8');
+      await new Promise((resolve) => {
+        const p2 = hermesSpawn(['-p', ed.profile, 'chat', '--query-file', bf2, '-Q', '--oneshot', '--max-turns', '200', '--run-budget', '2100'], { cwd: ROOT, windowsHide: true, stdio: ['ignore', fs.openSync(path.join(abs, '_video_log_continue.txt'), 'w'), 'ignore'] });
+        p2.on('exit', resolve);
+      });
+      gt = gate(mp4, proj, { dynamics: true, format: fmt });          // перепроверка тем же кодом: оценка не зависит от того, что монтажёр о себе написал
+    }
+  }
   // --finish --send-anyway: решение Капитана/Ника отдать на РУЧНУЮ оценку ролик, не прошедший автопроверку (круги рендера исчерпаны). Только вместе с --finish; причина всегда в начале подписи.
   let overrideNote = '';
   if (!gt.ok && sendAnyway) { overrideNote = `⚠️ АВТОПРОВЕРКА НЕ ПРОЙДЕНА, ролик отправлен вам на ручную оценку:\n- ${gt.problems.join('\n- ')}\n\n`; console.log('отправка вопреки воротам (--send-anyway):', gt.problems.join('; ')); }

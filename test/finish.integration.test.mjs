@@ -39,12 +39,12 @@ async function scenario({ pre, scriptMode = 'short', checkMode = 'ok' }) {
   if (pre) fs.writeFileSync(path.join(RUN, 'PREAPPROVED'), '1');
   await api('/api/video', { id: 6, stage: 'script' });
   await api('/api/agent', { id: 'scriptwriter', status: 'working', task: 'Сокращаю: озвучка 58 с при лимите 53' });
-  const before = (await api('/api/chat?office=smm')).messages.length;
+  const before = (await api('/api/chat?office=smm')).messages.reduce((a, m) => Math.max(a, m.id), 0);      // по id, а не по длине: выдача чата ограничена 400 последними, длина перестаёт расти
   const code = await new Promise((resolve) => {
     const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'script', '6', '--finish'], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', SMM_TTS_ESTIMATE_ONLY: '1', HERMES_BIN: FAKE, FAKE_SCRIPT_MODE: scriptMode, FAKE_CHECK_MODE: checkMode } });
     p.on('exit', resolve); setTimeout(() => { p.kill(); resolve('timeout'); }, 150000);
   });
-  const st = await api('/api/state?office=smm'), msgs = (await api('/api/chat?office=smm')).messages.slice(before);
+  const st = await api('/api/state?office=smm'), msgs = (await api('/api/chat?office=smm')).messages.filter((m) => m.id > before);
   return { code, st, msgs, stage: st.videos.find((v) => v.id === 6).stage, agent: (id) => st.agents.find((a) => a.id === id) };
 }
 const card = (msgs) => msgs.filter((m) => m.kind === 'action' && /Сценарий: «/.test(m.text)).pop();
@@ -85,12 +85,12 @@ test('пока шли круги, Ник отклонил тему: ни кар�
   fs.rmSync(RUN, { recursive: true, force: true }); fs.mkdirSync(RUN, { recursive: true });
   fs.writeFileSync(path.join(RUN, 'script.json'), JSON.stringify({ title: 'Холод', rubric: 'myth', hook_type: 'вопрос-ловушка', segments: ['Короткий текст про шаги.'], claims: [], sources_card: [], disclaimer: 'x' }));
   fs.writeFileSync(path.join(RUN, 'PREAPPROVED'), '1'); await api('/api/video', { id: 6, stage: 'script' });
-  const before = (await api('/api/chat?office=smm')).messages.length;
+  const before = (await api('/api/chat?office=smm')).messages.reduce((a, m) => Math.max(a, m.id), 0);      // по id, а не по длине: выдача чата ограничена 400 последними, длина перестаёт расти
   const run = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'script', '6', '--finish'], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', SMM_TTS_ESTIMATE_ONLY: '1', HERMES_BIN: FAKE, FAKE_SCRIPT_MODE: 'short', FAKE_DELAY_MS: '3000' } });
   const done = new Promise((r) => { run.on('exit', r); setTimeout(r, 60000); });
   await sleep(1500); await api('/api/video', { id: 6, stage: 'rejected' });          // Ник отклонил тему, пока Вера проверяла
   await done;
-  const st = await api('/api/state?office=smm'), msgs = (await api('/api/chat?office=smm')).messages.slice(before);
+  const st = await api('/api/state?office=smm'), msgs = (await api('/api/chat?office=smm')).messages.filter((m) => m.id > before);
   assert.equal(st.videos.find((v) => v.id === 6).stage, 'rejected'); assert.equal(fs.existsSync(path.join(RUN, 'PREAPPROVED')), false);
   assert.ok(!msgs.some((m) => m.kind === 'action' && /Сценарий: «/.test(m.text)), 'карточка по отклонённой теме не прислана'); assert.ok(!msgs.some((m) => /Сценарий утверждён/.test(m.text)));
 });

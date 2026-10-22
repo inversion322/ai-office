@@ -75,7 +75,7 @@ if (/Проверь сценарий из файла/.test(q) && !isVariant) {
   fs.writeFileSync(out, JSON.stringify({ verdict: bad ? 'fix' : 'pass', summary: bad ? 'формулировка шире данных (имитация)' : 'факты подтверждены (имитация)', claims: [], required_changes: bad ? ['Сегмент 2: уточнить формулировку'] : [] }));
 }
 
-// ---- Кирилл (этап монтажа, конвейер produce). FAKE_VIDEO_MODE: good | tilted_hat | bad_format | static | bad_cta | no_plan | no_vizavi
+// ---- Кирилл (этап монтажа, конвейер produce). FAKE_VIDEO_MODE: good | tilted_hat | bad_format | static | bad_cta | no_plan | no_vizavi | no_review (собрал всё, но не успел записать журнал просмотра) | static_no_review (то же, но ещё и ролик статичный: дефект КАЧЕСТВА, продолжение его не лечит)
 if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   const proj = /Создай проект `?([^`\s:]+(?::[^`\s:]+)?)`?:/.exec(q)[1].replace(/\\/g, '/'); const n = /dosie(\d+)_v1\.mp4/.exec(q)[1];
   const { spawnSync } = await import('node:child_process'); const path = await import('node:path');
@@ -84,7 +84,8 @@ if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   if (process.env.FAKE_VIDEO_DELAY_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_VIDEO_DELAY_MS)));
   fs.mkdirSync(proj + '/final', { recursive: true }); fs.mkdirSync(proj + '/compositions', { recursive: true });
   const { makeClip } = await import('./make_clip.mjs');
-  makeClip(ff, `${proj}/final/dosie${n}_v1.mp4`, mode === 'bad_format' ? 'horizontal' : mode === 'static' ? 'static' : 'dynamic');
+  makeClip(ff, `${proj}/final/dosie${n}_v1.mp4`, mode === 'bad_format' ? 'horizontal' : (mode === 'static' || mode === 'static_no_review') ? 'static' : 'dynamic');
+  const noReview = mode === 'no_review' || mode === 'static_no_review';
   fs.writeFileSync(proj + '/compositions/d_frame.html', mode === 'tilted_hat' ? 'tl.fromTo("#dk-hatwrap", { x: 0, y: 0, rotation: 0 }, { x: 3, y: -9, rotation: 16 }, 1);' : 'tl.fromTo("#dk-hatwrap", { y: 0 }, { y: -9 }, 1);');
   // сцена призыва: эталон из репозитория (как копирует настоящий Кирилл); режим bad_cta кладёт прежнюю: обычный регистр, моноширинная ссылка, текст целиком
   const { fileURLToPath } = await import('node:url');
@@ -95,9 +96,18 @@ if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   if (mode !== 'no_plan') fs.writeFileSync(proj + '/LIBRARY_PLAN.json', refPlan);
   // vizavi-motion: эталонные раскадровка и журнал правок; режим no_vizavi имитирует Кирилла, который скилл не применил
   const mdir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'video', 'med_detective');
-  if (mode !== 'no_vizavi') { fs.copyFileSync(path.join(mdir, 'STORYBOARD_REFERENCE.json'), proj + '/STORYBOARD.json'); fs.copyFileSync(path.join(mdir, 'REVIEW_LOG_REFERENCE.json'), proj + '/REVIEW_LOG.json'); }
+  if (mode !== 'no_vizavi') { fs.copyFileSync(path.join(mdir, 'STORYBOARD_REFERENCE.json'), proj + '/STORYBOARD.json'); if (!noReview) fs.copyFileSync(path.join(mdir, 'REVIEW_LOG_REFERENCE.json'), proj + '/REVIEW_LOG.json'); }
+  if (noReview) { fs.writeFileSync(proj + '/format.json', '{"format":"A"}'); fs.writeFileSync(proj + '/build_dosie' + n + '.py', '# имитация сборщика'); fs.writeFileSync(proj + '/narration.mp3', 'x'); fs.writeFileSync(proj + '/words.json', '[]'); fs.writeFileSync(proj + '/_render_rounds.json', JSON.stringify({ main: { done: 1, fails: 0, history: [] } })); }
   fs.writeFileSync(proj + '/_fake_span.json', JSON.stringify({ ...span, end: Date.now() }));
+  if (process.env.FAKE_BRIEF_LOG) fs.appendFileSync(process.env.FAKE_BRIEF_LOG, 'FIRST ' + q.length + ' ' + (/ПРОДОЛЖЕНИЕ, А НЕ НОВЫЙ РОЛИК/.test(q) ? 'resume' : 'fresh') + '\n');
   fs.writeFileSync(proj + '/RESULT.md', '# Результат\nГотово (имитация).' + (mode === 'no_plan' ? '' : '\n\n## Использовано из библиотеки\n- iris-reveal, caption-highlight (имитация)') + (mode === 'no_vizavi' ? '' : '\n\n## Использовано из vizavi-motion\n- раскадровка с вариантами (имитация)'));
+}
+
+// ---- Короткое продолжение монтажёра (ворота ругались только на отчётные артефакты). FAKE_CONTINUE_MODE: writes (дописал журнал) | ignores (ничего не сделал)
+if (/Дописать отчёт и довести ролик/.test(q)) {
+  const proj = /Состояние проекта `([^`]+)`/.exec(q)[1].replace(/\\/g, '/'); const { fileURLToPath } = await import('node:url'); const path = await import('node:path');
+  if (process.env.FAKE_BRIEF_LOG) fs.appendFileSync(process.env.FAKE_BRIEF_LOG, 'CONTINUE ' + q.length + '\n');
+  if ((process.env.FAKE_CONTINUE_MODE || 'writes') === 'writes') fs.copyFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'video', 'med_detective', 'REVIEW_LOG_REFERENCE.json'), proj + '/REVIEW_LOG.json');
 }
 
 // ---- Ежедневные темы (Виктор и Лев). FAKE_DAILY_MODE: ok | all_dups (всё повторы) | dups_then_new (1 круг повторы, 2 новые)

@@ -18,7 +18,8 @@ const can = fs.existsSync(path.join(REAL, 'office.db')) && fs.existsSync(path.jo
 const PORT = 9700 + (process.pid % 90), API = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let tmp, server, TOKEN, g; const dirs = [];
-const api = async (p, body) => { const r = await fetch(API + p, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); return r.json(); };
+// Connection: close и два повтора: в полном параллельном прогоне пулованное keep-alive соединение иногда рвётся (ECONNRESET), пока рядом идут ffmpeg-тесты; тест мигал красным без причины в продукте
+const api = async (p, body) => { for (let i = 0; ; i++) { try { const r = await fetch(API + p, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json', Connection: 'close' }, body: body ? JSON.stringify(body) : undefined }); return await r.json(); } catch (e) { if (i >= 2) throw e; await new Promise((r) => setTimeout(r, 400)); } } };
 const msgs = async () => (await api('/api/chat?office=smm')).messages;
 async function waitFor(re, from = 0, ms = 60000) { for (let t = 0; t < ms; t += 400) { const m = (await msgs()).find((x) => x.id > from && re.test(x.text)); if (m) return m; await sleep(400); } throw new Error('сообщение не пришло: ' + re); }
 const lastId = async () => Math.max(0, ...(await msgs()).map((m) => m.id));

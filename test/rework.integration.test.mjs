@@ -91,10 +91,10 @@ test('правки не вышли: приоритет снят, прежняя 
 });
 
 test('правка про динамику (DYNAMICS.md): статичный результат Нику НЕ отправляется, названы цифры динамики', { skip: !can }, async () => {
-  const before = (await api('/api/chat?office=smm')).messages.length;
+  const before = (await api('/api/chat?office=smm')).messages.reduce((a, m) => Math.max(a, m.id), 0);      // по id, а не по длине: выдача чата ограничена 400 последними, длина перестаёт расти
   const res = await runStage(['rework', '9', '--comment', 'Динамика по DYNAMICS.md: переделать визуал'], { FAKE_KIRILL_SECONDS: '1', FAKE_KIRILL_CLIP: 'static' });
   assert.notEqual(res.code, 0, res.out);
-  const msgs = (await api('/api/chat?office=smm')).messages.slice(before);
+  const msgs = (await api('/api/chat?office=smm')).messages.filter((m) => m.id > before);
   assert.ok(!msgs.some((m) => m.kind === 'action' && /accept:9/.test(JSON.stringify(m.buttons))), 'карточка приёмки не должна прийти');
   assert.ok(msgs.some((m) => /НЕ отправлены вам/.test(m.text) && /динамика:/.test(m.text) && /резких смен/.test(m.text)));
   assert.equal((await api('/api/priority')).active, false, 'приоритет снят и после отказа проверки');

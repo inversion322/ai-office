@@ -23,8 +23,8 @@ const SA = ['Говорят, что кофе обезвоживает. Прав�
 let tmp, server, TOKEN;
 const envFor = { OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE, FAKE_ROOT: ROOT, TEST_FFMPEG: FF, SMM_TTS_ESTIMATE_ONLY: '1', CRAFT_GATE: 'off', DYNAMICS_GATE: 'off', FAKE_VIDEO_DELAY_MS: '3000' };
 const api = async (p, body) => { const r = await fetch(API + p, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); return r.json(); };
-// чистим ТОЛЬКО тестовые номера (>= 90000): настоящие ролики имеют номера в сотнях
-const cleanup = () => { for (const [base, re] of [[path.join(ROOT, 'smm', 'runs'), /^video_(\d+)$/], [path.join(ROOT, 'video'), /^dosie(\d+)$/]]) { try { for (const f of fs.readdirSync(base)) { const m = re.exec(f); if (m && Number(m[1]) >= 90000) fs.rmSync(path.join(base, f), { recursive: true, force: true }); } } catch {} } };
+// чистим ТОЛЬКО СВОИ номера 90000-90199 (базовые 90001/90100 и варианты max+1 после них). Раньше было «>= 90000»: это сносило папки соседних файлов (92001+ publish_queue, 92101+ publish_at, 92201+ produce_continue) посреди их работы, и те падали с ENOENT/«нет mp4» только в полном параллельном прогоне
+const cleanup = () => { for (const [base, re] of [[path.join(ROOT, 'smm', 'runs'), /^video_(\d+)$/], [path.join(ROOT, 'video'), /^dosie(\d+)$/]]) { try { for (const f of fs.readdirSync(base)) { const m = re.exec(f); if (m && Number(m[1]) >= 90000 && Number(m[1]) <= 90199) fs.rmSync(path.join(base, f), { recursive: true, force: true }); } } catch {} } };
 const state = async () => (await api('/api/state?office=smm'));
 const video = async (id) => (await state()).videos.find((v) => v.id === id);
 const notesOf = (v) => { try { return JSON.parse(v.notes || '{}'); } catch { return {}; } };

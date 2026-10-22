@@ -20,6 +20,9 @@ const run = (extra = {}) => new Promise((resolve) => { const p = spawn(process.e
 const RUNS = path.join(ROOT, 'smm', 'runs'), isDaily = (d) => /_daily_med_detective$/.test(d);
 let keep = new Set();      // настоящие подборки (их создаёт cron) тест не трогает: по ним считаются повторы
 const chat = async () => (await api('/api/chat?office=smm')).messages;
+// «новые сообщения» считаем по id, а не по длине: выдача /api/chat ограничена 400 последними, и на копии живой БД длина перестаёт расти (тест мигал красным по мере накопления сообщений в офисе)
+const chatMaxId = async () => (await chat()).reduce((a, m) => Math.max(a, m.id), 0);
+const chatSince = async (id) => (await chat()).filter((m) => m.id > id);
 const vids = async () => (await api('/api/state?office=smm')).videos;
 const newer = async (maxId) => (await vids()).filter((v) => v.id > maxId);     // API отдаёт список не по порядку добавления: новые = id больше прежнего максимума
 const maxId = async () => Math.max(0, ...(await vids()).map((v) => v.id));
@@ -38,7 +41,7 @@ after(() => { try { server && server.kill(); } catch {} try { for (const d of fs
 
 test('подборка: повторы (офис, лента канала, прежние подборки) отсеяны, темы без первоисточника не берутся, приходит одна карточка с кнопками «Тема N» и «Другие темы»', { skip: !can }, async () => {
   await api('/api/video', { title: 'Нужно ходить ровно десять тысяч шагов в день?', stage: 'approved', score: 80, notes: '{}' });
-  const before0 = await maxId(), cardsBefore = (await chat()).length;
+  const before0 = await maxId(), cardsBefore = await chatMaxId();
   const r = await run({ FAKE_DAILY_MODE: 'ok' }); assert.equal(r.code, 0, r.out);
   const added = await newer(before0);
   assert.ok(added.length >= 3 && added.length <= 6, 'добавлено новых тем: ' + added.length);
@@ -47,10 +50,10 @@ test('подборка: повторы (офис, лента канала, пр�
   assert.ok(!titles.some((t) => /кофе натощак/i.test(t)), 'тема, уже опубликованная в канале (лента), отсеяна');
   assert.ok(!titles.includes('Тема без источника'), 'тема без первоисточника не берётся');
   assert.equal(new Set(titles).size, titles.length);
-  const msgs = (await chat()).slice(cardsBefore).filter((m) => /Темы на сегодня/.test(m.text)); assert.equal(msgs.length, 1, 'ровно одна карточка');
+  const msgs = (await chatSince(cardsBefore)).filter((m) => /Темы на сегодня/.test(m.text)); assert.equal(msgs.length, 1, 'ровно одна карточка');
   const ds = msgs[0].buttons.flat().map((b) => b.d); assert.ok(ds.some((d) => /^pick:\d+$/.test(d)) && ds.includes('more:0'), ds.join());
   assert.match(msgs[0].text, /повторов нет/); assert.match(msgs[0].text, /Без вашей кнопки ничего не запускается/);
-  assert.ok(!(await chat()).slice(cardsBefore).some((m) => /Ксения пишет|Тема выбрана/i.test(m.text)), 'сценарий сам не запускался');
+  assert.ok(!(await chatSince(cardsBefore)).some((m) => /Ксения пишет|Тема выбрана/i.test(m.text)), 'сценарий сам не запускался');
 });
 
 test('если в подборке вышли одни повторы: второй круг просит другие темы, итог без повторов', { skip: !can }, async () => {
@@ -61,8 +64,8 @@ test('если в подборке вышли одни повторы: втор�
 });
 
 test('если новых тем нет совсем: честное сообщение «новых тем не нашлось», никаких карточек выбора и ложных тем', { skip: !can }, async () => {
-  const before0 = await maxId(), c0 = (await chat()).length;
+  const before0 = await maxId(), c0 = await chatMaxId();
   const r = await run({ FAKE_DAILY_MODE: 'all_dups' }); assert.equal(r.code, 0, r.out);
   assert.equal((await newer(before0)).length, 0, 'новые темы не добавлены');
-  const m = (await chat()).slice(c0).filter((x) => /новых тем без повторов не нашлось/.test(x.text)); assert.equal(m.length, 1); assert.ok(!(m[0].buttons || []).length);
+  const m = (await chatSince(c0)).filter((x) => /новых тем без повторов не нашлось/.test(x.text)); assert.equal(m.length, 1); assert.ok(!(m[0].buttons || []).length);
 });

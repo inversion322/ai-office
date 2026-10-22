@@ -32,12 +32,12 @@ async function produce(mode) {
   fs.rmSync(PROJ, { recursive: true, force: true }); fs.rmSync(RUN, { recursive: true, force: true }); fs.mkdirSync(RUN, { recursive: true });
   fs.writeFileSync(path.join(RUN, 'script_ru.txt'), 'Короткий текст про шаги.\n'); fs.writeFileSync(path.join(RUN, 'FACTS.md'), '# факты\n');
   const id = 5; await api('/api/video', { id, stage: 'editing' });
-  const before = (await api('/api/chat?office=smm')).messages.length;
+  const before = (await api('/api/chat?office=smm')).messages.reduce((a, m) => Math.max(a, m.id), 0);      // по id, а не по длине: выдача чата ограничена 400 последними, длина перестаёт расти
   const code = await new Promise((resolve) => {
     const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'produce', String(id)], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE, TEST_FFMPEG: FF, FAKE_VIDEO_MODE: mode } });
     p.on('exit', resolve); setTimeout(() => { p.kill(); resolve('timeout'); }, 180000);     // 90 с хватало вне нагрузки; в полном прогоне рядом идут ffmpeg-тесты других файлов
   });
-  const st = await api('/api/state?office=smm'), msgs = (await api('/api/chat?office=smm')).messages.slice(before);
+  const st = await api('/api/state?office=smm'), msgs = (await api('/api/chat?office=smm')).messages.filter((m) => m.id > before);
   return { code, st, msgs, stage: st.videos.find((v) => v.id === id).stage, agent: st.agents.find((a) => a.id === 'video') };
 }
 const sentToNick = (msgs) => msgs.some((m) => m.kind === 'action' && /Принять ролик/.test(JSON.stringify(m.buttons)));
@@ -83,12 +83,12 @@ async function finishRun(extra = []) {
   const MARK = path.join(tmp, 'agent_called.txt'); fs.rmSync(MARK, { force: true });
   const NOAGENT = path.join(tmp, 'noagent.mjs'); fs.writeFileSync(NOAGENT, `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(MARK)}, 'called'); process.exit(1);`);
   const id = 5; await api('/api/video', { id, stage: 'editing' });
-  const before = (await api('/api/chat?office=smm')).messages.length;
+  const before = (await api('/api/chat?office=smm')).messages.reduce((a, m) => Math.max(a, m.id), 0);      // по id, а не по длине: выдача чата ограничена 400 последними, длина перестаёт расти
   const code = await new Promise((resolve) => {
     const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'produce', String(id), '--finish', ...extra], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: NOAGENT, TEST_FFMPEG: FF } });
     p.on('exit', resolve); setTimeout(() => { p.kill(); resolve('timeout'); }, 120000);
   });
-  const st = await api('/api/state?office=smm'), msgs = (await api('/api/chat?office=smm')).messages.slice(before);
+  const st = await api('/api/state?office=smm'), msgs = (await api('/api/chat?office=smm')).messages.filter((m) => m.id > before);
   return { code, called: fs.existsSync(MARK), msgs, stage: st.videos.find((v) => v.id === id).stage };
 }
 
