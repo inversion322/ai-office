@@ -420,3 +420,15 @@ test('«тема» без пожеланий: просто поиск; «тем�
   assert.equal(m2.chat.incoming({ text: 'тема 5', source: 'telegram' }).note, 'pick');
   assert.notEqual(m2.chat.incoming({ text: 'темы', source: 'dashboard', thread: 'scriptwriter' }).note, 'topics', 'в ветке Ксении это разговор с Ксенией');
 });
+
+test('«Внести правки» варианта C: правки идут Роману (имя в ответе, статус video_c), лампочка Кирилла не загорается; у обычного ролика Кирилл как раньше', async () => {
+  const { chat, db } = make(); db.exec(`ALTER TABLE videos ADD COLUMN notes TEXT; INSERT INTO agents VALUES ('video','Кирилл Кадров','Video Editor','smm','idle','',0,0),('video_c','Роман Ракурсов','Video Editor C','smm','idle','',0,0);`);
+  db.prepare("UPDATE videos SET stage='produced', notes=? WHERE id=3").run(JSON.stringify({ variant: { group: 1, letter: 'C', format: 'C' } })); db.prepare("UPDATE videos SET stage='produced' WHERE id=5").run();
+  const idC = videoCard(chat, 3); await chat.answer({ id: idC, choice: 'rework:3', comment: 'переделай страницу', via: 'dashboard' });
+  const sayC = db.prepare("SELECT text FROM messages WHERE sender='captain_smm' AND text LIKE 'Правки приняты%' ORDER BY id DESC").get().text;
+  assert.match(sayC, /^Правки приняты, Роман начинает сразу/, sayC.slice(0, 80)); assert.doesNotMatch(sayC, /Кирилл/);
+  assert.equal(db.prepare("SELECT status FROM agents WHERE id='video'").get().status, 'idle', 'Кирилл не при делах: чужой формат');
+  const idA = videoCard(chat, 5); await chat.answer({ id: idA, choice: 'rework:5', comment: 'заголовок крупнее', via: 'dashboard' });
+  const sayA = db.prepare("SELECT text FROM messages WHERE sender='captain_smm' AND text LIKE 'Правки приняты%' ORDER BY id DESC").get().text;
+  assert.match(sayA, /^Правки приняты, Кирилл начинает сразу/); assert.equal(db.prepare("SELECT status FROM agents WHERE id='video'").get().status, 'working');
+});

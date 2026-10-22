@@ -240,8 +240,9 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
         const short = comment.trim().replace(/\s+/g, ' ').slice(0, 90);
         supersede(`accept:${id}`); supersede(`rework:${id}`);
         setStage(id, 'editing'); setPriority({ active: true, video_id: id, label: `правки ролика №${id}` });
-        setAgent('video', 'working', `Правки ролика №${id}: ${short}`, `Ник просит правки ролика «${v.title}»: ${short}`);
-        cap(`Правки приняты, Кирилл начинает сразу. У этого ролика приоритет: новые этапы других роликов подождут, пока он не закончит.\nЧто делает: «${short}${comment.trim().length > 90 ? '…' : ''}».\nГотовую версию пришлю сюда с кнопками «Принять» и «Внести правки».`);
+        const edId = (VFORMATS[letterOf(v)] || VFORMATS.A).editor, edName = { video: 'Кирилл', video_b: 'Матвей', video_c: 'Роман' }[edId] || 'Монтажёр';          // правки идут тому монтажёру, чей формат у ролика (A Кирилл, B Матвей, C Роман)
+        if (edId === 'video') setAgent('video', 'working', `Правки ролика №${id}: ${short}`, `Ник просит правки ролика «${v.title}»: ${short}`);
+        cap(`Правки приняты, ${edName} начинает сразу. У этого ролика приоритет: новые этапы других роликов подождут, пока он не закончит.\nЧто делает: «${short}${comment.trim().length > 90 ? '…' : ''}».\nГотовую версию пришлю сюда с кнопками «Принять» и «Внести правки».`);
         spawnPipeline(['rework', String(id), '--comment', comment.trim()]);
       } else { kvSet('awaiting', JSON.stringify({ kind: 'rework', id, mid: srcMsg && srcMsg.id, ts: now() })); cap('Напишите одним сообщением, что поправить в ролике (здесь или в Telegram). Кирилл начнёт сразу, у этого ролика будет приоритет.'); }
     } else if (act === 'accept' && v) {

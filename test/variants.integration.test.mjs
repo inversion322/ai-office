@@ -44,7 +44,9 @@ async function waitFor(fn, ms = 150000) { const t0 = Date.now(); for (;;) { cons
 before(async () => {
   if (!can) return; cleanup();
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vint-')); copyLiveDb(REAL, tmp); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
-  const db = new DatabaseSync(path.join(tmp, 'office.db')); seedTopic(db, G1); seedTopic(db, G2); db.close();
+  const db = new DatabaseSync(path.join(tmp, 'office.db')); seedTopic(db, G1); seedTopic(db, G2);
+  db.exec("UPDATE agents SET status='idle', progress=0 WHERE status IN ('working','waiting','error')");          // копия снята с боевого офиса: статусы тех, кто работает в этот момент, к тесту не относятся (иначе тест мигает при каждом монтаже)
+  db.close();
   server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, ...envFor, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1' }, stdio: 'ignore', windowsHide: true });
   for (let i = 0; i < 40; i++) { try { if ((await fetch(API + '/health')).ok) break; } catch {} await sleep(300); }
 });
