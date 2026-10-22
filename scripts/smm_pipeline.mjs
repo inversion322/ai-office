@@ -329,7 +329,7 @@ function panelsLine(dir) {
     return a.map((t, i) => `Панель ${i + 1}: ${String(t.scene || '').trim()}${t.caption ? ` (подпись: «${String(t.caption).trim()}»)` : ''}`).join('\n') + `\nПоследняя панель (пустая с «?» весь ролик, проявляется только на развязке): ${reveal || 'см. reveal в script.json'}`;
   } catch { return ''; }
 }
-async function produce(id, comment) {
+async function produce(id, comment, { finishOnly = false, sendAnyway = false } = {}) {        // finishOnly: монтажёр уже собрал файл, но не успел отчитаться (кончился бюджет сессии): монтаж не запускается, код сам проверяет ворота и отправляет
   const v = await getVideo(id); if (!v) throw new Error('нет ролика #' + id);
   const ed = editorOf(v), fmt = formatOf(v), vr = variantOf(v), tag = vr ? ` · вариант ${vr.letter} «${FORMATS[fmt].name}»` : '';   // монтажёр и формат по метке варианта; одиночный ролик: Кирилл, формат A
   const n = String(id).padStart(2, '0');
@@ -343,17 +343,21 @@ async function produce(id, comment) {
   const bf = path.join(abs, 'BRIEF.md'); fs.writeFileSync(bf, brief, 'utf8');
 
   await agent('captain_smm', 'working', `Монтаж: «${v.title}»${tag}`, 60, `Сценарий утверждён, передал ${ed.name}${tag}`);
-  await scene('captain_smm', ed.id, `${ed.name.split(' ')[0]}, сценарий утверждён: «${v.title}»${tag}. Озвучка, субтитры, монтаж.`);
-  await yieldToPriority(ed.id);          // идут правки другого ролика: у правок приоритет
-  await agent(ed.id, 'working', 'Озвучка, субтитры, монтаж (Opus 5.5)', 3, 'Начал сборку ролика', undefined, { real: true });
-  const videoStartedAt = Date.now();
-  // настоящий процент по файлам проекта: дашборд показывает «N% · ещё ~M мин» (video_progress.mjs)
-  const stopWatch = watchVideoProgress(proj, n, videoStartedAt, (pct, step) => agent(ed.id, 'working', undefined, pct, `Монтаж: ${step} (${pct}%)`, undefined, { real: true }));
-  const { spawn } = await import('node:child_process');
-  const code = await new Promise((resolve) => {
-    const p = hermesSpawn(['-p', ed.profile, 'chat', '--query-file', bf, '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: ROOT, windowsHide: true, stdio: ['ignore', fs.openSync(path.join(abs, '_video_log.txt'), 'w'), 'ignore'] });
-    p.on('exit', resolve);
-  });
+  let videoStartedAt = Date.now() - 4 * 3600e3, code = 'finish', stopWatch = () => {};          // finishOnly: смотрим логи скиллов за последние 4 часа (когда монтажёр работал)
+  if (finishOnly) { await agent('captain_smm', 'working', `Проверяю готовый ролик: «${v.title}»${tag}`, 80, 'Монтажёр файл собрал, проверяю ворота и отправляю'); }
+  else {
+    await scene('captain_smm', ed.id, `${ed.name.split(' ')[0]}, сценарий утверждён: «${v.title}»${tag}. Озвучка, субтитры, монтаж.`);
+    await yieldToPriority(ed.id);          // идут правки другого ролика: у правок приоритет
+    await agent(ed.id, 'working', 'Озвучка, субтитры, монтаж (Opus 5.5)', 3, 'Начал сборку ролика', undefined, { real: true });
+    videoStartedAt = Date.now();
+    // настоящий процент по файлам проекта: дашборд показывает «N% · ещё ~M мин» (video_progress.mjs)
+    stopWatch = watchVideoProgress(proj, n, videoStartedAt, (pct, step) => agent(ed.id, 'working', undefined, pct, `Монтаж: ${step} (${pct}%)`, undefined, { real: true }));
+    const { spawn } = await import('node:child_process');
+    code = await new Promise((resolve) => {
+      const p = hermesSpawn(['-p', ed.profile, 'chat', '--query-file', bf, '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: ROOT, windowsHide: true, stdio: ['ignore', fs.openSync(path.join(abs, '_video_log.txt'), 'w'), 'ignore'] });
+      p.on('exit', resolve);
+    });
+  }
   stopWatch();
   const mp4 = path.join(proj, 'final', `dosie${n}_v1.mp4`);
   if (!fs.existsSync(mp4)) {
@@ -362,10 +366,13 @@ async function produce(id, comment) {
     throw new Error('нет mp4');
   }
   const gt = gate(mp4, proj, { dynamics: true, format: fmt });        // формат, шляпа и динамика проверяются конвейером по профилю формата ролика (A, B или C), а не только словами в задании
-  if (!gt.ok) {
+  // --finish --send-anyway: решение Капитана/Ника отдать на РУЧНУЮ оценку ролик, не прошедший автопроверку (круги рендера исчерпаны). Только вместе с --finish; причина всегда в начале подписи.
+  let overrideNote = '';
+  if (!gt.ok && sendAnyway) { overrideNote = `⚠️ АВТОПРОВЕРКА НЕ ПРОЙДЕНА, ролик отправлен вам на ручную оценку:\n- ${gt.problems.join('\n- ')}\n\n`; console.log('отправка вопреки воротам (--send-anyway):', gt.problems.join('; ')); }
+  else if (!gt.ok) {
     const why = gt.problems.join('; ');
     await agent(ed.id, 'error', 'Ролик не прошёл проверку (формат/шляпа/динамика)', 0, why.slice(0, 200), 'error');
-    await safeNotify(`⚠️ Ролик «${v.title}»${tag} собран, но НЕ отправлен вам: не прошёл автоматическую проверку.\n- ${gt.problems.join('\n- ')}\nФайл: ${mp4}`);
+    await safeNotify(`⚠️ Ролик «${v.title}»${tag} собран, но НЕ отправлен вам: не прошёл автоматическую проверку.\n- ${gt.problems.join('\n- ')}\nФайл: ${mp4}${finishOnly ? '\nМожно отдать его вам на ручную оценку: produce <id> --finish --send-anyway.' : ''}`);
     throw new Error('ролик не прошёл проверку: ' + why);
   }
   markFormat(proj, fmt);
@@ -380,8 +387,8 @@ async function produce(id, comment) {
   const skillNote = skillUsageNote(videoStartedAt, undefined, { profile: ed.profile, name: ed.name.split(' ')[0] }), roundNote = roundsNote(proj);
   if (skillNote) console.log(skillNote);
   if (roundNote) console.log(roundNote);
-  try { await sendVideoFile(mp4, `🎬 «${v.title}»${tag} готов.\n${res}${gt.summary ? '\n' + gt.summary : ''}${skillNote ? '\n' + skillNote : ''}${roundNote ? '\n' + roundNote : ''}\n\nПринять или внести правки?`, btn); }
-  catch (e) { await safeNotify(`🎬 Ролик${tag} готов: ${mp4}\n(не удалось отправить файл: ${e.message})\n${res}`, btn); }
+  try { await sendVideoFile(mp4, `${overrideNote}🎬 «${v.title}»${tag} готов.\n${res}${gt.summary ? '\n' + gt.summary : ''}${skillNote ? '\n' + skillNote : ''}${roundNote ? '\n' + roundNote : ''}\n\nПринять или внести правки?`, btn); }
+  catch (e) { await safeNotify(`${overrideNote}🎬 Ролик${tag} готов: ${mp4}\n(не удалось отправить файл: ${e.message})\n${res}`, btn); }
   console.log('готово:', mp4);
 }
 
@@ -582,7 +589,7 @@ const runOnce = () => cmd === 'topics' ? topics(opt('--hint', all))
   : cmd === 'group-card' ? flow.groupCard(a1).then((cid) => console.log('карточка группы', cid))
   : cmd === 'variant-revise' ? flow.reviseVariant(a1, opt('--comment', rest)).then((cid) => console.log('карточка группы', cid))
   : cmd === 'script' ? script(a1, opt('--comment', rest), all.includes('--regen'), all.includes('--finish'))
-  : cmd === 'produce' ? produce(a1, opt('--comment', rest))
+  : cmd === 'produce' ? produce(a1, opt('--comment', rest), { finishOnly: all.includes('--finish'), sendAnyway: all.includes('--finish') && all.includes('--send-anyway') })
   : cmd === 'rework' ? rework(a1, opt('--comment', rest))
   : cmd === 'package' ? packageClip(a1, opt('--comment', rest))
   : cmd === 'publish' ? publishYouTube(a1, opt('--target', rest) || 'ytp', { when: opt('--at', rest) || undefined }).then((r) => { if (!r.ok) process.exitCode = 1; })

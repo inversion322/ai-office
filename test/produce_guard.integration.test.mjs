@@ -77,3 +77,40 @@ test('ролик без vizavi-motion (нет STORYBOARD.json, REVIEW_LOG.json �
   const r = await produce('no_vizavi'); assert.notEqual(r.code, 0); assert.equal(r.stage, 'editing'); assert.equal(r.agent.status, 'error'); assert.ok(!sentToNick(r.msgs));
   assert.ok(r.msgs.some((m) => /НЕ отправлен вам/.test(m.text) && /vizavi:/.test(m.text) && /STORYBOARD\.json/.test(m.text) && /REVIEW_LOG\.json/.test(m.text) && /Использовано из vizavi-motion/.test(m.text)), r.msgs.map((m) => m.text.slice(0, 220)).join(' | '));
 });
+
+// --finish: монтажёр собрал файл, но не успел отчитаться (кончился бюджет сессии). Монтаж НЕ запускается, код сам проверяет те же ворота и отправляет.
+async function finishRun(extra = []) {
+  const MARK = path.join(tmp, 'agent_called.txt'); fs.rmSync(MARK, { force: true });
+  const NOAGENT = path.join(tmp, 'noagent.mjs'); fs.writeFileSync(NOAGENT, `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(MARK)}, 'called'); process.exit(1);`);
+  const id = 5; await api('/api/video', { id, stage: 'editing' });
+  const before = (await api('/api/chat?office=smm')).messages.length;
+  const code = await new Promise((resolve) => {
+    const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'produce', String(id), '--finish', ...extra], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: NOAGENT, TEST_FFMPEG: FF } });
+    p.on('exit', resolve); setTimeout(() => { p.kill(); resolve('timeout'); }, 120000);
+  });
+  const st = await api('/api/state?office=smm'), msgs = (await api('/api/chat?office=smm')).messages.slice(before);
+  return { code, called: fs.existsSync(MARK), msgs, stage: st.videos.find((v) => v.id === id).stage };
+}
+
+test('--finish: готовый хороший ролик проверяется и уходит Нику, монтажёр (модель) НЕ вызывается', { skip: !can }, async () => {
+  const made = await produce('good'); assert.equal(made.stage, 'produced');       // проект и файл собирает подмена Кирилла как обычно
+  const r = await finishRun(); assert.equal(r.code, 0); assert.equal(r.called, false, 'монтажёр не должен запускаться'); assert.equal(r.stage, 'produced'); assert.ok(sentToNick(r.msgs), 'ролик ушёл Нику с кнопками');
+});
+test('--finish: ролик не проходит ворота (статичный) — Нику НЕ отправляется, причина названа, монтажёр не вызывается', { skip: !can }, async () => {
+  const made = await produce('static'); assert.notEqual(made.code, 0);
+  const r = await finishRun(); assert.notEqual(r.code, 0); assert.equal(r.called, false); assert.equal(r.stage, 'editing'); assert.ok(!sentToNick(r.msgs));
+  assert.ok(r.msgs.some((m) => /НЕ отправлен вам/.test(m.text) && /динамика:/.test(m.text)), r.msgs.map((m) => m.text.slice(0, 80)).join(' | '));
+});
+test('--finish: файла нет — честная ошибка «нет mp4», монтаж не запускается', { skip: !can }, async () => {
+  fs.rmSync(PROJ, { recursive: true, force: true }); fs.mkdirSync(RUN, { recursive: true }); fs.writeFileSync(path.join(RUN, 'script_ru.txt'), 'Короткий текст.\n'); fs.writeFileSync(path.join(RUN, 'FACTS.md'), '# факты\n');
+  const r = await finishRun(); assert.notEqual(r.code, 0); assert.equal(r.called, false); assert.equal(r.stage, 'editing'); assert.ok(!sentToNick(r.msgs));
+});
+
+test('--finish --send-anyway: ролик не прошёл автопроверку, но уходит Нику на ручную оценку; причина В НАЧАЛЕ подписи, кнопки приёмки на месте; без --finish флаг ничего не обходит', { skip: !can }, async () => {
+  const made = await produce('static'); assert.notEqual(made.code, 0);
+  const plain = await finishRun(); assert.notEqual(plain.code, 0); assert.ok(!sentToNick(plain.msgs), 'без --send-anyway ролик не уходит');
+  assert.ok(plain.msgs.some((m) => /produce <id> --finish --send-anyway/.test(m.text)), 'в отказе подсказан путь «на ручную оценку»');
+  const r = await finishRun(['--send-anyway']); assert.equal(r.code, 0); assert.equal(r.called, false); assert.equal(r.stage, 'produced'); assert.ok(sentToNick(r.msgs));
+  const card = r.msgs.filter((m) => m.kind === 'action' && /Принять ролик/.test(JSON.stringify(m.buttons))).pop();
+  assert.match(card.text, /^⚠️ АВТОПРОВЕРКА НЕ ПРОЙДЕНА, ролик отправлен вам на ручную оценку:/, 'пометка в самом начале'); assert.match(card.text, /динамика:/);
+});
