@@ -65,6 +65,14 @@ test('правки: приоритет включается и выключае�
   assert.ok(fs.existsSync(path.join(PROJ, 'final', 'dosie09_v1.mp4')), 'прежний ролик пропал');
   const brief = fs.readFileSync(path.join(PROJ, 'REWORK_v2.md'), 'utf8');
   assert.ok(brief.includes(comment), 'комментарий Ника не дословно в задании'); assert.match(brief, /Не перезаписывай и не удаляй прежние версии/); assert.match(brief, /приоритет/i);
+  // решение Ника 2026-10-22: правка ТОЧЕЧНАЯ, ролик с нуля не монтируется; при этом ворота кода после правки не должны падать из-за того, что монтажёр пропустил обязательное
+  assert.match(brief, /Разбор правки \(ПЕРВЫЙ шаг/, 'нет шага диагностики: что именно нужно менять'); assert.match(brief, /пункт просьбы → какие сцены\/файлы\/секунды меняются → что НЕ трогаю/);
+  assert.match(brief, /Не пересобирай с нуля/); assert.match(brief, /озвучку НЕ генерируй/); assert.match(brief, /скиллы целиком не перечитывай/);
+  assert.match(brief, /Любая более узкая просьба[^.]*остаётся точечной/, 'узкая просьба не должна превращаться в полную переделку');
+  assert.doesNotMatch(brief, /БИБЛИОТЕКА ПРЕЖДЕ ВСЕГО/, 'полный ритуал монтажа (7 шагов библиотеки) не должен идти в бриф правок');
+  assert.match(brief, /«\*\*Использовано из библиотеки\*\*»/); assert.match(brief, /«\*\*Использовано из vizavi-motion\*\*»/, 'без этих двух разделов в RESULT_vN.md правка упадёт на воротах уже после рендера');
+  assert.match(brief, /увеличь \\?`?builds\\?`? на 1|builds[^.]*на 1/, 'REVIEW_LOG.builds >= 2 проверяется кодом'); assert.match(brief, /STORYBOARD\.json`? и `?[^`]*LIBRARY_PLAN\.json`? не удаляй и не переписывай целиком/);
+  assert.match(brief, /чистый рендер|рендер[^.]*целый ролик/, 'сказано честно, что рендер полный'); assert.ok(brief.length < 12000, 'бриф правок разросся: ' + brief.length);
   const chat = await api('/api/chat?office=smm');
   const card = chat.messages.filter((m) => m.kind === 'action' && m.status === 'open').pop();
   assert.ok(card, 'нет карточки с результатом');

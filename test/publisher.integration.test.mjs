@@ -105,7 +105,7 @@ test('«Перейти к публикации»: приходит карточ�
   const cid = (await api('/api/chat/post', { office: 'smm', thread: 'captain_smm', sender: 'captain_smm', text: 'Название', buttons: [[['🔄', `package:${v.id}`], ['✏️', `title:${v.id}`]], [['🚀', `publish_go:${v.id}`]]], mirror: false })).id;
   assert.equal((await api('/api/chat/answer', { id: cid, choice: `publish_go:${v.id}`, via: 'dashboard' })).ok, true);
   const card = await waitFor(/Публикация ролика №\d+ «Тест: шаги»/, from); const ds = JSON.parse(JSON.stringify(card.buttons)).flat().map((b) => b.d).filter((d) => d !== 'dismiss:0');
-  assert.deepEqual(ds, [`publish:${v.id}:yt`, `publish:${v.id}:ytp`, `title:${v.id}`, `package:${v.id}`]); assert.match(card.text, /«Десять тысяч шагов родились в рекламе\?»/);
+  assert.deepEqual(ds, [`publish:${v.id}:yt`, `publish:${v.id}:ytp`, `pubat:${v.id}`, `title:${v.id}`, `package:${v.id}`], 'на карточке есть «Запланировать на своё время» (pubat) между проверкой и сменой названия'); assert.match(card.text, /«Десять тысяч шагов родились в рекламе\?»/);
   assert.equal(g.st.inits.length, g.st.inits.length, 'до кнопки «опубликовать» ничего не загружено'); assert.ok(!fs.existsSync(path.join(v.run, 'publish.json')));
 });
 

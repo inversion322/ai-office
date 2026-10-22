@@ -8,6 +8,7 @@ import { cleanReport } from './lib_text.mjs';
 import { topicRequest, classifyAnswer, quickPick, topicMentioned, stripButtonTalk } from './lib_intent.mjs';
 import { probeVideo, checkFormat, sendFields } from '../scripts/video_format.mjs';
 import { variantOf, groupMembers, isGroup, anchorOf, parseVariantComment, FORMATS as VFORMATS } from '../scripts/variants.mjs';
+import { parseWhen, isCancelWhen, fmtMsk } from '../scripts/publish_when.mjs';
 
 const OWNER = 323028999;
 const NAMES = { капитан: 'captain_smm', кряк: 'captain_smm', виктор: 'research', ксения: 'scriptwriter', лев: 'virality', вера: 'factcheck', кирилл: 'video', матвей: 'video_b', роман: 'video_c', тимофей: 'packager' };
@@ -143,7 +144,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       if (r && (r.data === data || (type === 'pick' && String(r.data).startsWith('pick:')))) closeCard(o, 'answered', 'superseded', 'system');
     }
   }
-  const AWAIT_ACT = (kind) => (kind === 'rework' ? 'rework' : kind === 'title' ? 'title' : 'revise');     // какое действие продолжит следующий текст Ника
+  const AWAIT_ACT = (kind) => (kind === 'rework' ? 'rework' : kind === 'title' ? 'title' : kind === 'pubat' ? 'pubat' : 'revise');     // какое действие продолжит следующий текст Ника
   async function execAction(data, comment, via, srcMsg) {
     const [act, idStr, mode] = String(data).split(':'); const id = Number(idStr);
     const v = act === 'confirm' || act === 'cancel' ? null : (id ? q('SELECT * FROM videos WHERE id=?', id)[0] : null);
@@ -258,13 +259,17 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       cap('Запустила Кирилла заново: он продолжит по сохранённым файлам. Ход работы виден справа в «Сейчас в работе».');
     } else if (act === 'publish' && v) {
       // Публикация только по кнопке и только принятого ролика; одну и ту же карточку второй раз не исполняем
-      if (!['yt', 'ytp', 'yts'].includes(mode)) { cap('Не понял, куда публиковать.', false); return {}; }
+      if (!['yt', 'ytp', 'yts', 'at'].includes(mode)) { cap('Не понял, куда публиковать.', false); return {}; }
+      let atIso = ''; if (mode === 'at') {          // publish:<id>:at:<минуты от эпохи в base36>: время зашито в кнопку, старая карточка не может выложить в другое
+        const raw = String(data).split(':')[3] || '', min = parseInt(raw, 36); atIso = Number.isFinite(min) && min > 0 ? new Date(min * 60e3).toISOString() : '';
+        if (!atIso) { cap('Не вижу времени выхода в кнопке. Нажмите «Запланировать на своё время» ещё раз.', false); return {}; }
+      }
       if (v.stage !== 'approved') { cap(`Ролик «${v.title}» ещё не принят, публиковать рано.`, false); return {}; }
-      supersede(`publish:${id}:${mode}`);
+      supersede(`publish:${id}:${mode}`); if (mode === 'at') supersede(`pubat:${id}`);
       if (stageRunning(['publish', String(id)])) { cap(`Публикатор уже загружает ролик «${v.title}». Второй раз не запускаю.`, false); return {}; }
-      setAgent('publisher', 'working', `Публикация ролика №${id}`, `Ник нажал «${mode === 'yt' ? 'опубликовать в YouTube Shorts' : 'приватная проверка в YouTube'}»`);
-      cap(mode === 'yts' ? `Принято. Пётр Выкладов загружает «${v.title}» сейчас, а выложит его YouTube сам по слоту очереди вариантов (интервал 30 минут). Пришлю ссылку.` : `Принято. Пётр Выкладов загружает «${v.title}» в YouTube ${mode === 'yt' ? 'публично' : 'как приватный (виден только вам)'}. Пришлю ссылку.`);
-      spawnPipeline(['publish', String(id), '--target', mode]);
+      setAgent('publisher', 'working', `Публикация ролика №${id}`, `Ник нажал «${mode === 'at' ? 'запланировать выход в YouTube' : mode === 'yt' ? 'опубликовать в YouTube Shorts' : 'приватная проверка в YouTube'}»`);
+      cap(mode === 'at' ? `Принято. Пётр Выкладов загружает «${v.title}» сейчас, а YouTube выложит его сам ${fmtMsk(atIso)} (МСК). До этого ролик виден только вам. Пришлю ссылку.` : mode === 'yts' ? `Принято. Пётр Выкладов загружает «${v.title}» сейчас, а выложит его YouTube сам по слоту очереди вариантов (интервал 30 минут). Пришлю ссылку.` : `Принято. Пётр Выкладов загружает «${v.title}» в YouTube ${mode === 'yt' ? 'публично' : 'как приватный (виден только вам)'}. Пришлю ссылку.`);
+      spawnPipeline(['publish', String(id), '--target', mode, ...(mode === 'at' ? ['--at', atIso] : [])]);
     } else if (act === 'title' && v) {
       // Своё название вместо предложенного Тимофеем: кнопка без текста ждёт следующее сообщение Ника, с текстом сохраняет сразу
       const t = String(comment || '').replace(/\s+/g, ' ').trim();
@@ -273,6 +278,23 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       supersede(`package:${id}"`); supersede(`title:${id}"`); supersede(`publish_go:${id}"`); supersede(`publish:${id}:`);
       cap(`Принято, ставлю ваше название: «${t}».`);
       spawnPipeline(['set-title', String(id), '--title', t]);
+    } else if (act === 'pubat' && v) {
+      // Отложенная публикация на время Ника: кнопка без текста ждёт сообщение вроде «завтра 18:00», с текстом разбирает сразу.
+      if (v.stage !== 'approved') { cap(`Ролик «${v.title}» ещё не принят, публиковать рано.`, false); return {}; }
+      const had = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'smm', 'runs', `video_${id}`, 'publish.json'), 'utf8')).youtube || []; } catch { return []; } })().find((x) => x.privacy === 'public' || x.scheduledFor);
+      if (had) { cap(`Ролик «${v.title}» уже ${had.scheduledFor ? 'запланирован на ' + fmtMsk(had.scheduledFor) + ' (МСК)' : 'опубликован'}: ${had.url}. Второй раз не загружаю.`, false); return {}; }
+      const t = String(comment || '').replace(/\s+/g, ' ').trim();
+      if (!t || isCancelWhen(t)) {
+        if (t) { cap('Хорошо, время выхода не задаю. Карточка публикации остаётся с прежними кнопками.', false); return {}; }
+        kvSet('awaiting', JSON.stringify({ kind: 'pubat', id, mid: srcMsg && srcMsg.id, ts: now() }));
+        cap(`Когда выложить «${v.title}»? Напишите одним сообщением время по Москве, например: «завтра 18:00», «сегодня 20:30», «25.10 19:00», «в субботу в 11», «через 3 часа». Сейчас ${fmtMsk(Date.now())} МСК. Передумали, напишите «отмена».`);
+        return {};
+      }
+      const w = parseWhen(t, Date.now());
+      if (!w.ok) { kvSet('awaiting', JSON.stringify({ kind: 'pubat', id, ts: now() })); cap(`${w.error}\nНапишите время ещё раз или «отмена».`); return {}; }
+      supersede(`publish:${id}:at:`);
+      const code = Math.round(w.atMs / 60e3).toString(36);
+      post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: `📅 Выложить «${v.title}» ${w.text} (МСК)?\nРолик загрузится сейчас как приватный, а YouTube сам опубликует его в это время. До выхода его видите только вы, время можно поменять в YouTube Studio.`, buttons: [[[`✅ Да, на ${w.text}`, `publish:${id}:at:${code}`]], [['🕐 Другое время', `pubat:${id}`]]], mirrorTg: true });
     } else if (act === 'publish_go' && v) {
       if (v.stage !== 'approved') { cap(`Ролик «${v.title}» ещё не принят, публиковать рано.`, false); return {}; }
       supersede(`publish_go:${id}"`); supersede(`publish:${id}:`);

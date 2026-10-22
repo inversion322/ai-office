@@ -2,6 +2,7 @@
 // Ничего не публикуется без нажатия кнопки «publish:<id>:<режим>» в карточке (решение Ника: автопубликации без согласования нет).
 // Режимы: ytp = YouTube, приватная проверка (видно только вам в YouTube Studio); yt = YouTube Shorts, публично;
 // yts = выход по слоту очереди вариантов (варианты одной темы выходят с интервалом 30 минут: загрузка сразу, YouTube сам выложит в назначенное время).
+// at = выход в момент, который назвал Ник («завтра 18:00»): загрузка сразу, YouTube сам выложит в срок (publishAt).
 // Один ролик не уходит дважды: состояние в smm/runs/video_N/publish.json.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,6 +10,7 @@ import { ROOT, agent, say, notify, getVideo, videos, readJson } from './smm_lib.
 import { variantOf, groupMembers, publishOrder, slotFor, hhmm, GAP_MIN, MIN_AHEAD_MIN, FORMATS } from './variants.mjs';
 import { probeVideo, checkFormat } from './video_format.mjs';
 import { ytStatus, buildMetadata, uploadVideo, YtError } from './youtube.mjs';
+import { fmtMsk, MIN_AHEAD_MIN_USER, MAX_AHEAD_DAYS } from './publish_when.mjs';
 
 export const stateFile = (id) => path.join(ROOT, 'smm', 'runs', `video_${Number(id)}`, 'publish.json');
 export const loadState = (id) => readJson(stateFile(id)) || {};
@@ -58,18 +60,24 @@ export async function preflight(id, mode) {
   else { try { problems.push(...checkFormat(probeVideo(file)).problems.map((p) => 'формат: ' + p)); } catch (e) { problems.push('не удалось проверить формат файла: ' + String(e.message).slice(0, 120)); } }
   const meta = loadPublishMeta(id); if (!meta) problems.push('нет пакета публикации (название и хэштеги от Тимофея)');
   const st = ytStatus(); if (!st.ready) problems.push(!st.client ? 'YouTube не подключён: нет ключа OAuth-клиента (server/data/youtube_client.json)' : 'YouTube не подключён: нет разрешения (запустите node scripts/youtube_auth.mjs на ПК)');
-  const had = (loadState(id).youtube || []).find((x) => mode === 'ytp' ? x.privacy === 'private' && !x.scheduledFor : (x.privacy === 'public' || x.scheduledFor));
+  const had = (loadState(id).youtube || []).find((x) => mode === 'ytp' ? x.privacy === 'private' && !x.scheduledFor : (x.privacy === 'public' || x.scheduledFor));       // at и yts, как yt: любой публичный или запланированный выход = дубль
   if (had) problems.push(`уже загружено ${had.scheduledFor ? 'с отложенным выходом' : mode === 'ytp' ? 'для проверки' : 'публично'}: ${had.url}`);
   return { ok: problems.length === 0, problems, file, meta, v };
 }
 
 export async function publishYouTube(id, mode = 'ytp', { when } = {}) {
-  let slotNote = '';
+  let slotNote = '', byNick = false;
+  if (mode === 'at') {          // время назвал Ник: проверяем ещё раз прямо перед загрузкой (карточка могла пролежать, часы идут)
+    const ms = new Date(when).getTime(), nowMs = Date.now();
+    const bad = !Number.isFinite(ms) ? 'время выхода не распознано' : ms < nowMs + MIN_AHEAD_MIN_USER * 60e3 ? `время выхода ${fmtMsk(ms)} МСК уже прошло или слишком близко (нужно минимум ${MIN_AHEAD_MIN_USER} минут вперёд): выберите другое` : ms > nowMs + MAX_AHEAD_DAYS * 86400e3 ? 'время выхода дальше чем через год' : '';
+    if (bad) { await safe(agent('publisher', 'error', 'Публикация не началась', 0, bad.slice(0, 200), 'error')); await notify(`⚠️ Публикатор: ролик №${id} НЕ загружен в YouTube.\n- ${bad}`); await publishCard(id).catch(() => {}); return { ok: false, problems: [bad] }; }
+    when = new Date(ms).toISOString(); byNick = true;          // режим остаётся «at» до проверки «уже загружено»: иначе запланированная запись не считалась бы дублем
+  }
   if (mode === 'yts') {         // выход по слоту очереди: слот берётся из плана группы; близкий или прошедший слот значит «публикуем сейчас»
     const q = await queueInfo(id); const s = q && q.slot;
     if (s && q.ahead >= MIN_AHEAD_MIN) when = s.toISOString(); else { mode = 'yt'; slotNote = s ? ` (слот ${hhmm(s)} уже наступил или слишком близко: публикую сразу)` : ' (слот ещё не определён: публикую сразу)'; }
   }
-  const privacy = mode === 'yt' ? 'public' : 'private';
+  const privacy = mode === 'yt' ? 'public' : 'private';       // yts и at всегда загружаются приватными: YouTube сам откроет их в publishAt
   await safe(agent('publisher', 'working', `Проверяю ролик №${id} перед загрузкой`, 10, `Публикация ролика №${id} в YouTube (${privacy === 'public' ? 'публично' : 'приватная проверка'})`));
   const pf = await preflight(id, mode);
   if (!pf.ok) {
@@ -81,12 +89,18 @@ export async function publishYouTube(id, mode = 'ytp', { when } = {}) {
     await safe(agent('publisher', 'working', `Загружаю ролик №${id} в YouTube`, 40, 'Идёт загрузка', 'info'));
     const meta = buildMetadata({ title: pf.meta.title, videoTitle: pf.meta.videoTitle || pf.v.title, tags: pf.meta.tags, sources: sourcesOf(id), privacy, publishAt: when });
     const r = await uploadVideo({ file: pf.file, meta });
-    const st = loadState(id); st.youtube = [...(st.youtube || []), { id: r.id, url: r.url, privacy: meta.status.privacyStatus, title: meta.snippet.title, ts: new Date().toISOString(), file: path.relative(ROOT, pf.file), ...(when ? { scheduledFor: new Date(when).toISOString() } : {}) }]; saveState(id, st);
+    const st = loadState(id); st.youtube = [...(st.youtube || []), { id: r.id, url: r.url, privacy: meta.status.privacyStatus, title: meta.snippet.title, ts: new Date().toISOString(), file: path.relative(ROOT, pf.file), ...(when ? { scheduledFor: new Date(when).toISOString(), ...(byNick ? { byNick: true } : {}) } : {}) }]; saveState(id, st);
     // первый вышедший ролик группы задаёт старт очереди: остальные варианты получают слоты от него с интервалом 30 минут
-    try { const vr = variantOf(pf.v); if (vr && !when && meta.status.privacyStatus === 'public' && !loadPlan(vr.group).start) savePlan(vr.group, { ...loadPlan(vr.group), start: Date.now(), first: vr.letter }); } catch {}
+    try {
+      const vr = variantOf(pf.v);
+      if (vr && !loadPlan(vr.group).start) {
+        if (!when && meta.status.privacyStatus === 'public') savePlan(vr.group, { ...loadPlan(vr.group), start: Date.now(), first: vr.letter });
+        else if (when && byNick) savePlan(vr.group, { ...loadPlan(vr.group), start: new Date(when).getTime(), first: vr.letter });          // Ник назначил выход первого: остальные варианты встают за ним через 30 минут
+      }
+    } catch {}
     await safe(agent('publisher', 'idle', `Ролик №${id} загружен в YouTube`, 100, `YouTube: ${r.url} (${meta.status.privacyStatus})`));
     await safe(say('publisher', `Готово: ${r.url}`));
-    if (when) await notify(`🕐 Ролик №${id} загружен и запланирован на ${hhmm(when)} (МСК): ${r.url}\nНазвание: «${meta.snippet.title}». YouTube сам выложит его в назначенное время, больше ничего нажимать не нужно.`);
+    if (when) await notify(`🕐 Ролик №${id} загружен и запланирован на ${byNick ? fmtMsk(when) : hhmm(when)} (МСК): ${r.url}\nНазвание: «${meta.snippet.title}». YouTube сам выложит его в назначенное время, больше ничего нажимать не нужно.`);
     else if (meta.status.privacyStatus === 'public') await notify(`✅ Ролик №${id} опубликован в YouTube Shorts: ${r.url}${slotNote}\nНазвание: «${meta.snippet.title}»`);
     else { await notify(`🧪 Ролик №${id} загружен в YouTube как ПРИВАТНЫЙ (виден только вам): ${r.url}\nОткройте в YouTube Studio и проверьте название, описание и то, что он определился как Short. Если всё хорошо, нажмите «Опубликовать» (загрузится вторая, публичная копия; приватную можно удалить в Studio).`); await publishCard(id, { only: 'yt' }); }
     return { ok: true, ...r };
@@ -105,8 +119,9 @@ export async function publishCard(id, { only } = {}) {
   const sched = (st.youtube || []).find((x) => x.scheduledFor); if (sched) return null;                 // уже загружен с отложенным выходом: нечего публиковать
   const q = await queueInfo(id).catch(() => null);
   const row = []; if (q && q.slot && q.ahead >= MIN_AHEAD_MIN && (!only || only === 'yts')) row.push([`🕐 Запланировать на ${hhmm(q.slot)} (МСК)`, `publish:${id}:yts`]);
+  const row2 = []; if (!only && !has('public')) row2.push(['📅 Запланировать на своё время', `pubat:${id}`]);
   if ((!only || only === 'yt') && !has('public')) row.push([q && q.slot && q.ahead >= MIN_AHEAD_MIN ? '🚀 Опубликовать сейчас' : '🚀 YouTube Shorts: опубликовать', `publish:${id}:yt`]); if ((!only || only === 'ytp') && !has('private') && !has('public')) row.push(['🧪 Приватная проверка', `publish:${id}:ytp`]);
-  if (!row.length) return null;
+  if (!row.length && !row2.length) return null;
   const text = `🚀 Публикация ролика №${id} «${v.title}»\nНазвание: ${meta ? '«' + meta.title + '»' : '(пакета нет)'}${meta && meta.manual ? ' (ваше)' : ''}\nХэштеги (рекомендация, уйдут в описание YouTube${meta && meta.titleTags && meta.titleTags.length ? '; в названии: ' + meta.titleTags.join(' ') : '; в названии их нет'}): ${meta ? meta.tags.join(' ') : '—'}\n${has('private') ? `Приватная проверка уже загружена: ${has('private').url}\n` : ''}Ничего не публикуется без вашей кнопки. Название можно поменять кнопками ниже.${q ? '\n\n' + queueText(q) : ''}`;
-  return notify(text, [row, [['✏️ Своё название', `title:${id}`], ['🔄 Перегенерировать название', `package:${id}`]]]);
+  return notify(text, [row, ...(row2.length ? [row2] : []), [['✏️ Своё название', `title:${id}`], ['🔄 Перегенерировать название', `package:${id}`]]].filter((r) => r.length));
 }
