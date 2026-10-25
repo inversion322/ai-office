@@ -67,3 +67,22 @@ test('охрана: каждый интеграционный тест на ко
   const seen = new Map();
   for (const [f, tag] of tags) { const b = idBaseFor(tag); assert.ok(!seen.has(b), `${f} и ${seen.get(b)} делят диапазон номеров`); seen.set(b, f); }
 });
+
+test('в копию не попадают работающие сотрудники и открытые запуски живого офиса; история завершённых запусков сохраняется', () => {
+  const real = fs.mkdtempSync(path.join(os.tmpdir(), 'live-')), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'copy-'));
+  try {
+    const db = new DatabaseSync(path.join(real, 'office.db'));
+    db.exec(`CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT); CREATE TABLE agents (id TEXT PRIMARY KEY, status TEXT, progress INT);
+      CREATE TABLE agent_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT, started_at INT, finished_at INT, outcome TEXT);
+      INSERT INTO agents VALUES ('a','working',40),('b','waiting',10),('c','error',5),('d','idle',0);
+      INSERT INTO agent_runs (agent_id, started_at, finished_at, outcome) VALUES ('a', 1000, NULL, NULL), ('d', 1000, 5000, 'ok');`);
+    db.close(); fs.writeFileSync(path.join(real, 'config.json'), '{}');
+    copyLiveDb(real, tmp);
+    const c = new DatabaseSync(path.join(tmp, 'office.db'));
+    assert.deepEqual(c.prepare('SELECT id, status, progress FROM agents ORDER BY id').all().map((r) => [r.id, r.status, r.progress]), [['a', 'idle', 0], ['b', 'idle', 0], ['c', 'idle', 0], ['d', 'idle', 0]]);
+    assert.equal(c.prepare('SELECT COUNT(*) n FROM agent_runs WHERE finished_at IS NULL').get().n, 0, 'открытых запусков нет');
+    assert.equal(c.prepare("SELECT COUNT(*) n FROM agent_runs WHERE outcome='ok'").get().n, 1, 'завершённая история на месте (по ней считается оценка времени)'); c.close();
+    const live = new DatabaseSync(path.join(real, 'office.db'));
+    assert.equal(live.prepare("SELECT status FROM agents WHERE id='a'").get().status, 'working', 'боевая база не тронута'); assert.equal(live.prepare('SELECT COUNT(*) n FROM agent_runs WHERE finished_at IS NULL').get().n, 1); live.close();
+  } finally { fs.rmSync(real, { recursive: true, force: true }); fs.rmSync(tmp, { recursive: true, force: true }); }
+});

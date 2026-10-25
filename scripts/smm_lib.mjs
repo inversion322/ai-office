@@ -22,8 +22,16 @@ export const hermesSpawn = (args, opts) => (HERMES.endsWith('.mjs') ? spawn(proc
 export const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /* ---------- API офиса ---------- */
+// Локальный API закрывает простаивающее keep-alive соединение через несколько секунд, а конвейер между вызовами часто занят (ffmpeg, ворота, ожидание модели).
+// Пул fetch иногда отдавал уже закрытый сокет: «fetch failed» / ECONNRESET. Это попадает под TRANSIENT, и монтажёр запускался ЗАНОВО через 2 минуты (лишняя сессия Opus).
+// Поэтому: новое соединение на каждый вызов (Connection: close) и до трёх попыток для чтения (GET). Запись (POST) не повторяем: она могла дойти до сервера.
 export async function api(p, body) {
-  const r = await fetch(API + p, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + cfg().token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const opts = { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + cfg().token, 'Content-Type': 'application/json', Connection: 'close' }, body: body ? JSON.stringify(body) : undefined };
+  let r;
+  for (let attempt = 1; ; attempt++) {
+    try { r = await fetch(API + p, opts); break; }
+    catch (e) { if (body || attempt >= 3) throw e; await sleep(400 * attempt); }
+  }
   if (!r.ok) throw new Error(`${p}: HTTP ${r.status}`);
   return r.json();
 }

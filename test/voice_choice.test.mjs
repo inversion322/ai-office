@@ -70,3 +70,14 @@ T('default: основной Edge, запасной VoiceStudio с голосо�
   const s = settings();
   assert.deepEqual([s.provider, s.fallback, s.voicestudio.voice], ['edge', 'voicestudio', 'v1']);
 });
+
+T('list показывает пометку «утверждён Ником» у голоса, у остальных её нет', () => {
+  const f = path.join(VOICES, 'v1', 'voice.json'), orig = fs.readFileSync(f, 'utf8');
+  fs.mkdirSync(path.join(VOICES, 'v2'), { recursive: true });
+  fs.writeFileSync(path.join(VOICES, 'v2', 'voice.json'), JSON.stringify({ title: 'второй', ref_audio: 'ref.wav', ref_text: 'т', approved: 'Ник, слепой тест' })); fs.writeFileSync(path.join(VOICES, 'v2', 'ref.wav'), 'RIFF');
+  try {
+    const r = run('list'); assert.equal(r.status, 0, r.stderr);
+    const by = Object.fromEntries(JSON.parse(r.stdout).voices.map((v) => [v.name, v.approved]));
+    assert.ok(!by.v1, 'у v1 пометки нет'); assert.match(by.v2, /Ник/);
+  } finally { fs.rmSync(path.join(VOICES, 'v2'), { recursive: true, force: true }); fs.writeFileSync(f, orig); }
+});

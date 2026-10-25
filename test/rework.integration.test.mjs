@@ -41,8 +41,8 @@ before(async () => {
   throw new Error('тестовый API не поднялся');
 });
 // kill() не ждёт конца процесса, а на Windows сервер ещё держит office.db: без повторов rmSync иногда падал с EPERM и красил весь файл при зелёных проверках
-const RM = { recursive: true, force: true, maxRetries: 20, retryDelay: 250 };
-after(() => { try { server && server.kill(); } catch {} fs.rmSync(PROJ, RM); if (tmp) fs.rmSync(tmp, RM); });
+const RM = { recursive: true, force: true, maxRetries: 60, retryDelay: 250 };      // до 15 с: под нагрузкой (живой монтаж + полный прогон) сервер отпускает office.db дольше 5 с
+after(() => { try { server && server.kill(); } catch {} fs.rmSync(PROJ, RM); try { if (tmp) fs.rmSync(tmp, RM); } catch {} });      // папка в системном Temp не должна красить зелёные проверки; проект в репозитории удаляется строго
 
 test('правки: приоритет включается и выключается, версия собирается, Нику приходит карточка с двумя кнопками', { skip: !can }, async () => {
   const comment = 'Сделай заголовок крупнее и замедли первую сцену';

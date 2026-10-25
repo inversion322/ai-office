@@ -85,7 +85,9 @@ test('очередь: три рендера одновременно при дв
     let peak = 0; for (const [s] of iv) peak = Math.max(peak, iv.filter(([a, b]) => a <= s && s < b).length);
     assert.equal(peak, 2, 'пик одновременных рендеров: ' + peak + ' ' + JSON.stringify(iv));
     assert.ok(res.some((r) => /ждал очереди/.test(r.out)), 'третий должен был ждать');
-    assert.equal(slotsBusy(), 0, 'слоты освобождены');
+    // slotsBusy() читает RENDER_SLOTS_DIR ЭТОГО процесса; переменная выше передана только дочерним. Без неё тест смотрел в настоящий smm/render_slots и краснел, пока шёл живой рендер (слот Кирилла).
+    const prevDir = process.env.RENDER_SLOTS_DIR; process.env.RENDER_SLOTS_DIR = slots;
+    try { assert.equal(slotsBusy(), 0, 'слоты освобождены'); } finally { if (prevDir === undefined) delete process.env.RENDER_SLOTS_DIR; else process.env.RENDER_SLOTS_DIR = prevDir; }
   } finally { for (const d of [marks, slots, ...projs]) rm(d); }
 });
 

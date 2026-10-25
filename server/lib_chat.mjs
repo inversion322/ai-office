@@ -103,6 +103,30 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
   const preFile = (id) => path.join(ROOT, 'smm', 'runs', `video_${Number(id)}`, 'PREAPPROVED');
   const setPre = (id) => { try { fs.mkdirSync(path.dirname(preFile(id)), { recursive: true }); fs.writeFileSync(preFile(id), String(now())); } catch {} };
   const clearPre = (id) => { try { fs.rmSync(preFile(id), { force: true }); } catch {} };
+  // Правка Ника, пришедшая ПОКА этап «script» этого ролика ещё идёт. Цепочка «сценарий A -> варианты B и C» работает около получаса, карточки A в это время нет,
+  // и Ник пишет правку текстом. Раньше ролик A сразу переводился в стадию «script», а второй запуск отклонялся как дубль: правка пропадала, A выпадал из карточки
+  // вариантов и никогда не монтировался (25.10, №100). Теперь правка ждёт в файле и применяется, как только этап закончится; стадия ролика до тех пор не трогается.
+  const pendingFile = (id) => path.join(ROOT, 'smm', 'runs', `video_${Number(id)}`, 'PENDING_REVISE.txt');
+  const clearPending = (id) => { try { fs.rmSync(pendingFile(id), { force: true }); } catch {} };
+  function queueRevise(id, text) {
+    const f = pendingFile(id); let prev = ''; try { prev = fs.readFileSync(f, 'utf8').trim(); } catch {}
+    fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, [prev, String(text).trim()].filter(Boolean).join('\n'));
+  }
+  function runQueuedRevise(args) {
+    if (args[0] !== 'script' || !args[1] || String(args[1]).startsWith('--')) return;
+    const id = Number(args[1]); let text = '';
+    try { text = fs.readFileSync(pendingFile(id), 'utf8').trim(); } catch { return; }
+    clearPending(id); if (!text) return;
+    setTimeout(() => {                     // дать завершившемуся этапу дописать в базу
+      try {
+        const v = q('SELECT * FROM videos WHERE id=?', id)[0], short = text.replace(/\s+/g, ' ').slice(0, 90);
+        const cap = (t) => post({ thread: 'captain_smm', sender: 'captain_smm', text: t, mirrorTg: true });
+        if (v && v.stage === 'checked') { cap(`Ксения закончила предыдущий этап по теме «${v.title}». Беру вашу правку: «${short}».`); execAction(`revise:${id}`, text, 'system', null).catch((e) => cap('Не получилось применить отложенную правку: ' + e.message)); }
+        else if (v && v.stage === 'script') { setStage(id, 'script'); cap(`Предыдущий этап по теме «${v.title}» закончился без готового сценария. Передаю Ксении вашу правку: «${short}».`); spawnPipeline(['script', String(id), '--comment', text]); }
+        else cap(`Правку «${short}» к сценарию «${v ? v.title : '№' + id}» применить не вышло: пока Ксения работала, ролик ушёл дальше (${v ? (STAGE_LABEL[v.stage] || v.stage) : 'удалён'}). Если она ещё нужна, напишите её заново.`);
+      } catch (e) { console.error('отложенная правка:', e.message); }
+    }, 400);
+  }
   const say = (agentId, text, mirrorTg = false) => post({ thread: agentId, sender: agentId, text, mirrorTg });
   const setAgent = (id, status, task, log) => {
     run('UPDATE agents SET status=COALESCE(?,status), task=COALESCE(?,task), updated_at=? WHERE id=?', status ?? null, task ?? null, now(), id);
@@ -119,7 +143,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     const out = fs.openSync(path.join(ROOT, 'smm', STUB ? 'pipeline.test.log' : 'pipeline.log'), 'a');
     const port = process.env.PORT || 8787;      // этап ходит в тот же сервер, что его запустил
     const child = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), ...args], { cwd: ROOT, detached: true, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, OFFICE_API: process.env.OFFICE_API || `http://127.0.0.1:${port}` } });
-    RUNNING.set(stageKey(args), { pid: child.pid, ts: now() }); child.on('exit', () => RUNNING.delete(stageKey(args)));
+    RUNNING.set(stageKey(args), { pid: child.pid, ts: now() }); child.on('exit', () => { RUNNING.delete(stageKey(args)); runQueuedRevise(args); });
     child.unref(); return true;
   }
   // Один и тот же этап одного ролика не запускается дважды: 20.10 четыре «Да, сделать» подряд запустили четыре Ксении на одну тему.
@@ -191,7 +215,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       cap(`Принято, сценарий «${v.title}» утверждён.\nСейчас его текст ещё не прошёл проверку Веры (длина и правки по фактам). Ксения доведёт его, Вера проверит. Если пропустит, сразу запущу Кирилла на монтаж, вопрос повторять не буду. Если нет, напишу вам и объясню почему.`);
       spawnPipeline(['script', String(id), '--finish']);
     } else if (act === 'approve' && v) {
-      supersede(`approve:${id}`); supersede(`revise:${id}`); supersede('vregen:'); supersede('vdrop:'); clearPre(id);
+      supersede(`approve:${id}`); supersede(`revise:${id}`); supersede('vregen:'); supersede('vdrop:'); clearPre(id); clearPending(id);
       const mem = members(v), live = mem.filter((m) => m.stage === 'checked');
       if (isGroup(mem) && live.length > 1) {
         // варианты одной темы: все живые уходят в монтаж СРАЗУ, у каждого свой монтажёр и формат; рендер ставится в очередь на два слота
@@ -230,9 +254,11 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
         const target = pc.letter ? mem.find((m) => letterOf(m) === pc.letter && m.stage === 'checked') : mem.find((m) => letterOf(m) === 'A' && m.stage === 'checked');
         if (!target) { cap(pc.letter ? `Варианта ${pc.letter} нет среди ждущих утверждения. Напишите правку с буквой существующего варианта, например «${letterOf(anchorOf(mem) || v)}: …».` : 'Вариант A убран: начните правку с буквы существующего варианта, например «B: …».', false); return {}; }
         supersede(`approve:${id}`); supersede(`revise:${id}`); supersede('vregen:'); supersede('vdrop:');
-        if (letterOf(target) === 'A') { setStage(target.id, 'script'); cap(`Передала Ксении правку к варианту A: исправит, Вера проверит заново, потом обновлю карточку со всеми вариантами.`); spawnPipeline(['script', String(target.id), '--comment', pc.text]); }
+        if (letterOf(target) === 'A' && stageRunning(['script', String(target.id)])) { queueRevise(target.id, pc.text); cap(`Ксения ещё дописывает варианты по теме «${v.title}». Правку к варианту A («${pc.text.replace(/\s+/g, ' ').slice(0, 90)}») запомнила: возьмусь сразу, как она закончит, и пришлю одну карточку.`); }
+        else if (letterOf(target) === 'A') { setStage(target.id, 'script'); cap(`Передала Ксении правку к варианту A: исправит, Вера проверит заново, потом обновлю карточку со всеми вариантами.`); spawnPipeline(['script', String(target.id), '--comment', pc.text]); }
         else { cap(`Передала Ксении правку к варианту ${letterOf(target)} «${VFORMATS[letterOf(target)].name}»: исправит, Вера сверит с фактами, остальные варианты не трогаю.`); setAgent('captain_smm', 'working', `Правка варианта ${letterOf(target)}`, `Правка Ника к варианту ${letterOf(target)}`); spawnPipeline(['variant-revise', String(target.id), '--comment', pc.text]); }
       }
+      else if (comment && comment.trim() && stageRunning(['script', String(id)])) { queueRevise(id, comment.trim()); cap(`Ксения ещё работает над сценарием «${v.title}». Вашу правку запомнила: возьмусь сразу, как она закончит.`); }
       else if (comment && comment.trim()) { supersede(`approve:${id}`); supersede(`revise:${id}`); cap('Передала Ксении: исправит, Вера проверит заново.'); spawnPipeline(['script', String(id), '--comment', comment.trim()]); }
       else { kvSet('awaiting', JSON.stringify({ kind: 'script', id, mid: srcMsg && srcMsg.id, ts: now() })); cap(grouped ? 'Напишите одним сообщением, что поправить. Если правка к варианту B или C, начните с буквы: «B: …». Без буквы правка пойдёт в вариант A.' : 'Напишите одним сообщением, что поправить в сценарии (здесь или в Telegram). Ксения исправит и Вера проверит заново.'); }
     } else if (act === 'rework' && v) {
@@ -307,14 +333,14 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       if (v.stage === 'editing') { cap(`Запускаю монтаж заново: «${v.title}».`); spawnPipeline(['produce', String(id)]); }
       else { setStage(id, 'script'); cap(`Запускаю сценарий заново: «${v.title}».`); spawnPipeline(['script', String(id)]); }
     } else if (act === 'regen' && v) {
-      clearPre(id);
+      clearPre(id); clearPending(id);
       supersede(`approve:${id}`); supersede(`revise:${id}`); supersede(`regen:${id}`);
       try { const aw = JSON.parse(kvGet('awaiting') || 'null'); if (aw && aw.id === id) kvDel('awaiting'); } catch {}
       setStage(id, 'script'); setAgent('captain_smm', 'working', `Сценарий заново: ${v.title}`, `Ник просит новый сценарий «${v.title}» с нуля`);
       cap(`Перегенерирую сценарий «${v.title}» с нуля.\nКсения напишет другую версию: другой крючок и другая композиция, а не правку прежней; Вера проверит факты заново. Прежняя версия сохранена в истории. Результат пришлю сюда.`);
       spawnPipeline(['script', String(id), '--regen', ...(comment && comment.trim() ? ['--comment', comment.trim()] : [])]);
     } else if (act === 'reject' && v) {
-      clearPre(id);
+      clearPre(id); clearPending(id);
       supersede(`approve:${id}`); supersede(`revise:${id}`); supersede(`regen:${id}`); supersede('vregen:'); supersede('vdrop:');
       const grp = members(v); for (const m of grp) if (['script', 'checked'].includes(m.stage)) setStage(m.id, 'rejected');      // отклонена тема: отклоняются и все её варианты
       setStage(id, 'rejected'); cap(grp.length > 1 ? 'Тема отклонена вместе со всеми вариантами.' : 'Тема отклонена.');

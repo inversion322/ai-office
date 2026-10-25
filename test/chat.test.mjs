@@ -432,3 +432,70 @@ test('«Внести правки» варианта C: правки идут Р
   const sayA = db.prepare("SELECT text FROM messages WHERE sender='captain_smm' AND text LIKE 'Правки приняты%' ORDER BY id DESC").get().text;
   assert.match(sayA, /^Правки приняты, Кирилл начинает сразу/); assert.equal(db.prepare("SELECT status FROM agents WHERE id='video'").get().status, 'working');
 });
+
+/* ---------- правка пришла, пока этап «script» ещё идёт (25.10, №100: правка потерялась, вариант A не смонтировался) ---------- */
+const reviseCard = (chat, id) => chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: 'Сценарий', buttons: [[['Утвердить сценарий', `approve:${id}`], ['Нужны правки', `revise:${id}`]]] });
+const waitUntil = async (fn, ms = 7000) => { for (let t = 0; t < ms; t += 100) { if (fn()) return true; await tick(100); } return false; };
+const pendingPath = (dir, id) => path.join(dir, 'smm', 'runs', `video_${id}`, 'PENDING_REVISE.txt');
+const capText = (db) => msgs(db).filter((m) => m.sender === 'captain_smm').map((m) => m.text).join('\n');
+function addGroup(db) {      // тема 100: A уже есть, B готов (в боевом офисе их пишет цепочка после «Вера пропустила»)
+  db.exec('ALTER TABLE videos ADD COLUMN notes TEXT');
+  const note = (l) => JSON.stringify({ variant: { group: 100, letter: l, format: l } });
+  db.prepare("INSERT INTO videos (id,title,stage,updated_at,notes) VALUES (100,'Голодание','script',0,?),(101,'Голодание','checked',0,?)").run(note('A'), note('B'));
+}
+
+test('правка к варианту A во время работы цепочки не теряется: запоминается, стадия A не сбивается, применяется после этапа', withPipeline(async ({ chat, db, dir, spawned }) => {
+  addGroup(db);
+  await chat.answer({ id: reviseCard(chat, 100), choice: 'approve:100', via: 'dashboard' });                 // запускает этап «script 100» (в офисе это цепочка сценарий -> варианты)
+  assert.ok(await waitUntil(() => spawned().length === 1), 'этап запущен'); assert.deepEqual(spawned(), ['script 100 --finish']);
+  db.prepare("UPDATE videos SET stage='checked' WHERE id=100").run();                                          // Вера пропустила A, цепочка ещё идёт
+  await chat.answer({ id: reviseCard(chat, 100), choice: 'revise:100', comment: 'убери строчку про надёжность', via: 'telegram' });
+  assert.equal(spawned().length, 1, 'второй запуск, который отклонился бы как дубль, не делается');
+  assert.equal(stageOf(db, 100), 'checked', 'A не переведён в «script» без исполнителя (так он выпал из карточки вариантов)');
+  assert.equal(fs.readFileSync(pendingPath(dir, 100), 'utf8'), 'убери строчку про надёжность');
+  assert.match(capText(db), /запомнила/); assert.ok(!/Этап «script/.test(capText(db)), 'ответа «второй раз не запускаю» нет');
+  assert.ok(await waitUntil(() => spawned().length === 2), 'после конца этапа правка пошла Ксении');
+  assert.equal(spawned()[1], 'script 100 --comment убери строчку про надёжность');
+  assert.equal(stageOf(db, 100), 'script'); assert.ok(!fs.existsSync(pendingPath(dir, 100)), 'очередь очищена');
+  assert.match(capText(db), /Беру вашу правку/);
+}));
+
+test('две правки подряд во время работы этапа склеиваются в одну; запуск один', withPipeline(async ({ chat, db, dir, spawned }) => {
+  addGroup(db);
+  await chat.answer({ id: reviseCard(chat, 100), choice: 'approve:100', via: 'dashboard' }); assert.ok(await waitUntil(() => spawned().length === 1));
+  db.prepare("UPDATE videos SET stage='checked' WHERE id=100").run();
+  await chat.answer({ id: reviseCard(chat, 100), choice: 'revise:100', comment: 'первое', via: 'telegram' });
+  await chat.answer({ id: reviseCard(chat, 100), choice: 'revise:100', comment: 'второе', via: 'telegram' });
+  assert.equal(fs.readFileSync(pendingPath(dir, 100), 'utf8'), 'первое\nвторое');
+  assert.ok(await waitUntil(() => spawned().some((l) => l.startsWith('script 100 --comment')))); await tick(700);
+  const runs = spawned().filter((l) => l.startsWith('script 100')); assert.equal(runs.length, 2, 'после первого этапа ровно один новый запуск (обе правки в одном комментарии)'); assert.deepEqual(spawned().slice(1), ['script 100 --comment первое', 'второе'], 'комментарий многострочный, журнал заглушки разбивает его по строкам');
+}));
+
+test('одиночный ролик (без вариантов): правка во время работы этапа тоже ждёт его конца', withPipeline(async ({ chat, db, dir, spawned }) => {
+  db.prepare("INSERT INTO videos VALUES (4,'Шаги','script',0)").run();
+  await chat.answer({ id: reviseCard(chat, 4), choice: 'approve:4', via: 'dashboard' }); assert.ok(await waitUntil(() => spawned().length === 1));
+  db.prepare("UPDATE videos SET stage='checked' WHERE id=4").run();
+  await chat.answer({ id: reviseCard(chat, 4), choice: 'revise:4', comment: 'короче', via: 'telegram' });
+  assert.equal(spawned().length, 1); assert.equal(fs.readFileSync(pendingPath(dir, 4), 'utf8'), 'короче'); assert.equal(stageOf(db, 4), 'checked');
+  assert.ok(await waitUntil(() => spawned().length === 2)); assert.equal(spawned()[1], 'script 4 --comment короче');
+}));
+
+test('если за время работы этапа ролик ушёл дальше (утверждён и в монтаже), отложенная правка не применяется и Ник узнаёт об этом', withPipeline(async ({ chat, db, dir, spawned }) => {
+  addGroup(db);
+  await chat.answer({ id: reviseCard(chat, 100), choice: 'approve:100', via: 'dashboard' }); assert.ok(await waitUntil(() => spawned().length === 1));
+  db.prepare("UPDATE videos SET stage='checked' WHERE id=100").run();
+  await chat.answer({ id: reviseCard(chat, 100), choice: 'revise:100', comment: 'убери строчку', via: 'telegram' });
+  db.prepare("UPDATE videos SET stage='editing' WHERE id=100").run();
+  assert.ok(await waitUntil(() => /применить не вышло/.test(capText(db))), 'сообщение о неприменённой правке');
+  await tick(500); assert.equal(spawned().length, 1, 'Ксения не запускалась'); assert.equal(stageOf(db, 100), 'editing'); assert.ok(!fs.existsSync(pendingPath(dir, 100)));
+}));
+
+test('«Утвердить» после запомненной правки отменяет её (иначе после монтажа придёт непонятное сообщение)', withPipeline(async ({ chat, db, dir, spawned }) => {
+  addGroup(db);
+  await chat.answer({ id: reviseCard(chat, 100), choice: 'approve:100', via: 'dashboard' });
+  db.prepare("UPDATE videos SET stage='checked' WHERE id=100").run();
+  await chat.answer({ id: reviseCard(chat, 100), choice: 'revise:100', comment: 'убери строчку', via: 'telegram' });
+  assert.ok(fs.existsSync(pendingPath(dir, 100)));
+  await chat.answer({ id: reviseCard(chat, 100), choice: 'approve:100', via: 'dashboard' });
+  assert.ok(!fs.existsSync(pendingPath(dir, 100)), 'очередь очищена утверждением');
+}));

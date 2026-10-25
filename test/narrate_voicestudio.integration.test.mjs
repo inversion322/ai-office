@@ -106,7 +106,7 @@ T('второй запуск того же текста идёт из кэша: 
   const r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice']);
   assert.equal(r.code, 0, r.se);
   assert.equal(speech().length, 0);
-  assert.equal(log.length, 0, 'к серверу вообще не обращались: ни здоровья, ни профиля, ни выгрузки');
+  assert.equal(log.length, 0, 'к серверу вообще не обращались: ни здоровья, ни профиля, ни выгрузки; пришло: ' + JSON.stringify(log.map((x) => `${x.m} ${x.u}`)) + ' || stderr: ' + r.se.slice(-400));
   assert.match(r.se, /из кэша/);
 });
 

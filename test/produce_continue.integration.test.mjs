@@ -45,13 +45,15 @@ async function run(id, env = {}, args = []) {
   const LOG = path.join(tmp, `briefs_${id}_${Date.now()}.log`); fs.writeFileSync(LOG, '');
   const before = (await api('/api/chat?office=smm')).messages.reduce((a, m) => Math.max(a, m.id), 0);      // по id, а не по длине: выдача чата ограничена 400 последними, длина перестаёт расти
   const code = await new Promise((resolve) => {
-    const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'produce', String(id), ...args], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE, TEST_FFMPEG: FF, FAKE_BRIEF_LOG: LOG, ...env } });
+    const OUT = path.join(tmp, `out_${id}_${Date.now()}.log`), outFd = fs.openSync(OUT, 'a');          // вывод конвейера нужен для разбора редких красных прогонов (например, «временный сбой» и автоповтор)
+    const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), 'produce', String(id), ...args], { cwd: ROOT, stdio: ['ignore', outFd, outFd], env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE, TEST_FFMPEG: FF, FAKE_BRIEF_LOG: LOG, ...env } });
     const guard = setTimeout(() => { p.kill(); resolve('timeout'); }, 240000);      // таймер ОБЯЗАН сниматься: живой setTimeout держит процесс теста ещё 4 минуты после зелёных тестов
     p.on('exit', (code) => { clearTimeout(guard); resolve(code); });
   });
   const st = await api('/api/state?office=smm'), msgs = (await api('/api/chat?office=smm')).messages.filter((m) => m.id > before);
   const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').filter(Boolean);
-  return { code, calls, msgs, stage: st.videos.find((v) => v.id === id).stage, agent: st.agents.find((a) => a.id === 'video') };
+  const outFile = fs.readdirSync(tmp).filter((f) => f.startsWith(`out_${id}_`)).sort().pop(), out = outFile ? fs.readFileSync(path.join(tmp, outFile), 'utf8').replace(/\r/g, '').trim().split('\n').slice(-12).join(' / ') : '';
+  return { code, calls, out, msgs, stage: st.videos.find((v) => v.id === id).stage, agent: st.agents.find((a) => a.id === 'video') };
 }
 const kinds = (calls) => calls.map((c) => c.split(' ')[0]);
 const count = (calls, kind) => kinds(calls).filter((k) => k === kind).length;
@@ -60,7 +62,7 @@ const sentToNick = (msgs) => msgs.some((m) => m.kind === 'action' && /Приня
 test('монтажёр собрал всё, но не записал журнал: один раз короткое продолжение, оно дописало журнал, ролик уходит Нику (вторая сессия на 90 минут не нужна)', { skip: !can }, async () => {
   const id = 92201, r = await produce(id, { FAKE_VIDEO_MODE: 'no_review', FAKE_CONTINUE_MODE: 'writes' });
   assert.equal(r.code, 0, JSON.stringify(r.msgs.map((m) => m.text.slice(0, 160))));
-  assert.equal(count(r.calls, 'CONTINUE'), 1, 'короткое продолжение вызвано ровно один раз: ' + r.calls.join(' | ')); assert.ok(count(r.calls, 'FIRST') >= 1, 'сборка была');
+  assert.equal(count(r.calls, 'CONTINUE'), 1, 'короткое продолжение вызвано ровно один раз: ' + r.calls.join(' | ') + ' || вывод конвейера: ' + r.out); assert.ok(count(r.calls, 'FIRST') >= 1, 'сборка была');
   assert.equal(kinds(r.calls).lastIndexOf('FIRST') < kinds(r.calls).indexOf('CONTINUE'), true, 'продолжение идёт ПОСЛЕ сборки');
   assert.equal(r.stage, 'produced'); assert.ok(sentToNick(r.msgs), 'карточка приёмки ушла');
   assert.ok(fs.existsSync(path.join(projOf(id), 'REVIEW_LOG.json')));
@@ -71,7 +73,7 @@ test('монтажёр собрал всё, но не записал журна�
 test('продолжение ничего не сделало: честный отказ с причиной, и НИКАКОГО цикла (короткое продолжение даётся один раз)', { skip: !can }, async () => {
   const id = 92202, r = await produce(id, { FAKE_VIDEO_MODE: 'no_review', FAKE_CONTINUE_MODE: 'ignores' });
   assert.notEqual(r.code, 0); assert.equal(r.stage, 'editing'); assert.ok(!sentToNick(r.msgs));
-  assert.equal(count(r.calls, 'CONTINUE'), 1, 'ровно одно продолжение, не больше: ' + r.calls.join(' | '));
+  assert.equal(count(r.calls, 'CONTINUE'), 1, 'ровно одно продолжение, не больше: ' + r.calls.join(' | ') + ' || вывод конвейера: ' + r.out);
   assert.ok(r.msgs.some((m) => /НЕ отправлен вам/.test(m.text) && /REVIEW_LOG\.json/.test(m.text)), 'причина названа');
   assert.ok(fs.existsSync(path.join(runOf(id), '_short_continue.json')), 'метка «продолжение уже было»');
   const again = await run(id, { FAKE_VIDEO_MODE: 'no_review', FAKE_CONTINUE_MODE: 'ignores' });          // «Повторить»: новая сессия монтажёра получает бриф ПРОДОЛЖЕНИЯ, не «с нуля»

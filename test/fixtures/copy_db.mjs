@@ -12,6 +12,10 @@ export function copyLiveDb(realDir, tmpDir, tag = '') {
   fs.copyFileSync(path.join(realDir, 'office.db'), dst); fs.copyFileSync(path.join(realDir, 'config.json'), path.join(tmpDir, 'config.json'));
   const db = new DatabaseSync(dst);
   try { db.exec("DELETE FROM kv WHERE k IN ('priority','awaiting')"); } catch {}
+  // Копия несёт состояние ЖИВОГО офиса: работающий сотрудник и его открытая запись запуска (agent_runs). Тест, который «запускает» того же сотрудника,
+  // получал продолжение чужого запуска (elapsed_sec 40+ вместо <5; progress.integration красный, когда полный прогон шёл во время реальной работы Ксении).
+  try { db.exec("UPDATE agents SET status='idle', progress=0 WHERE status IN ('working','waiting','error')"); } catch {}
+  try { db.exec("UPDATE agent_runs SET finished_at=started_at, outcome='copy' WHERE finished_at IS NULL"); } catch {}
   try {
     if (tag && db.prepare("SELECT 1 FROM sqlite_master WHERE name='sqlite_sequence'").get()) {      // таблицы нет, пока в базе нет ни одной AUTOINCREMENT-таблицы
       const base = idBaseFor(tag), row = db.prepare("SELECT seq FROM sqlite_sequence WHERE name='videos'").get();
