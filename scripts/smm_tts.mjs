@@ -25,6 +25,10 @@ function measure(segments, { root, patience, dir, stem, script }) {
   const narrate = path.join(root, 'video', 'narrate.py');
   const run = (args) => spawnSync(PY, [narrate, '--lang', 'ru', '--text', script, ...args], { encoding: 'utf8', env: process.env, timeout: (patience + 120) * 1000 });
 
+  // Замер длины сценария идёт только по Edge и никогда не будит VoiceStudio (видеокарта, ~1 мин на запуск): запасной голос здесь не нужен.
+  // Если основной голос ролика VoiceStudio, настоящий синтез Edge дал бы не ту длину (VoxCPM2 читает на ~40% быстрее): тогда оценка по темпу голоса.
+  let vsPrimary = false;
+  try { vsPrimary = JSON.parse((run(['--show-config']).stdout || '{}').trim().split('\n').pop()).provider === 'voicestudio'; } catch {}
   const est = run(['--estimate-only']);                              // мгновенно, без сети: нужна и для подсказок по абзацам
   const em = DURATION.exec(est.stdout || ''), sm = /segments_sec:\s*(.+)/.exec(est.stdout || '');
   const estSec = em ? Number(em[1]) : null;
@@ -32,7 +36,8 @@ function measure(segments, { root, patience, dir, stem, script }) {
 
   // Тестовый режим: никакого синтеза и сети, только оценка по тексту (так интеграционные тесты не зависят от Edge TTS).
   if (process.env.SMM_TTS_ESTIMATE_ONLY && estSec != null) return { sec: estSec / ESTIMATE_BIAS + ESTIMATE_MARGIN, estimated: true, perSeg: estSeg.map((x) => x / ESTIMATE_BIAS), reason: 'тест' };
-  const real = run(['--out', path.join(dir, stem + '.mp3'), '--max-sec', '999', '--patience', String(patience)]);
+  if (vsPrimary && estSec != null) return { sec: estSec, estimated: true, perSeg: estSeg, reason: 'голос VoiceStudio: оценка по темпу голоса, синтез не запускался' };
+  const real = run(['--provider', 'edge', '--no-fallback', '--out', path.join(dir, stem + '.mp3'), '--max-sec', '999', '--patience', String(patience)]);
   const rm = DURATION.exec(real.stdout || '');
   if (rm) {
     const sec = Number(rm[1]), k = estSec ? sec / estSec : 1;

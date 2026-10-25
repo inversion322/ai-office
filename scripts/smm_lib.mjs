@@ -31,7 +31,8 @@ export async function api(p, body) {
 export const agent = (id, status, task, progress, log, level, extra = {}) => api('/api/agent', { id, status, task, progress, log, level, ...extra });
 export const scene = (from, to, text, kind = 'assign') => api('/api/scene', { from, to, text, kind, ttl: 9000 });
 export const promptOf = async (id) => (await api('/api/agent-config?id=' + id)).prompt.body;
-export const videos = async () => (await api('/api/state?office=smm')).videos;
+// все ролики, а не последние 100 панели: иначе старые темы выпадают из проверки повторов и из поиска по номеру
+export const videos = async () => (await api('/api/state?office=smm&videos=all')).videos;
 export const getVideo = async (id) => (await videos()).find((v) => v.id === Number(id));
 export const setVideo = (id, fields) => api('/api/video', { id, ...fields });
 

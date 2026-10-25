@@ -223,7 +223,9 @@ http.createServer(async (req, res) => {
     const stages = {};
     for (const j of jobs) stages[j.stage] = (stages[j.stage] || 0) + 1;
     // у варианта одной темы в ответе готовая метка (из notes.variant): { group, letter, format }, фронту не нужно разбирать notes
-    const videos = office === 'smm' ? q("SELECT * FROM videos WHERE office='smm' ORDER BY updated_at DESC LIMIT 100").map((v) => { let x = null; try { x = JSON.parse(v.notes || '{}').variant || null; } catch {} return { ...v, variant: x && x.letter ? { group: Number(x.group), letter: x.letter, format: x.format || x.letter } : null }; }) : [];
+    // Панель получает 100 последних роликов (быстро). Скриптам конвейера нужны ВСЕ: повторы тем и поиск ролика по номеру не должны зависеть от того, когда ролик обновляли (?videos=all)
+    const videoLimit = url.searchParams.get('videos') === 'all' ? 100000 : 100;
+    const videos = office === 'smm' ? q("SELECT * FROM videos WHERE office='smm' ORDER BY updated_at DESC LIMIT ?", videoLimit).map((v) => { let x = null; try { x = JSON.parse(v.notes || '{}').variant || null; } catch {} return { ...v, variant: x && x.letter ? { group: Number(x.group), letter: x.letter, format: x.format || x.letter } : null }; }) : [];
     const vstages = {};
     for (const v of videos) vstages[v.stage] = (vstages[v.stage] || 0) + 1;
     return json(res, 200, {

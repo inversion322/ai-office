@@ -25,7 +25,7 @@ const lastCard = async () => (await api('/api/chat?office=smm')).messages.filter
 before(async () => {
   if (!can) return;
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pack-test-'));
-  copyLiveDb(REAL, tmp);
+  copyLiveDb(REAL, tmp, 'pack');
   token = JSON.parse(fs.readFileSync(path.join(tmp, 'config.json'), 'utf8')).token;
   fs.mkdirSync(RUN, { recursive: true });
   fs.writeFileSync(path.join(RUN, 'script_ru.txt'), 'Ребёнок съел конфету. Сахар не влияет на поведение. Миф.\n\nПодписывайтесь на телеграм-канал «Медицинский детектив»: там больше полезного.\n', 'utf8');

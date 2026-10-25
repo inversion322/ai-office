@@ -30,7 +30,7 @@ const maxId = async () => Math.max(0, ...(await vids()).map((v) => v.id));
 before(async () => {
   if (!can) return;
   keep = new Set(fs.readdirSync(RUNS).filter(isDaily));      // без try: если защита не сработала, тест должен упасть, а не удалить настоящие подборки
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'daily-test-')); copyLiveDb(REAL, tmp);
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'daily-test-')); copyLiveDb(REAL, tmp, 'daily_topics');
   feedFile = path.join(tmp, 'feed.json');      // «лента канала»: тема, которой нет в БД офиса, но она уже опубликована
   fs.writeFileSync(feedFile, JSON.stringify({ posts: [{ id: 1, title: 'Утренний кофе натощак вреден для желудка?' }] }));
   token = JSON.parse(fs.readFileSync(path.join(tmp, 'config.json'), 'utf8')).token;
@@ -66,6 +66,7 @@ test('если в подборке вышли одни повторы: втор�
 test('если новых тем нет совсем: честное сообщение «новых тем не нашлось», никаких карточек выбора и ложных тем', { skip: !can }, async () => {
   const before0 = await maxId(), c0 = await chatMaxId();
   const r = await run({ FAKE_DAILY_MODE: 'all_dups' }); assert.equal(r.code, 0, r.out);
-  assert.equal((await newer(before0)).length, 0, 'новые темы не добавлены');
+  const added0 = await newer(before0);
+  assert.equal(added0.length, 0, 'новые темы не добавлены, а добавлено: ' + added0.map((v) => `№${v.id} «${v.title}» (${v.stage})`).join('; '));
   const m = (await chatSince(c0)).filter((x) => /новых тем без повторов не нашлось/.test(x.text)); assert.equal(m.length, 1); assert.ok(!(m[0].buttons || []).length);
 });

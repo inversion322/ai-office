@@ -43,7 +43,7 @@ async function waitFor(fn, ms = 150000) { const t0 = Date.now(); for (;;) { cons
 
 before(async () => {
   if (!can) return; cleanup();
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vint-')); copyLiveDb(REAL, tmp); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vint-')); copyLiveDb(REAL, tmp, 'variants'); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
   const db = new DatabaseSync(path.join(tmp, 'office.db')); seedTopic(db, G1); seedTopic(db, G2);
   db.exec("UPDATE agents SET status='idle', progress=0 WHERE status IN ('working','waiting','error')");          // копия снята с боевого офиса: статусы тех, кто работает в этот момент, к тесту не относятся (иначе тест мигает при каждом монтаже)
   db.close();

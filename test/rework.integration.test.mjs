@@ -30,7 +30,7 @@ function runStage(args, extra) {
 before(async () => {
   if (!can) return;
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-test-'));
-  copyLiveDb(REAL, tmp);
+  copyLiveDb(REAL, tmp, 'rework');
   token = JSON.parse(fs.readFileSync(path.join(tmp, 'config.json'), 'utf8')).token;
   fs.mkdirSync(path.join(PROJ, 'final'), { recursive: true });
   fs.writeFileSync(path.join(PROJ, 'final', 'dosie09_v1.mp4'), Buffer.alloc(2048, 7));
@@ -40,7 +40,9 @@ before(async () => {
   for (let i = 0; i < 40; i++) { try { const r = await fetch(API + '/api/priority', { headers: { Authorization: 'Bearer ' + token } }); if (r.ok) return; } catch {} await sleep(300); }
   throw new Error('тестовый API не поднялся');
 });
-after(() => { try { server && server.kill(); } catch {} fs.rmSync(PROJ, { recursive: true, force: true }); if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); });
+// kill() не ждёт конца процесса, а на Windows сервер ещё держит office.db: без повторов rmSync иногда падал с EPERM и красил весь файл при зелёных проверках
+const RM = { recursive: true, force: true, maxRetries: 20, retryDelay: 250 };
+after(() => { try { server && server.kill(); } catch {} fs.rmSync(PROJ, RM); if (tmp) fs.rmSync(tmp, RM); });
 
 test('правки: приоритет включается и выключается, версия собирается, Нику приходит карточка с двумя кнопками', { skip: !can }, async () => {
   const comment = 'Сделай заголовок крупнее и замедли первую сцену';

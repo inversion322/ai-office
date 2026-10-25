@@ -38,7 +38,7 @@ const press = async (id, mode) => { const cid = (await api('/api/chat/post', { o
 const pipe = (args) => new Promise((resolve) => { const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), ...args], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE } }); p.on('exit', resolve); setTimeout(() => { p.kill(); resolve('timeout'); }, 60000); });
 
 before(async () => {
-  if (!can) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pq-test-')); copyLiveDb(REAL, tmp); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
+  if (!can) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pq-test-')); copyLiveDb(REAL, tmp, 'publish_queue'); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
   const db = new DatabaseSync(path.join(tmp, 'office.db')); for (const id of Object.values(IDS)) db.prepare("INSERT INTO videos (id,office,title,rubric,stage,created_at,updated_at) VALUES (?,'smm','seed','myth','approved',?,?)").run(id, Date.now(), Date.now()); db.close();
   g = await startFakeGoogle('ok');
   server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE, YT_OAUTH_URL: g.token, YT_UPLOAD_URL: g.upload, YT_RETRY_MS: '5' }, stdio: 'ignore', windowsHide: true });

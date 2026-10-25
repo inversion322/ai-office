@@ -26,7 +26,7 @@ const clean = () => { for (const id of IDS) { fs.rmSync(projOf(id), { recursive:
 
 before(async () => {
   if (!can) return;
-  clean(); tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-test-')); copyLiveDb(REAL, tmp);
+  clean(); tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-test-')); copyLiveDb(REAL, tmp, 'produce_continue');
   const db = new DatabaseSync(path.join(tmp, 'office.db'));           // свои ролики создаются в копии БД ДО старта сервера (id у параллельных файлов не должны совпадать)
   for (const id of IDS) db.prepare("INSERT OR REPLACE INTO videos (id, office, title, stage, created_at, updated_at) VALUES (?, 'smm', ?, 'editing', ?, ?)").run(id, 'Тест продолжения ' + id, Date.now(), Date.now());
   db.prepare("UPDATE agents SET status='idle', progress=0 WHERE status IN ('working','waiting','error')").run(); db.close();      // копия живого офиса несёт чужие статусы

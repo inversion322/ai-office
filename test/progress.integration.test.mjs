@@ -21,7 +21,7 @@ const agentOf = async (id) => (await api('/api/state?office=smm')).agents.find((
 
 before(async () => {
   if (!can) return;
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'prog-test-')); copyLiveDb(REAL, tmp); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'prog-test-')); copyLiveDb(REAL, tmp, 'progress'); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
   server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1' }, stdio: 'ignore', windowsHide: true });
   for (let i = 0; i < 40; i++) { try { if ((await fetch(API + '/health')).ok) break; } catch {} await sleep(300); }
 });

@@ -35,9 +35,9 @@ const press = async (id, mode) => { const cid = (await api('/api/chat/post', { o
 
 before(async () => {
   if (!can) return;
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pub-test-')); copyLiveDb(REAL, tmp); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pub-test-')); copyLiveDb(REAL, tmp, 'publisher'); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
   g = await startFakeGoogle('ok');
-  server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE, YT_OAUTH_URL: g.token, YT_UPLOAD_URL: g.upload, YT_RETRY_MS: '5' }, stdio: 'ignore', windowsHide: true });
+  server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE, YT_OAUTH_URL: g.token, YT_UPLOAD_URL: g.upload, YT_RETRY_MS: '5' }, stdio: process.env.PUB_TEST_SERVER_LOG ? ['ignore', fs.openSync(process.env.PUB_TEST_SERVER_LOG, 'a'), fs.openSync(process.env.PUB_TEST_SERVER_LOG, 'a')] : 'ignore', windowsHide: true });   // PUB_TEST_SERVER_LOG: журнал тестового сервера для разбора редких падений
   for (let i = 0; i < 40; i++) { try { if ((await fetch(API + '/health')).ok) break; } catch {} await sleep(300); }
 });
 after(async () => { try { server && server.kill(); } catch {} try { g && await g.close(); } catch {} await sleep(600); for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); try { tmp && fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch {} });
@@ -65,7 +65,16 @@ test('приватная проверка: загрузка с название�
 test('публичная выкладка: после приватной проверки загружается вторая копия публично; повторное нажатие не выкладывает дважды', { skip: !can }, async () => {
   const v = await newVideo(), from = await lastId(); await press(v.id, 'ytp'); await waitFor(/ПРИВАТНЫЙ/, from); const before = g.st.inits.length;
   const f2 = await lastId(); await press(v.id, 'yt'); const ok = await waitFor(/опубликован в YouTube Shorts/, f2); assert.match(ok.text, /shorts\/VID123/); assert.equal(g.st.inits.length, before + 1); assert.equal(g.st.inits[g.st.inits.length - 1].meta.status.privacyStatus, 'public');
-  const f3 = await lastId(); await press(v.id, 'yt'); const no = await waitFor(/НЕ загружен в YouTube/, f3); assert.match(no.text, /уже загружено публично/); assert.equal(g.st.inits.length, before + 1, 'второй публичной загрузки не было');
+  // Процесс первой публикации к моменту повторного нажатия может ещё не завершиться: тогда сервер отвечает «Публикатор уже загружает… Второй раз не запускаю» (тоже верная защита).
+  // Раньше тест угадывал только второй ответ и случайно падал; теперь при первом ответе ждём конца процесса и жмём ещё раз, пока не дойдём до защиты «уже загружено публично».
+  let no = null, guards = 0;
+  for (let k = 0; k < 6 && !no; k++) {
+    const f3 = await lastId(); await press(v.id, 'yt');
+    const m = await waitFor(/НЕ загружен в YouTube|Второй раз не запускаю/, f3);
+    if (/НЕ загружен в YouTube/.test(m.text)) no = m; else { guards++; await sleep(2500); }
+  }
+  assert.ok(no, 'защита «уже загружено публично» так и не ответила');
+  assert.match(no.text, /уже загружено публично/); assert.equal(g.st.inits.length, before + 1, 'второй публичной загрузки не было');
 });
 
 test('охрана: непринятый ролик не публикуется; файл не того формата (горизонтальный) не уходит в YouTube', { skip: !can }, async () => {

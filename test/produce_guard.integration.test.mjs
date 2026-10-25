@@ -21,7 +21,7 @@ let tmp, server, TOKEN;
 const api = async (p, body) => { const r = await fetch(API + p, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); return r.json(); };
 
 before(async () => {
-  if (!can) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pg-test-')); copyLiveDb(REAL, tmp);
+  if (!can) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pg-test-')); copyLiveDb(REAL, tmp, 'produce_guard');
   TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
   server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1' }, stdio: 'ignore' });
   for (let i = 0; i < 40; i++) { try { if ((await fetch(API + '/health')).ok) return; } catch {} await sleep(300); }

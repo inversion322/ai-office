@@ -24,7 +24,7 @@ const LONG = Array.from({ length: 6 }, (_, i) => `Абзац ${i + 1}: ${'дли
 
 before(async () => {
   if (!can) return;
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'finish-test-')); copyLiveDb(REAL, tmp);
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'finish-test-')); copyLiveDb(REAL, tmp, 'finish');
   TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
   // Сервер БЕЗ HERMES_BIN: этапы, которые он захотел бы запустить (монтаж Кирилла), в тесте отклоняются охраной, а не стартуют.
   server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1' }, stdio: 'ignore' });

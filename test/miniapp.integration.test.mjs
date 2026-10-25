@@ -21,7 +21,7 @@ const initData = ({ id = 323028999, age = 10, token = BOT } = {}) => { const p =
 before(async () => {
   if (!can) return;
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mini-test-'));
-  copyLiveDb(REAL, tmp);
+  copyLiveDb(REAL, tmp, 'miniapp');
   const cfg = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')); FULL = cfg.token; BOT = cfg.smmBotToken;
   fs.writeFileSync(path.join(tmp, 'config.json'), JSON.stringify(cfg));
   server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1' }, stdio: 'ignore' });

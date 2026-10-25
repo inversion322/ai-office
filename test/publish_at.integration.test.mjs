@@ -39,7 +39,7 @@ const pipe = (args) => new Promise((resolve) => { const p = spawn(process.execPa
 
 before(async () => {
   if (!can) return; for (const id of Object.values(IDS)) for (const k of ['video', 'package']) fs.rmSync(path.join(ROOT, 'smm', 'runs', `${k}_${id}`), { recursive: true, force: true });       // остатки прерванного прогона не должны ломать следующий (publish.json «уже загружено»)
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-test-')); copyLiveDb(REAL, tmp); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-test-')); copyLiveDb(REAL, tmp, 'publish_at'); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
   const db = new DatabaseSync(path.join(tmp, 'office.db')); for (const id of Object.values(IDS)) db.prepare("INSERT INTO videos (id,office,title,rubric,stage,created_at,updated_at) VALUES (?,'smm','seed','myth','approved',?,?)").run(id, Date.now(), Date.now()); db.close();
   g = await startFakeGoogle('ok');
   server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE, YT_OAUTH_URL: g.token, YT_UPLOAD_URL: g.upload, YT_RETRY_MS: '5' }, stdio: 'ignore', windowsHide: true });

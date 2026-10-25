@@ -32,7 +32,7 @@ async function run(checkMode, extra) {
   for (let i = 0; i < 120; i++) { await sleep(1000); const m = (await api('/api/chat?office=smm')).messages.filter((x) => x.kind === 'action' && x.status === 'open' && /Сценарий: «/.test(x.text) && x.id > cid); if (m.length) return { card: m[m.length - 1], RUN, id }; }
   throw new Error('карточка сценария не пришла за 120 с');
 }
-before(() => { if (!can) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-test-')); copyLiveDb(REAL, tmp); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token; });
+before(() => { if (!can) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-test-')); copyLiveDb(REAL, tmp, 'agent_skills'); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token; });
 after(async () => { try { server && server.kill(); } catch {} await sleep(600); for (const d of made) fs.rmSync(d, { recursive: true, force: true }); try { tmp && fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch {} });
 
 test('задания сотрудников несут блоки скиллов: Ксения (script-craft, humanizer), Вера (реестр в папке сценария, команды sources.py), у каждого запуска своя метка', { skip: !can }, async () => {
