@@ -5,9 +5,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { cleanReport } from './lib_text.mjs';
-import { topicRequest, classifyAnswer, quickPick, topicMentioned, stripButtonTalk } from './lib_intent.mjs';
+import { topicRequest, formatSwitch, classifyAnswer, quickPick, topicMentioned, stripButtonTalk } from './lib_intent.mjs';
 import { probeVideo, checkFormat, sendFields } from '../scripts/video_format.mjs';
-import { variantOf, groupMembers, isGroup, anchorOf, parseVariantComment, FORMATS as VFORMATS } from '../scripts/variants.mjs';
+import { variantOf, groupMembers, isGroup, anchorOf, parseVariantComment, enabledFormats, readSettings, writeSettings, FORMATS as VFORMATS } from '../scripts/variants.mjs';
 import { parseWhen, isCancelWhen, fmtMsk } from '../scripts/publish_when.mjs';
 
 const OWNER = 323028999;
@@ -142,7 +142,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     fs.mkdirSync(path.join(ROOT, 'smm'), { recursive: true });
     const out = fs.openSync(path.join(ROOT, 'smm', STUB ? 'pipeline.test.log' : 'pipeline.log'), 'a');
     const port = process.env.PORT || 8787;      // этап ходит в тот же сервер, что его запустил
-    const child = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), ...args], { cwd: ROOT, detached: true, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, OFFICE_API: process.env.OFFICE_API || `http://127.0.0.1:${port}` } });
+    const child = spawn(process.execPath, [path.join(ROOT, 'scripts', 'smm_pipeline.mjs'), ...args], { cwd: ROOT, detached: true, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, OFFICE_API: process.env.OFFICE_API || `http://127.0.0.1:${port}`, OFFICE_SETTINGS_FILE: process.env.OFFICE_SETTINGS_FILE || path.join(DATA_DIR, 'settings.json') } });
     RUNNING.set(stageKey(args), { pid: child.pid, ts: now() }); child.on('exit', () => { RUNNING.delete(stageKey(args)); runQueuedRevise(args); });
     child.unref(); return true;
   }
@@ -531,6 +531,23 @@ ${c.hist}
     return null;
   }
 
+  // Переключатель форматов роликов (решение Ника 2026-10-26): «только формат А» / «включи B и C» / «какие форматы включены?». Без модели и без пересказа через кнопки:
+  // прямое указание выполняется сразу, настройка server/data/settings.json (variantFormats) читается каждым следующим этапом конвейера, перезапуск не нужен.
+  function applyFormatSwitch(fr) {
+    const file = path.join(DATA_DIR, 'settings.json'), cur = readSettings(file), envSet = String(process.env.VARIANT_FORMATS || '').trim();
+    const before = enabledFormats(undefined, cur), name = (l) => `${l} «${VFORMATS[l].name}»`, list = (a) => a.map(name).join(', ');
+    let next = before;
+    if (fr.only) next = fr.only; else if (fr.on) next = [...new Set([...before, ...fr.on])]; else if (fr.off) next = before.filter((l) => l === 'A' || !fr.off.includes(l));
+    next = ['A', ...['B', 'C'].filter((l) => next.includes(l))];
+    const warn = envSet ? `\n⚠️ На сервере задана переменная VARIANT_FORMATS=${envSet}: она сильнее настройки, пока её не уберут из окружения.` : '';
+    if (fr.status) { const eff = enabledFormats(envSet || undefined, cur); return `Сейчас для новых тем монтируется: ${list(eff)}${eff.length === 1 ? ' (варианты B и C выключены)' : ''}.${warn}`; }
+    if (next.join() === before.join()) return `Уже так и стоит: ${list(before)}.${warn}`;
+    writeSettings({ variantFormats: next.join(',') }, file);
+    const head = next.length === 1 ? `Принято: для новых тем монтируется только формат ${name('A')}, варианты B и C не создаются и не монтируются.`
+      : `Принято: для новых тем монтируются форматы ${list(next)}. Это ${next.length} ролика на тему и ${next.length} монтажа Opus одновременно.`;
+    return `${head}\nДействует со следующего сценария, перезапуск не нужен. Что уже в работе или ждёт вашей приёмки, не меняется${next.length > before.length ? ': у сценариев, которые уже готовы, B и C не появятся' : ''}. Вернуть: «включи B и C».${warn}`;
+  }
+
   // Сообщение Ника: из дашборда (thread задан) или из Telegram (thread по имени, иначе Капитан)
   function incoming({ text, source, thread, office = 'smm' }) {
     text = String(text || '').trim(); if (!text) return { ok: false, error: 'пусто' };
@@ -551,6 +568,9 @@ ${c.hist}
       execAction(`${AWAIT_ACT(aw.kind)}:${aw.id}`, body, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true }));
       return { ok: true, id, note: 'comment' };
     }
+    // Переключатель форматов: «только формат А» и т.п. выполняется сразу, раньше разбора «да/нет» и модели
+    const fsw = office === 'smm' && t === 'captain_smm' ? formatSwitch(body) : null;
+    if (fsw) { let msg; try { msg = applyFormatSwitch(fsw); } catch (e) { msg = 'Не получилось изменить настройку форматов: ' + e.message; } post({ office, thread: 'captain_smm', sender: 'captain_smm', text: msg, mirrorTg: true }); return { ok: true, id, note: 'formats' }; }
     // «Тема» как просьба подобрать темы: выполняется сразу, до разбора «да/нет», чтобы «давай темы» не стало подтверждением чужой карточки
     const tr = office === 'smm' && t === 'captain_smm' ? topicRequest(body, { scored: q("SELECT id, title FROM videos WHERE stage='scored'") }) : null;
     if (tr) { execAction('topics:0', tr.hint, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true })); return { ok: true, id, note: 'topics' }; }

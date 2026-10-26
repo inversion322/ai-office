@@ -33,6 +33,15 @@ export const editorOf = (v) => EDITORS[(FORMATS[formatOf(v)] || FORMATS.A).edito
 export const SETTINGS_FILE = () => process.env.OFFICE_SETTINGS_FILE || path.join(process.env.OFFICE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'server', 'data'), 'settings.json');
 export function readSettings(file = SETTINGS_FILE()) { try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j && typeof j === 'object' ? j : {}; } catch { return {}; } }
 
+/** Записывает настройки (слияние с тем, что в файле) и возвращает новое содержимое. Запись через временный файл: этап конвейера, читающий настройку в этот момент, не увидит половину. */
+export function writeSettings(patch, file = SETTINGS_FILE()) {
+  const next = { ...readSettings(file), ...patch, _note: undefined };
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const body = JSON.stringify(next, null, 1), tmp = file + '.tmp';
+  try { fs.writeFileSync(tmp, body, 'utf8'); fs.renameSync(tmp, file); } catch { fs.writeFileSync(file, body, 'utf8'); try { fs.rmSync(tmp, { force: true }); } catch {} }
+  return next;
+}
+
 /** Какие форматы брать. Приоритет: env VARIANT_FORMATS, затем server/data/settings.json (variantFormats), затем все три «A,B,C».
  *  «A» выключает варианты B и C (решение Ника 2026-10-26: A набирает охваты лучше всего). Всегда начинается с A. */
 export function enabledFormats(env = process.env.VARIANT_FORMATS, settings = readSettings()) {

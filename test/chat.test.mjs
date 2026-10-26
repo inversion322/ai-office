@@ -499,3 +499,52 @@ test('«Утвердить» после запомненной правки от
   await chat.answer({ id: reviseCard(chat, 100), choice: 'approve:100', via: 'dashboard' });
   assert.ok(!fs.existsSync(pendingPath(dir, 100)), 'очередь очищена утверждением');
 }));
+
+// Переключатель форматов из чата (решение Ника 2026-10-26): настройка пишется в settings.json рядом с данными, ответ Капитана сразу, модель не вызывается
+const sendCap = (chat, text, src = 'dashboard') => chat.incoming({ text, source: src, thread: 'captain_smm' });
+const lastCap = (db) => db.prepare("SELECT text FROM messages WHERE sender='captain_smm' ORDER BY id DESC LIMIT 1").get().text;
+const settingsOf = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8')); } catch { return null; } };
+test('«только формат А» пишет настройку и отвечает сразу; повтор говорит «уже так и стоит»', () => {
+  delete process.env.VARIANT_FORMATS;
+  const { chat, db, dir } = make(); const r = sendCap(chat, 'выставь VARIANT_FORMATS=A, пока нужны видео только по данному формату');
+  assert.equal(r.note, 'formats'); assert.equal(settingsOf(dir).variantFormats, 'A');
+  assert.match(lastCap(db), /только формат A «Лента».*B и C не создаются/s); assert.match(lastCap(db), /перезапуск не нужен/); assert.match(lastCap(db), /включи B и C/);
+  sendCap(chat, 'Пока сделай так, чтобы монтировался только формат А'); assert.match(lastCap(db), /Уже так и стоит: A «Лента»/); assert.equal(settingsOf(dir).variantFormats, 'A');
+});
+test('«включи B и C» возвращает все три и предупреждает о цене; «B и C не нужны» выключает снова; другие поля файла сохраняются', () => {
+  delete process.env.VARIANT_FORMATS;
+  const { chat, db, dir } = make(); fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ variantFormats: 'A', other: 7 }));
+  sendCap(chat, 'включи B и C'); assert.equal(settingsOf(dir).variantFormats, 'A,B,C'); assert.equal(settingsOf(dir).other, 7);
+  assert.match(lastCap(db), /A «Лента», B «Один объект», C «Комикс»/); assert.match(lastCap(db), /3 ролика на тему/); assert.match(lastCap(db), /у сценариев, которые уже готовы, B и C не появятся/);
+  sendCap(chat, 'варианты B и C пока не нужны'); assert.equal(settingsOf(dir).variantFormats, 'A'); assert.equal(settingsOf(dir).other, 7);
+  sendCap(chat, 'включи формат B'); assert.equal(settingsOf(dir).variantFormats, 'A,B'); sendCap(chat, 'убери форматы B и C'); assert.equal(settingsOf(dir).variantFormats, 'A');
+});
+test('вопрос «какие форматы включены?» ничего не меняет и отвечает состоянием', () => {
+  delete process.env.VARIANT_FORMATS;
+  const { chat, db, dir } = make(); sendCap(chat, 'какие форматы сейчас включены?'); assert.equal(settingsOf(dir), null, 'файл не создан'); assert.match(lastCap(db), /монтируется: A «Лента», B «Один объект», C «Комикс»/);
+  sendCap(chat, 'только формат A'); sendCap(chat, 'какие варианты сейчас монтируются'); assert.match(lastCap(db), /монтируется: A «Лента» \(варианты B и C выключены\)/);
+});
+test('переменная окружения VARIANT_FORMATS сильнее файла: Капитан честно говорит об этом', () => {
+  process.env.VARIANT_FORMATS = 'A,B,C';
+  try { const { chat, db, dir } = make(); sendCap(chat, 'только формат A'); assert.match(lastCap(db), /VARIANT_FORMATS=A,B,C: она сильнее настройки/); assert.equal(settingsOf(dir).variantFormats, 'A'); }
+  finally { delete process.env.VARIANT_FORMATS; }
+});
+test('неоднозначное не трогает настройку: «убери вариант C», вопросы, чужие чаты сотрудников; из Telegram работает так же', () => {
+  delete process.env.VARIANT_FORMATS;
+  const { chat, db, dir } = make();
+  for (const x of ['убери вариант C', 'почему не включены B и C?', 'давай варианты названий']) { const r = sendCap(chat, x); assert.notEqual(r.note, 'formats', x); }
+  chat.incoming({ text: 'только формат A', source: 'dashboard', thread: 'scriptwriter' }); assert.equal(settingsOf(dir), null, 'в чате Ксении это не настройка');
+  sendCap(chat, 'только формат A'); assert.equal(settingsOf(dir).variantFormats, 'A');
+  const r = chat.incoming({ text: 'Включи B и C', source: 'telegram' }); assert.equal(r.note, 'formats'); assert.equal(settingsOf(dir).variantFormats, 'A,B,C');
+  const tgMsg = db.prepare("SELECT text FROM messages WHERE sender='captain_smm' ORDER BY id DESC LIMIT 1").get().text; assert.match(tgMsg, /Принято/);
+});
+
+test('этап конвейера получает путь к той же настройке форматов, что читает сервер (каталог данных сервера)', async () => {
+  const keep = process.env.OFFICE_SETTINGS_FILE; delete process.env.OFFICE_SETTINGS_FILE;
+  const m = make(); const log = path.join(m.dir, 'env.txt');
+  fs.mkdirSync(path.join(m.dir, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(m.dir, 'scripts', 'smm_pipeline.mjs'), `import fs from 'node:fs'; fs.appendFileSync(${JSON.stringify(log)}, String(process.env.OFFICE_SETTINGS_FILE) + '\\n'); setTimeout(() => {}, 1000);`);
+  process.env.HERMES_BIN = 'fake';
+  try { sendCap(m.chat, 'подбери темы про сон'); await tick(900); assert.ok(fs.existsSync(log), 'этап запущен'); assert.equal(path.resolve(fs.readFileSync(log, 'utf8').trim()), path.resolve(path.join(m.dir, 'settings.json'))); }
+  finally { delete process.env.HERMES_BIN; if (keep !== undefined) process.env.OFFICE_SETTINGS_FILE = keep; }
+});

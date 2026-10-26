@@ -67,3 +67,54 @@ export function topicRequest(text, { scored = [] } = {}) {
   const hint = rest.length ? raw.replace(/^\s*(?:тем[аыуи]|темк[аиу])\s*[:\-–—]\s*/i, '').trim().slice(0, 300) : '';
   return { hint };
 }
+
+/* ---------- переключатель форматов роликов (решение Ника 2026-10-26: «пока только формат A») ----------
+   «только формат А», «выставь VARIANT_FORMATS=A», «варианты B и C не нужны», «включи B и C», «верни все три формата», «какие форматы сейчас включены?».
+   Чистая функция: возвращает { only: [...] } | { on: [...] } | { off: [...] } | { status: true } | null. Всё неоднозначное (одна буква «убери вариант C», номера роликов,
+   вопросы «почему…», длинные тексты) возвращает null и уходит Капитану-модели: «убери вариант C» это кнопка «Убрать вариант» конкретной темы, а не настройка. */
+const FL = '[abcабвс]', FB = '(?<![\\p{L}\\p{N}])', FA = '(?![\\p{L}\\p{N}])';
+const FLET = `${FB}${FL}${FA}`, FLIST = `${FLET}(?:\\s+(?:и\\s+|или\\s+)?${FLET})*`;
+const FMARK = '(?:формат\\p{L}*|вариант\\p{L}*|вариаци\\p{L}*)';
+const FMAP = { a: 'A', b: 'B', c: 'C', 'а': 'A', 'б': 'B', 'в': 'B', 'с': 'C' };
+const fLetters = (s) => [...new Set((String(s).match(new RegExp(FLET, 'gu')) || []).map((x) => FMAP[x]).filter(Boolean))];
+const F_OFF = new RegExp(`${FB}(?:отключ\\p{L}*|выключ\\p{L}*|убер\\p{L}*|убир\\p{L}*|убрат\\p{L}*|не\\s+нужн\\p{L}*|не\\s+над\\p{L}*|не\\s+делай\\p{L}*|не\\s+монтир\\p{L}*|не\\s+создава\\p{L}*|не\\s+создавай\\p{L}*|не\\s+включ\\p{L}*|не\\s+добав\\p{L}*|не\\s+возвращ\\p{L}*|не\\s+верн\\p{L}*|без|хватит|прекрати\\p{L}*|останов\\p{L}*|пока\\s+не\\s+нужн\\p{L}*)`, 'u');
+const F_ON = new RegExp(`${FB}(?:включ\\p{L}*|верн\\p{L}*|возвращ\\p{L}*|добав\\p{L}*|делай\\p{L}*|монтир\\p{L}*|запуск\\p{L}*|снова|опять|нужн\\p{L}*|хочу|давай\\p{L}*)`, 'u');       // с указанными буквами хватает любого из них
+const F_ON_STRONG = new RegExp(`${FB}(?:включ\\p{L}*|верн\\p{L}*|возвращ\\p{L}*|добав\\p{L}*|снова|опять)`, 'u');                                                                     // без букв («верни варианты») только эти: «давай варианты» может значить «дай варианты названий»
+const F_OTHER = /назван|заголов|хэштег|хештег|сценари|тем[аыуе]|текст|музык|голос|картинк|кадр/;                                                                            // речь не о форматах роликов
+export function formatSwitch(text) {
+  const raw = String(text || '').trim(), t = norm(raw), w = t.split(' ').filter(Boolean);
+  if (!w.length || w.length > 30 || raw.length > 300) return null;
+  // 1. как переменная окружения: «VARIANT_FORMATS=A» / «VARIANT_FORMATS=A,B,C»
+  const env = /variant[_\s]?formats\s*[=:]\s*([a-cA-C][a-cA-C\s,;/и]*)/i.exec(raw);
+  if (env) { const L = fLetters(env[1].toLowerCase()); return L.length ? { only: ['A', ...L.filter((x) => x !== 'A')] } : null; }
+  if (/\d/.test(t)) return null;                                      // «ролик 126», «тема 4»: речь о конкретном ролике, не о настройке
+  if (/^(почему|зачем|как|что если)(\s|$)/.test(t)) return null;
+  const QUESTION = /^(какие|какой|что|сколько|в каких)(\s|$)/.test(t) || /\?\s*$/.test(raw);
+  const hasMark = new RegExp(FMARK, 'u').test(t), plural = /(?:формат(?:ы|ов|ам)|вариант(?:ы|ов|ам)|вариаци(?:и|й|ям))(?![\p{L}])/u.test(t);
+  const off = F_OFF.test(t), on = F_ON.test(t);
+  // 2. вопрос о текущем состоянии
+  if (QUESTION && hasMark && /(включен|выключен|сейчас|монтир|делае|идут|работа|активн|стоит|настроен|остал)/.test(t) && !off) return { status: true };
+  if (QUESTION) return null;
+  // 3. «только …»: «только формат А», «оставь только A и B», «только А» (одно такое сообщение)
+  const only = new RegExp(`${FB}только\\s+(?:(${FMARK})\\s+)?(${FLIST})`, 'u').exec(t);
+  if (only) {
+    const L = fLetters(only[2]), latin = !/[абвс]/.test(only[2]);
+    if (L.length && (only[1] || latin || w.length <= 3)) return { only: ['A', ...L.filter((x) => x !== 'A')] };
+  }
+  // 4. буквы, привязанные к слову «формат/вариант»: «варианты B и C», «B и C варианты», «формат B»
+  const m1 = new RegExp(`${FMARK}\\s+(${FLIST})`, 'u').exec(t), m2 = new RegExp(`(${FLIST})\\s+${FMARK}`, 'u').exec(t);
+  const latinList = new RegExp(FLIST, 'u').exec(t);                  // «B и C не нужны» без слова «формат»: только латиница и минимум две разные буквы
+  let L = fLetters((m1 && m1[1]) || (m2 && m2[1]) || ''), bare = false;
+  if (!L.length && latinList && !/[абвс]/.test(latinList[0]) && fLetters(latinList[0]).filter((x) => x !== 'A').length >= 2) { L = fLetters(latinList[0]); bare = true; }
+  const nonA = L.filter((x) => x !== 'A');
+  if (off || /(?<![\p{L}])не\s+включ/u.test(t)) {
+    if (nonA.length >= 2 || (nonA.length === 1 && plural && !bare)) return { off: nonA };      // одна буква без «варианты»: «убери вариант C» это кнопка конкретной темы
+    if (!L.length && plural && /вариант|формат/.test(t) && !F_OTHER.test(t) && !/(?<![\p{L}])(этот|эту|эти|этого|этой|данн\p{L}*|текущ\p{L}*)(?![\p{L}])/u.test(t)) return { off: ['B', 'C'] };    // «отключи варианты», «варианты не нужны»
+    return null;
+  }
+  if (on) {
+    if (nonA.length) return { on: nonA };
+    if (!L.length && !F_OTHER.test(t) && (/все\s+три\s+(?:формат|вариант)|все\s+формат|все\s+вариант|оба\s+формата|остальные\s+формат|все\s+три\s*$/.test(t) || (F_ON_STRONG.test(t) && plural && hasMark))) return { on: ['B', 'C'] };
+  }
+  return null;
+}
