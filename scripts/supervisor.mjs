@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { check } from './tunnel_watch.mjs';
-import { updateMenuButton, makeTg, readBotToken } from './menu_button.mjs';
+import { updateMenuButtonPatiently, makeTg, readBotToken } from './menu_button.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Всё настраиваемое окружением, чтобы проверять супервизор на отдельных портах и копии данных, не задевая рабочий офис. Без переменных работает как раньше.
@@ -48,8 +48,9 @@ function saveUrl(url) {
 async function pushMenuButton(url) {
   if (DRY) { log('кнопка Mini App: сухой режим, пропуск'); return; }
   const token = readBotToken(dataDir); if (!token) { log('кнопка Mini App: нет smmBotToken, пропуск'); return; }
-  const r = await updateMenuButton(makeTg(token), url);
-  log(r.ok ? `кнопка Mini App обновлена (попыток: ${r.attempts})` : `кнопка Mini App НЕ обновлена: ${r.error}`);
+  const r = await updateMenuButtonPatiently(makeTg(token), url, { isCurrent: () => watch.url === url, onRetry: (n, e) => { if (n === 1 || n % 10 === 0) log(`кнопка Mini App: нет связи с Telegram (${e}), повторяю раз в 30 с`); } });
+  if (r.superseded) { log('кнопка Mini App: адрес уже сменился, этот вызов снят'); return; }
+  log(r.ok ? `кнопка Mini App обновлена (раундов: ${r.rounds}, попыток в последнем: ${r.attempts})` : `кнопка Mini App НЕ обновлена за ${r.rounds} раундов: ${r.error}`);
   if (!r.ok) {
     try { await makeTg(token)('sendMessage', { chat_id: 323028999, text: `⚠️ Туннель сменил адрес, но кнопку «Офис» обновить не вышло (${r.error}). Откройте вручную:\n${r.url}` }); } catch (e) { log('сообщение о сбое кнопки не ушло: ' + e.message); }
   }

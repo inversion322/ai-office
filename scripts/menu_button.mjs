@@ -29,6 +29,21 @@ export async function updateMenuButton(tgCall, api, { retries = 4, wait = (ms) =
   return { ok: false, url, error: last, attempts: retries };
 }
 
+// После включения ПК автозапуск стартует раньше сети: 4 быстрые попытки (~14 с) кончаются раньше, чем сеть поднимется, кнопка остаётся со старым адресом
+// и Mini App «недоступно» до ручной починки (так было 2026-10-26 после перезагрузки в 15:49). Поэтому при сбое повторяем раз в intervalMs, пока адрес актуален.
+// isCurrent() = false -> адрес уже сменился, этим занимается более новый вызов. Адрес, который Telegram отвергает (не HTTPS), не повторяем.
+export async function updateMenuButtonPatiently(tgCall, api, { isCurrent = () => true, rounds = 40, intervalMs = 30000, wait = (ms) => new Promise((r) => setTimeout(r, ms)), onRetry = () => {}, ...rest } = {}) {
+  let r = null;
+  for (let round = 1; round <= rounds; round++) {
+    r = await updateMenuButton(tgCall, api, { wait, ...rest });
+    if (r.ok) return { ...r, rounds: round };
+    if (/Only HTTPS|invalid/i.test(r.error || '')) return { ...r, rounds: round };
+    if (!isCurrent()) return { ...r, rounds: round, superseded: true };
+    if (round < rounds) { onRetry(round, r.error); await wait(intervalMs); }
+  }
+  return { ...r, rounds };
+}
+
 export function readBotToken(dataDir) {
   try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8')).smmBotToken || ''; } catch { return ''; }
 }
