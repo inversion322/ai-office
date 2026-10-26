@@ -15,7 +15,7 @@ test('форматы и монтажёры: A у Кирилла, B и C у св�
 });
 
 test('какие форматы включены: по умолчанию A,B,C; можно выключить; A всегда есть; мусор отбрасывается', () => {
-  assert.deepEqual(enabledFormats(undefined), ['A', 'B', 'C']); assert.deepEqual(enabledFormats(''), ['A', 'B', 'C']);
+  assert.deepEqual(enabledFormats(undefined, {}), ['A', 'B', 'C']); assert.deepEqual(enabledFormats('', {}), ['A', 'B', 'C']);
   assert.deepEqual(enabledFormats('A'), ['A']); assert.deepEqual(enabledFormats('a, c'), ['A', 'C']); assert.deepEqual(enabledFormats('B'), ['A', 'B']); assert.deepEqual(enabledFormats('X,Y'), ['A']);
 });
 
@@ -102,4 +102,34 @@ test('якорь группы: вариант A, пока он ждёт утве
   const m = (id, letter, stage, extra = {}) => ({ id, stage, notes: JSON.stringify({ variant: { group: 1, letter, format: letter }, ...extra }) });
   assert.equal(anchorOf([m(1, 'A', 'checked'), m(2, 'B', 'checked')]).id, 1); assert.equal(anchorOf([m(1, 'A', 'rejected'), m(2, 'B', 'checked'), m(3, 'C', 'checked')]).id, 2);
   assert.equal(anchorOf([m(1, 'A', 'rejected')]), null); assert.equal(isDropped(m(2, 'B', 'rejected', { dropped: true })), true); assert.equal(isDropped(m(2, 'B', 'checked')), false);
+});
+
+// Постоянная настройка (решение Ника 2026-10-26: пока монтируется только формат A) и её приоритеты.
+import fs2 from 'node:fs'; import os2 from 'node:os'; import path2 from 'node:path';
+import { readSettings, SETTINGS_FILE } from '../scripts/variants.mjs';
+test('настройка variantFormats=A из файла выключает B и C, пока env не задан', () => {
+  assert.deepEqual(enabledFormats(undefined, { variantFormats: 'A' }), ['A']);
+  assert.deepEqual(enabledFormats('', { variantFormats: 'A' }), ['A']);
+  assert.deepEqual(enabledFormats(undefined, { variantFormats: 'A,B' }), ['A', 'B']);
+});
+test('env сильнее файла (на время опыта можно включить все три, не трогая файл)', () => {
+  assert.deepEqual(enabledFormats('A,B,C', { variantFormats: 'A' }), ['A', 'B', 'C']);
+  assert.deepEqual(enabledFormats('B', { variantFormats: 'A' }), ['A', 'B']);
+});
+test('мусор или пустая настройка не ломает: без значения все три, с нечитаемым значением только A', () => {
+  assert.deepEqual(enabledFormats(undefined, { variantFormats: '' }), ['A', 'B', 'C']);
+  assert.deepEqual(enabledFormats(undefined, null), ['A', 'B', 'C']);
+  assert.deepEqual(enabledFormats(undefined, { variantFormats: 'ZZ' }), ['A']);
+});
+test('файл настроек: читается при каждом вызове; нет файла или битый JSON = пусто; путь следует за OFFICE_DATA_DIR и OFFICE_SETTINGS_FILE', () => {
+  const d = fs2.mkdtempSync(path2.join(os2.tmpdir(), 'setf-')); const f = path2.join(d, 'settings.json');
+  const keep = { a: process.env.OFFICE_SETTINGS_FILE, b: process.env.OFFICE_DATA_DIR };
+  try {
+    process.env.OFFICE_SETTINGS_FILE = f; assert.deepEqual(readSettings(), {});
+    assert.deepEqual(enabledFormats(undefined), ['A', 'B', 'C']);
+    fs2.writeFileSync(f, JSON.stringify({ variantFormats: 'A' })); assert.deepEqual(enabledFormats(undefined), ['A']);       // правка подхвачена без перезапуска
+    fs2.writeFileSync(f, '{битый'); assert.deepEqual(readSettings(), {}); assert.deepEqual(enabledFormats(undefined), ['A', 'B', 'C']);
+    delete process.env.OFFICE_SETTINGS_FILE; process.env.OFFICE_DATA_DIR = d; assert.equal(path2.resolve(SETTINGS_FILE()), path2.resolve(f));
+    fs2.writeFileSync(f, JSON.stringify({ variantFormats: 'A' })); assert.deepEqual(enabledFormats(undefined), ['A']);
+  } finally { for (const [k, v] of [['OFFICE_SETTINGS_FILE', keep.a], ['OFFICE_DATA_DIR', keep.b]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } fs2.rmSync(d, { recursive: true, force: true }); }
 });

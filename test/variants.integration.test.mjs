@@ -17,7 +17,7 @@ const FF = path.join(path.dirname(ffprobePath()), 'ffmpeg.exe');
 const can = fs.existsSync(path.join(REAL, 'office.db')) && fs.existsSync(path.join(REAL, 'config.json')) && fs.existsSync(FF);
 const PORT = 9900 + (process.pid % 90), API = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const G1 = 90001, G2 = 90100;        // базовые записи двух тем; варианты получают id сервера (max+1), их находим по меткам notes.variant
+const G1 = 90001, G2 = 90100, G3 = 90150;        // базовые записи двух тем; варианты получают id сервера (max+1), их находим по меткам notes.variant
 const runDir = (id) => path.join(ROOT, 'smm', 'runs', `video_${id}`), projDir = (id) => path.join(ROOT, 'video', `dosie${id}`);
 const SA = ['Говорят, что кофе обезвоживает. Правда ли это?', 'Британцы пометили воду в телах пятидесяти мужчин. Три дня те пили кофе, три дня воду.', 'Вода в организме у обеих групп вела себя одинаково, а различие нашли в мелочах.', 'Чашку кофе зря обвиняли: за день жидкости она даёт столько же, сколько вода.'];
 let tmp, server, TOKEN;
@@ -44,7 +44,8 @@ async function waitFor(fn, ms = 150000) { const t0 = Date.now(); for (;;) { cons
 before(async () => {
   if (!can) return; cleanup();
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vint-')); copyLiveDb(REAL, tmp, 'variants'); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token;
-  const db = new DatabaseSync(path.join(tmp, 'office.db')); seedTopic(db, G1); seedTopic(db, G2);
+  envFor.OFFICE_SETTINGS_FILE = path.join(tmp, 'settings.json');          // боевая настройка «только A» (server/data/settings.json) в тесте не участвует; свой файл тест создаёт сам
+  const db = new DatabaseSync(path.join(tmp, 'office.db')); seedTopic(db, G1); seedTopic(db, G2); seedTopic(db, G3);
   db.exec("UPDATE agents SET status='idle', progress=0 WHERE status IN ('working','waiting','error')");          // копия снята с боевого офиса: статусы тех, кто работает в этот момент, к тесту не относятся (иначе тест мигает при каждом монтаже)
   db.close();
   server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, ...envFor, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1' }, stdio: 'ignore', windowsHide: true });
@@ -105,4 +106,18 @@ test('правка «B: …» уходит варианту B, а «reject» о�
   assert.match(fs.readFileSync(path.join(runDir(B.id), 'script.json.queries'), 'utf8'), /Правка Ника к этому варианту: сделай концовку короче/);
   const open = (await cards(new RegExp(`reject:${G2}`))).filter((m) => m.status === 'open').pop(); await api('/api/chat/answer', { id: open.id, choice: `reject:${G2}`, via: 'test' }); await sleep(1500);
   assert.deepEqual(await Promise.all([G2, B.id, C.id].map(async (id) => (await video(id)).stage)), ['rejected', 'rejected', 'rejected']);
+});
+
+test('настройка «только формат A» (settings.json): variants ничего не заводит, A остаётся одиночным роликом, карточки группы нет; после снятия настройки варианты снова работают', { skip: !can }, async () => {
+  const f = envFor.OFFICE_SETTINGS_FILE; fs.writeFileSync(f, JSON.stringify({ variantFormats: 'A' }));
+  try {
+    const before = (await state()).videos.length;
+    const code = await pipe(['variants', String(G3)]); const log = fs.readFileSync(path.join(tmp, `pipe_${logN}_variants.log`), 'utf8');
+    assert.equal(code, 0, log.slice(-600)); assert.match(log, /варианты выключены/);
+    assert.equal((await state()).videos.length, before, 'ни B, ни C не заведены');
+    assert.equal((await group(G3)).length, 0, 'у A нет метки группы: это обычный одиночный ролик'); assert.equal((await video(G3)).stage, 'checked');
+    assert.equal((await cards(new RegExp(`approve:${G3}`))).length, 0, 'карточка группы не уходит');
+  } finally { fs.rmSync(f, { force: true }); }
+  const code2 = await pipe(['variants', String(G3)]); assert.equal(code2, 0, fs.readFileSync(path.join(tmp, `pipe_${logN}_variants.log`), 'utf8').slice(-600));
+  assert.ok(await ofLetter(G3, 'B') && await ofLetter(G3, 'C'), 'без настройки B и C заводятся как раньше');
 });

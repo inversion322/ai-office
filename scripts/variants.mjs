@@ -2,6 +2,9 @@
 // в три РАЗНЫХ по содержанию (хук, подача, концовка) и по формату, которые монтируют три монтажёра параллельно. Чистая логика без сети и моделей.
 // Модель данных: каждый вариант это обычная запись ролика (videos) со своим id, поэтому приёмка, правки, название и публикация работают для него как раньше.
 // Метка лежит в notes.variant = { group, letter, format, rotation }, group = id базового ролика (вариант A).
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { novelty } from './script_novelty.mjs';
 const norm = (t) => String(t == null ? '' : t).toLowerCase().replace(/ё/g, 'е').replace(/[^а-яa-z0-9\s]/gi, ' ').replace(/\s+/g, ' ').trim();
 
@@ -24,9 +27,16 @@ export const formatOf = (v) => { const x = variantOf(v); return x ? x.format : '
 /** Монтажёр записи: у варианта по формату, у одиночного ролика Кирилл. */
 export const editorOf = (v) => EDITORS[(FORMATS[formatOf(v)] || FORMATS.A).editor] || EDITORS.video;
 
-/** Какие форматы брать: env VARIANT_FORMATS=A,B,C (или «A» чтобы выключить варианты). Всегда начинается с A. */
-export function enabledFormats(env = process.env.VARIANT_FORMATS) {
-  const want = String(env || 'A,B,C').toUpperCase().split(/[\s,;]+/).filter((x) => LETTERS.includes(x));
+/** Постоянная настройка офиса: server/data/settings.json -> { "variantFormats": "A" }. Лежит рядом с config.json в каталоге данных (OFFICE_DATA_DIR), поэтому тестовый сервер на
+ *  копии данных боевую настройку не видит. Файл читается при каждом вызове: правка действует на следующем же этапе без перезапуска (этапы конвейера это отдельные процессы).
+ *  OFFICE_SETTINGS_FILE подменяет путь целиком (модульные тесты без сервера). */
+export const SETTINGS_FILE = () => process.env.OFFICE_SETTINGS_FILE || path.join(process.env.OFFICE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'server', 'data'), 'settings.json');
+export function readSettings(file = SETTINGS_FILE()) { try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j && typeof j === 'object' ? j : {}; } catch { return {}; } }
+
+/** Какие форматы брать. Приоритет: env VARIANT_FORMATS, затем server/data/settings.json (variantFormats), затем все три «A,B,C».
+ *  «A» выключает варианты B и C (решение Ника 2026-10-26: A набирает охваты лучше всего). Всегда начинается с A. */
+export function enabledFormats(env = process.env.VARIANT_FORMATS, settings = readSettings()) {
+  const want = String(env || (settings && settings.variantFormats) || 'A,B,C').toUpperCase().split(/[\s,;]+/).filter((x) => LETTERS.includes(x));
   return ['A', ...LETTERS.filter((l) => l !== 'A' && want.includes(l))];
 }
 

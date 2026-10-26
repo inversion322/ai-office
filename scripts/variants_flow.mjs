@@ -138,6 +138,8 @@ ${prev && comment ? `Текущий текст варианта (правь ег
 
   async function variantsFlow(id, { regen = false } = {}) {
     id = Number(id);
+    // Выключено настройкой (server/data/settings.json: variantFormats=A) или env VARIANT_FORMATS=A: ничего не заводим и ролик A меткой группы не помечаем, он остаётся обычным одиночным
+    if (enabledFormats().length < 2) { log('варианты выключены (variantFormats / VARIANT_FORMATS)'); return { skipped: true }; }
     const g = await ensureGroup(id); if (g.members.length < 2) { log('варианты выключены (VARIANT_FORMATS)'); return { skipped: true }; }
     const v = g.A.video, dirA = runDir(id), Aj = readJson(path.join(dirA, 'script.json'));
     if (!Aj || !Array.isArray(Aj.segments)) throw new Error('нет script.json варианта A: сначала этап script');
