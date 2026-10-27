@@ -119,6 +119,10 @@ export async function publishCard(id, { only } = {}) {
   const sched = (st.youtube || []).find((x) => x.scheduledFor); if (sched) return null;                 // уже загружен с отложенным выходом: нечего публиковать
   const q = await queueInfo(id).catch(() => null);
   const row = []; if (q && q.slot && q.ahead >= MIN_AHEAD_MIN && (!only || only === 'yts')) row.push([`🕐 Запланировать на ${hhmm(q.slot)} (МСК)`, `publish:${id}:yts`]);
+  // Ролик из плана дня студии: его слот выхода назначен планом (по умолчанию 18:30 МСК). Кнопка загружает ролик сейчас, YouTube выкладывает сам в слот.
+  const planned = (() => { try { return (JSON.parse(v.notes || '{}').studio || null); } catch { return null; } })();
+  const slotAt = planned && Number(planned.slot_at), slotOk = slotAt && !has('public') && !sched && (!only || only === 'at') && (slotAt - Date.now()) / 60e3 >= MIN_AHEAD_MIN_USER && (slotAt - Date.now()) / 86400e3 <= MAX_AHEAD_DAYS;
+  if (slotOk) row.unshift([`🎬 По плану дня: ${hhmm(slotAt)} МСК`, `publish:${id}:at:${Math.round(slotAt / 60e3).toString(36)}`]);
   const row2 = []; if (!only && !has('public')) row2.push(['📅 Запланировать на своё время', `pubat:${id}`]);
   if ((!only || only === 'yt') && !has('public')) row.push([q && q.slot && q.ahead >= MIN_AHEAD_MIN ? '🚀 Опубликовать сейчас' : '🚀 YouTube Shorts: опубликовать', `publish:${id}:yt`]); if ((!only || only === 'ytp') && !has('private') && !has('public')) row.push(['🧪 Приватная проверка', `publish:${id}:ytp`]);
   if (!row.length && !row2.length) return null;

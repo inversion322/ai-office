@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { cleanReport } from './lib_text.mjs';
-import { topicRequest, formatSwitch, classifyAnswer, quickPick, topicMentioned, stripButtonTalk } from './lib_intent.mjs';
+import { topicRequest, formatSwitch, classifyAnswer, quickPick, topicMentioned, stripButtonTalk, studioPlanRequest, studioAutoSwitch } from './lib_intent.mjs';
+import * as STUDIO from '../scripts/studio.mjs';
 import { probeVideo, checkFormat, sendFields } from '../scripts/video_format.mjs';
 import { variantOf, groupMembers, isGroup, anchorOf, parseVariantComment, enabledFormats, readSettings, writeSettings, FORMATS as VFORMATS } from '../scripts/variants.mjs';
 import { parseWhen, isCancelWhen, fmtMsk } from '../scripts/publish_when.mjs';
@@ -154,7 +155,9 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
   }
   // Один и тот же этап одного ролика не запускается дважды: 20.10 четыре «Да, сделать» подряд запустили четыре Ксении на одну тему.
   const RUNNING = new Map();
-  const stageKey = (args) => `${args[0]} ${args[1] && !String(args[1]).startsWith('--') ? args[1] : ''}`.trim();
+  const stageKey = (args) => (args[0] === 'studio'
+    ? args.filter((x, i) => !String(x).startsWith('--') && !String(args[i - 1] || '').startsWith('--')).join(' ')       // studio post-act med 2026-10-28 post1 ok: две кнопки подряд не блокируют друг друга
+    : `${args[0]} ${args[1] && !String(args[1]).startsWith('--') ? args[1] : ''}`.trim());
   const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   function stageRunning(args) { const k = stageKey(args), r = RUNNING.get(k); if (r && pidAlive(r.pid) && now() - r.ts < 4 * 3600e3) return true; RUNNING.delete(k); return false; }
 
@@ -174,7 +177,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       if (r && (r.data === data || (type === 'pick' && String(r.data).startsWith('pick:')))) closeCard(o, 'answered', 'superseded', 'system');
     }
   }
-  const AWAIT_ACT = (kind) => (kind === 'rework' ? 'rework' : kind === 'title' ? 'title' : kind === 'pubat' ? 'pubat' : 'revise');     // какое действие продолжит следующий текст Ника
+  const AWAIT_ACT = (kind) => (kind === 'rework' ? 'rework' : kind === 'title' ? 'title' : kind === 'pubat' ? 'pubat' : 'revise');
+  const awaitData = (aw) => (aw.kind === 'spost' && aw.data ? aw.data : `${AWAIT_ACT(aw.kind)}:${aw.id}`);     // какое действие продолжит следующий текст Ника
   async function execAction(data, comment, via, srcMsg) {
     const [act, idStr, mode] = String(data).split(':'); const id = Number(idStr);
     const v = act === 'confirm' || act === 'cancel' ? null : (id ? q('SELECT * FROM videos WHERE id=?', id)[0] : null);
@@ -189,6 +193,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       return execAction(ref.data, [ref.comment, comment].filter((x) => x && String(x).trim()).join('. '), via, m);
     }
     if (act === 'cancel') { cap('Хорошо, не делаю.', false); return {}; }
+    if (act === 'splan' || act === 'spost' || act === 'splan_new') return execStudio(act, String(data).split(':'), comment, srcMsg, cap);
     if (act === 'pick' && v) {
       supersede('pick:'); supersede('more:');
       if (['checked', 'editing', 'produced', 'approved'].includes(v.stage)) { cap(`Тема «${v.title}» уже в работе (${STAGE_LABEL[v.stage] || v.stage}), второй раз не запускаю.`); return {}; }
@@ -355,6 +360,39 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     return {};
   }
 
+  /* ---------- студия каналов: план дня и посты (scripts/studio_pipeline.mjs, этапы `studio …`) ----------
+     splan:<канал>:<дата>:ok|more|skip          ответ на карточку «План дня»
+     splan_new:<канал>:<дата>                   просьба Ника «план дня» (подсказка в comment)
+     spost:<канал>:<дата>:<слот>:ok|edit|drop   ответ на превью поста
+     В эфир пост уходит только после «ok» Ника на превью; сам выход делает минутный сторож studioTick (Григорий). */
+  function execStudio(act, parts, comment, srcMsg, cap) {
+    const chKey = parts[1], date = parts[2], note = comment && comment.trim() ? ['--comment', comment.trim()] : [];
+    if (!chKey || !/^\d{4}-\d{2}-\d{2}$/.test(date || '')) { cap('Не разобрал, к какому плану относится кнопка. Напишите «план дня».', false); return {}; }
+    if (act === 'splan_new') {
+      const plan = STUDIO.loadPlan(date, chKey);
+      if (plan && plan.status === 'approved') { cap(`План на ${date} уже утверждён и в работе. Новый не собираю, чтобы не затереть его: ролик и посты идут по нему.`, false); return {}; }
+      if (stageRunning(['studio', 'plan', chKey])) { cap('План дня уже собирается (Глеб ищет темы), пришлю сюда. Это обычно 10–25 минут.', false); return {}; }
+      supersede(`splan:${chKey}:${date}:`);
+      cap(`Принято, собираю план дня на ${date}${note.length ? ` с вашим пожеланием «${comment.trim().slice(0, 160)}»` : ''}. Глеб ищет темы и первоисточники, код замеряет спрос на YouTube, Мария соберёт три разные темы: самая востребованная пойдёт на ролик. Это обычно 10–25 минут, ничего не уйдёт в канал без вашего «да».`);
+      setAgent('studio_chief', 'working', `План дня ${date}`, `Ник просит план дня на ${date}`);
+      spawnPipeline(['studio', 'plan', chKey, '--date', date, ...(note.length ? ['--hint', comment.trim()] : [])]);
+      return {};
+    }
+    if (act === 'splan') {
+      const action = parts[3]; if (!['ok', 'more', 'skip'].includes(action)) return { note: 'неизвестное действие' };
+      supersede(`splan:${chKey}:${date}:`);
+      spawnPipeline(['studio', 'plan-act', chKey, date, action, ...note]); return {};
+    }
+    const slot = parts[3], action = parts[4];
+    if (!['post1', 'post2'].includes(slot) || !['ok', 'edit', 'drop'].includes(action)) return { note: 'неизвестное действие' };
+    if (action === 'edit' && !note.length) {
+      kvSet('awaiting', JSON.stringify({ kind: 'spost', data: parts.join(':'), mid: srcMsg && srcMsg.id, ts: now() }));
+      cap('Напишите одним сообщением, что исправить в посте: Дарья поправит, Павел проверит заново, новое превью придёт сюда.'); return {};
+    }
+    supersede(`spost:${chKey}:${date}:${slot}:`);
+    spawnPipeline(['studio', 'post-act', chKey, date, slot, action, ...note]); return {};
+  }
+
   // «Убрать»: карточка закрывается без действий и без реплик в чате; кнопки гаснут в обоих каналах; сотрудник, который только из-за неё «ждал», освобождается.
   function dismissCard(m, via) {
     closeCard(m, 'dismissed', 'dismiss', via || 'dashboard');
@@ -391,7 +429,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     const btn = JSON.parse(m.buttons || '[]').flat().find((b) => b.d === choice);
     if (!btn) return { ok: false, error: 'нет такой кнопки' };
     // «Внести правки» / «Вернуть на правки» без текста (кнопка в Telegram): карточка остаётся открытой, пока не придёт комментарий, иначе кнопка «Принять» пропала бы зря
-    if (/^(rework|revise|title):/.test(choice) && !(comment && comment.trim())) {
+    if (/^(rework|revise|title):|^spost:[^:]+:[^:]+:[^:]+:edit$/.test(choice) && !(comment && comment.trim())) {
       try { await execAction(choice, undefined, via, m); } catch (e) { return { ok: false, error: e.message }; }
       return { ok: true, pending: 'comment' };
     }
@@ -568,10 +606,10 @@ ${c.hist}
       kvDel('awaiting');
       if (aw.mid) {                       // карточка, у которой нажали кнопку, закрывается как отвеченная с комментарием
         const card = q("SELECT id, tg_msg FROM messages WHERE id=? AND status='open'", aw.mid)[0];
-        if (card) { run("UPDATE messages SET status='answered', choice=?, answered_ts=?, answered_via=? WHERE id=?", `${AWAIT_ACT(aw.kind)}:${aw.id}`, now(), source, card.id);
+        if (card) { run("UPDATE messages SET status='answered', choice=?, answered_ts=?, answered_via=? WHERE id=?", awaitData(aw), now(), source, card.id);
           if (card.tg_msg && !NO_TG) tg('editMessageReplyMarkup', { chat_id: chatId(), message_id: card.tg_msg, reply_markup: { inline_keyboard: [] } }).catch(() => {}); }
       }
-      execAction(`${AWAIT_ACT(aw.kind)}:${aw.id}`, body, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true }));
+      execAction(awaitData(aw), body, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true }));
       return { ok: true, id, note: 'comment' };
     }
     // Переключатель форматов: «только формат А» и т.п. выполняется сразу, раньше разбора «да/нет» и модели
@@ -580,6 +618,16 @@ ${c.hist}
     // «Тема» как просьба подобрать темы: выполняется сразу, до разбора «да/нет», чтобы «давай темы» не стало подтверждением чужой карточки
     const tr = office === 'smm' && t === 'captain_smm' ? topicRequest(body, { scored: q("SELECT id, title FROM videos WHERE stage='scored'") }) : null;
     if (tr) { execAction('topics:0', tr.hint, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true })); return { ok: true, id, note: 'topics' }; }
+    const sa = office === 'smm' && t === 'captain_smm' ? studioAutoSwitch(body) : null;
+    if (sa) { const s = STUDIO.writeStudioSettings({ autoPlan: sa.on }); post({ office, thread: 'captain_smm', sender: 'captain_smm', text: sa.on ? `Принято: план дня собирается сам каждый день в ${s.planAt} МСК на следующий день (канал: ${s.autoChannels.join(', ')}). Он придёт карточкой, в работу ничего не пойдёт без вашего «да». Выключить: «выключи автоплан».` : 'Принято: автоматический план дня выключен. Собрать вручную можно в любой момент: «план дня».', mirrorTg: true }); return { ok: true, id, note: 'studio-auto' }; }
+    const sp = office === 'smm' && t === 'captain_smm' ? studioPlanRequest(body) : null;
+    if (sp) {
+      const ch = STUDIO.studioSettings().autoChannels[0];
+      const nowMs = now(), mskHour = Number(new Date(nowMs + 3 * 3600e3).toISOString().slice(11, 13));
+      const date = sp.when === 'сегодня' ? STUDIO.mskDate(nowMs) : sp.when === 'завтра' ? STUDIO.mskDate(nowMs + 86400e3) : (mskHour < 10 ? STUDIO.mskDate(nowMs) : STUDIO.mskDate(nowMs + 86400e3));    // днём без уточнения план делается на завтра: ролик и посты не успеют на сегодня
+      execAction(`splan_new:${ch}:${date}`, sp.hint, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true }));
+      return { ok: true, id, note: 'studio-plan' };
+    }
     const fast = fastAnswer(office, body, source);
     if (fast) return { ok: true, id, note: fast };
     reply(office, t, id, body).catch((e) => console.error('reply', e.message));
@@ -677,6 +725,20 @@ ${c.hist}
       W.pid = null; await finishVideoJob(ag);
     }
   }
+  /* ---------- сторож студии (раз в минуту): Григорий выкладывает утверждённые посты, у которых пришло время; план дня сам, если Ник включил ---------- */
+  function studioTick() {
+    if (STUB) return;
+    const nowMs = now();
+    if (STUDIO.hasDue(nowMs) && !stageRunning(['studio', 'publish-due'])) spawnPipeline(['studio', 'publish-due']);
+    for (const t of STUDIO.autoPlanTargets(nowMs)) {
+      if (stageRunning(['studio', 'plan', t.ch])) continue;
+      STUDIO.markTried(t.date, t.ch, nowMs);
+      post({ thread: 'captain_smm', sender: 'captain_smm', text: `Собираю план дня на ${t.date} (автоматически, как вы включили). Глеб ищет темы, пришлю карточку.`, mirrorTg: false });
+      setAgent('studio_chief', 'working', `План дня ${t.date}`, `Автоплан на ${t.date}`);
+      spawnPipeline(['studio', 'plan', t.ch, '--date', t.date]);
+    }
+  }
+  if (!process.env.OFFICE_NO_WATCH) { setInterval(() => { try { studioTick(); } catch (e) { console.error('studio tick', e.message); } }, 60000); setTimeout(() => { try { studioTick(); } catch {} }, 20000); }
   if (!process.env.OFFICE_NO_WATCH) { setInterval(() => watchTick().catch((e) => console.error('watch', e.message)), 15000); setTimeout(() => watchTick().catch(() => {}), 3000); }
 
   /* ---------- HTTP ---------- */
