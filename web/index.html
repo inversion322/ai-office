@@ -30,6 +30,7 @@
       <nav id="officeTabs" class="tabs" aria-label="Офисы"></nav>
       <div id="conn" class="conn off">нет связи</div>
       <div class="spacer"></div>
+      <button id="calBtn" class="btn-ghost chat-btn hidden" type="button" title="Календарь студии: неделя × каналы">📅 Календарь<b id="calBadge" class="badge hidden">0</b></button>
       <button id="chatBtn" class="btn-ghost chat-btn" type="button" title="Чат с сотрудниками">💬 Чат<b id="chatBadge" class="badge hidden">0</b></button>
       <div id="clock" class="clock"></div>
       <button id="logout" class="btn-ghost">Выйти</button>
@@ -89,6 +90,19 @@
   </aside>
 </div>
 
+<div id="cal" class="modal cal hidden" role="dialog" aria-modal="true" aria-labelledby="calTitle">
+  <div class="cal-card">
+    <header class="cal-head">
+      <h2 id="calTitle">Календарь студии</h2>
+      <div class="cal-nav"><button id="calPrev" class="btn-ghost" type="button" aria-label="Прошлая неделя">‹</button><b id="calWeek"></b><button id="calNext" class="btn-ghost" type="button" aria-label="Следующая неделя">›</button><button id="calToday" class="btn-ghost" type="button">Сегодня</button></div>
+      <label class="cal-auto" title="Каждый день сам собирает план на завтра: варианты для видео и для постов одной карточкой"><input type="checkbox" id="calAuto"> Автоплан в <span id="calAutoAt">20:00</span></label>
+      <button id="calClose" class="btn-ghost" type="button" aria-label="Закрыть">✕</button>
+    </header>
+    <div class="cal-body" id="calBody"></div>
+    <footer class="cal-foot" id="calFoot"></footer>
+  </div>
+</div>
+
 <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="mTitle">
   <div class="modal-card">
     <div class="m-head"><div id="mAvatar" class="av big"></div><div><h2 id="mTitle"></h2><div id="mSub" class="m-sub"></div></div>
@@ -117,5 +131,7 @@
 <script src="office.js"></script>
 <script src="app.js"></script>
 <script src="chat.js"></script>
+<script src="cal_core.js"></script>
+<script src="cal.js"></script>
 </body>
 </html>

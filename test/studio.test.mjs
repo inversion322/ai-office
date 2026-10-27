@@ -176,3 +176,36 @@ test('блокировка плана: правки идут по очереди
   fs.writeFileSync(S.planFile('2026-12-25', 'lock_ch') + '.lock', String(Date.now() - 5 * 60e3)); await S.withPlanLock('2026-12-25', 'lock_ch', async () => order.push('stale-ok')); assert.equal(order.at(-1), 'stale-ok');
   fs.writeFileSync(S.planFile('2026-12-26', 'lock_ch') + '.lock', String(Date.now())); await assert.rejects(() => S.withPlanLock('2026-12-26', 'lock_ch', async () => {}, { waitMs: 150 }), /занят/);
 });
+
+/* ---- календарь ---- */
+test('даты недели: понедельник, семь дней, переход через месяц и год', () => {
+  assert.equal(S.weekStart('2026-10-28'), '2026-10-26'); assert.equal(S.weekStart('2026-10-26'), '2026-10-26'); assert.equal(S.weekStart('2026-11-01'), '2026-10-26');
+  assert.deepEqual(S.weekDays('2026-12-31'), ['2026-12-28', '2026-12-29', '2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02', '2027-01-03']); assert.equal(S.addDays('2026-03-01', -1), '2026-02-28');
+});
+test('календарь недели: статусы слотов, ролик по данным базы, ссылка на вышедший пост, пустые дни, подсказка автоплана', () => {
+  const st = path.join(process.env.OFFICE_STUDIO_DIR, 'cal_settings.json'); fs.writeFileSync(st, JSON.stringify({ autoPlan: true, autoChannels: ['cal_ch'], channels: { cal_ch: { name: 'Канал календаря', tg: 'cal_tg' } } }));
+  const settings = S.studioSettings(st), now = Date.parse('2027-02-09T09:00:00Z');         // вторник 12:00 МСК
+  const mkP = (date, ch, statuses, patch = {}) => { const plan = planWith(date, ch, statuses, patch); return plan; };
+  const p1 = mkP('2027-02-09', 'cal_ch', { post1: 'published', video: 'script', post2: 'approved' }, { post1: { message_id: 55 }, video: { videoId: 7001 } }); p1.status = 'approved'; S.savePlan(p1);
+  const p2 = mkP('2027-02-10', 'cal_ch', { post1: 'preview', video: 'planned', post2: 'planned' });                      // proposed
+  const p3 = mkP('2027-02-11', 'cal_ch', { post1: 'failed', video: 'script', post2: 'dropped' }, { video: { videoId: 7002 } }); p3.status = 'approved'; S.savePlan(p3);
+  const info = { 7001: { stage: 'editing' }, 7002: { stage: 'approved', url: 'https://youtu.be/abc', privacy: 'public' } };
+  const cal = S.calendarWeek('2027-02-09', { settings, videoInfo: (id) => info[id] || null, now });
+  assert.equal(cal.start, '2027-02-08'); assert.equal(cal.end, '2027-02-14'); assert.equal(cal.today, '2027-02-09'); assert.equal(cal.prev, '2027-02-01'); assert.equal(cal.next, '2027-02-15');
+  assert.deepEqual(cal.channels, [{ key: 'cal_ch', name: 'Канал календаря', tg: 'cal_tg' }]); assert.equal(cal.cells.length, 7); assert.equal(cal.autoPlan, true);
+  const cell = (d) => cal.cells.find((c) => c.date === d);
+  const a = cell('2027-02-09'); assert.deepEqual(a.slots.map((s) => [s.time, s.label, s.tone]), [['12:00', 'опубликован', 'done'], ['18:30', 'идёт монтаж', 'work'], ['19:00', 'в расписании', 'ok']]); assert.equal(a.slots[0].url, 'https://t.me/cal_tg/55'); assert.equal(a.plan.label, 'утверждён'); assert.equal(a.canPlan, false);
+  const b = cell('2027-02-10'); assert.ok(b.slots.every((s) => s.tone === 'you' && s.label === 'ждёт вашего выбора')); assert.equal(b.plan.label, 'ждёт вашего выбора'); assert.equal(b.canPlan, true);
+  const c = cell('2027-02-11'); assert.deepEqual(c.slots.map((s) => [s.label, s.tone]), [['не вышел', 'bad'], ['опубликован', 'done'], ['снят', 'off']]); assert.equal(c.slots[1].url, 'https://youtu.be/abc');
+  const empty = cell('2027-02-12'); assert.equal(empty.plan, null); assert.equal(empty.slots.length, 0); assert.equal(empty.canPlan, true); assert.equal(empty.autoAt, S.slotMs('2027-02-11', '20:00'), 'автоплан на пятницу сработает в четверг вечером');
+  assert.equal(cell('2027-02-08').autoAt, null, 'прошедший день автоплан не соберёт'); assert.equal(cell('2027-02-08').canPlan, false);
+});
+test('календарь: канал с планом появляется сам, пропущенный день и запланированный ролик YouTube', () => {
+  const settings = { ...S.studioSettings(path.join(process.env.OFFICE_STUDIO_DIR, 'nope.json')), autoChannels: ['med_detective'] }, now = Date.parse('2027-03-02T09:00:00Z');
+  const sk = planWith('2027-03-03', 'extra_ch', {}); sk.status = 'skipped'; S.savePlan(sk);
+  const ok = planWith('2027-03-04', 'med_detective', { video: 'script' }, { video: { videoId: 7003 } }); ok.status = 'approved'; S.savePlan(ok);
+  const cal = S.calendarWeek('2027-03-02', { settings, now, videoInfo: () => ({ stage: 'approved', url: 'https://youtu.be/zzz', privacy: 'private', scheduledFor: '2027-03-04T15:30:00Z' }) });
+  assert.deepEqual(cal.channels.map((c) => [c.key, c.name]), [['med_detective', 'Медицинский детектив'], ['extra_ch', 'extra_ch']]);
+  assert.deepEqual(cal.cells.find((c) => c.channel === 'extra_ch' && c.date === '2027-03-03').slots.map((s) => s.label), ['день пропущен', 'день пропущен', 'день пропущен']);
+  const v = cal.cells.find((c) => c.channel === 'med_detective' && c.date === '2027-03-04').slots.find((s) => s.kind === 'video'); assert.match(v.label, /в расписании YouTube: 18:30/); assert.equal(v.tone, 'ok'); assert.equal(v.url, 'https://youtu.be/zzz');
+});

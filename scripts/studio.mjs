@@ -329,3 +329,50 @@ export async function withPlanLock(date, ch, fn, { waitMs = 30000, staleMs = 900
   }
   try { return await fn(); } finally { try { fs.rmSync(f, { force: true }); } catch {} }
 }
+
+/* ---------------- единый календарь «неделя × каналы» (решение Ника 2026-10-28) ---------------- */
+/** Каналы студии для календаря (названия; сервер не может подключать daily_topics: тот тянет smm_lib). Свои названия задаются в studio.json: channels.<канал>.name / tg. */
+export const KNOWN_CHANNELS = { med_detective: { name: 'Медицинский детектив', tg: 'med_detective_ru' } };
+export function calendarChannels(settings = studioSettings(), extraKeys = []) {
+  const keys = [...new Set([...settings.autoChannels, ...Object.keys(settings.channels || {}), ...extraKeys])];
+  return keys.map((k) => { const o = (settings.channels || {})[k] || {}, kn = KNOWN_CHANNELS[k] || {}; return { key: k, name: o.name || kn.name || k, tg: o.tg || kn.tg || '' }; });
+}
+const dayMs = (date) => Date.UTC(...String(date).split('-').map((x, i) => (i === 1 ? Number(x) - 1 : Number(x))));
+export const addDays = (date, n) => new Date(dayMs(date) + n * 86400e3).toISOString().slice(0, 10);
+/** Понедельник недели, в которую попадает дата. */
+export const weekStart = (date) => { const wd = new Date(dayMs(date)).getUTCDay(); return addDays(date, -((wd + 6) % 7)); };
+export const weekDays = (date) => { const m = weekStart(date); return Array.from({ length: 7 }, (_, i) => addDays(m, i)); };
+
+const POST_VIEW = { planned: ['ждёт утверждения плана', 'wait'], queued: ['ждёт автора', 'wait'], writing: ['пишется', 'work'], preview: ['ждёт вашего «да»', 'you'], approved: ['в расписании', 'ok'], publishing: ['выкладывается', 'work'], published: ['опубликован', 'done'], failed: ['не вышел', 'bad'], dropped: ['снят', 'off'] };
+const VIDEO_VIEW = { script: ['сценарий пишется', 'work'], checked: ['сценарий ждёт вашего «да»', 'you'], editing: ['идёт монтаж', 'work'], produced: ['ролик ждёт вашей приёмки', 'you'], approved: ['принят, ждёт публикации', 'you'], rejected: ['отклонён', 'off'] };
+/** Как слот плана выглядит в календаре. video: { stage, url?, scheduledFor?, privacy? } для слота-ролика. */
+export function slotView(slot, plan, { video = null, tg = '' } = {}) {
+  let label, tone, url = '';
+  if (plan.status === 'proposed') [label, tone] = ['ждёт вашего выбора', 'you'];
+  else if (plan.status === 'skipped' || plan.status === 'replaced') [label, tone] = [plan.status === 'skipped' ? 'день пропущен' : 'план заменён', 'off'];
+  else if (slot.kind === 'video') {
+    if (video && video.stage === 'approved' && video.url && (video.privacy === 'public' || video.scheduledFor)) { label = video.scheduledFor ? `в расписании YouTube: ${new Date(video.scheduledFor).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' })}` : 'опубликован'; tone = video.scheduledFor ? 'ok' : 'done'; url = video.url; }
+    else [label, tone] = (video && VIDEO_VIEW[video.stage]) || VIDEO_VIEW[slot.status] || ['сценарий пишется', 'work'];
+  } else [label, tone] = POST_VIEW[slot.status] || [slot.status || '—', 'wait'];
+  if (slot.kind === 'post' && slot.status === 'published' && slot.message_id && tg) url = `https://t.me/${tg}/${slot.message_id}`;
+  return { slot: slot.slot, kind: slot.kind, time: slot.time, at: slot.at, title: slot.title, status: slot.status, label, tone, url, videoId: slot.videoId || null, source: (slot.sources_meta && slot.sources_meta[0] && slot.sources_meta[0].name) || '' };
+}
+const PLAN_LABEL = { proposed: 'ждёт вашего выбора', approved: 'утверждён', skipped: 'день пропущен', replaced: 'заменён другим' };
+/**
+ * Неделя × каналы. -> { start, end, days, today, prev, next, channels, cells: [{ date, channel, plan: {status,label,options}|null, slots, canPlan, autoAt }], autoPlan, planAt }.
+ * videoInfo(id) даёт сведения о ролике из базы (stage) и публикации (url, scheduledFor, privacy).
+ */
+export function calendarWeek(startDate, { settings = studioSettings(), videoInfo = () => null, now = Date.now() } = {}) {
+  const days = weekDays(startDate || mskDate(now)), today = mskDate(now);
+  let files = []; try { files = fs.readdirSync(path.join(studioDir(), 'plans')); } catch {}
+  const found = new Set(); for (const f of files) { const m = /^(\d{4}-\d{2}-\d{2})_([^.]+)\.json$/.exec(f); if (m && days.includes(m[1])) found.add(m[2]); }
+  const channels = calendarChannels(settings, [...found]), cells = [];
+  for (const ch of channels) for (const date of days) {
+    const plan = loadPlan(date, ch.key), planAt = (settings.channels[ch.key] && settings.channels[ch.key].planAt) || settings.planAt;
+    const slots = plan ? [...(plan.slots || [])].sort((a, b) => a.at - b.at).map((sl) => slotView(sl, plan, { video: sl.kind === 'video' && sl.videoId ? videoInfo(sl.videoId) : null, tg: ch.tg })) : [];
+    let autoAt = null;
+    if (!plan && settings.autoPlan && date >= today) { const gen = slotMs(Number(planAt.split(':')[0]) >= 12 ? addDays(date, -1) : date, planAt.padStart(5, '0')); if (gen > now) autoAt = gen; }
+    cells.push({ date, channel: ch.key, plan: plan ? { status: plan.status, label: PLAN_LABEL[plan.status] || plan.status, options: plan.options ? { video: plan.options.video.length, posts: plan.options.posts.length } : null } : null, slots, canPlan: date >= today && (!plan || plan.status === 'proposed' || plan.status === 'skipped' || plan.status === 'replaced'), autoAt });
+  }
+  return { start: days[0], end: days[6], days, today, prev: addDays(days[0], -7), next: addDays(days[0], 7), channels, cells, autoPlan: settings.autoPlan, planAt: settings.planAt };
+}

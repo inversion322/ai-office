@@ -186,7 +186,8 @@ const authed = (req) => {
 };
 // Сессия телефона видит всё, что нужно для просмотра, и отвечает/пишет сотрудникам. Менять промпты, статусы агентов и сцены (то, чем пользуются сами агенты) она не может:
 // если телефон потеряют или в странице найдут дыру, офис не перепишут.
-export const MINI_ALLOWED = [['GET', '/api/state'], ['GET', '/api/chat'], ['POST', '/api/chat/send'], ['POST', '/api/chat/answer'], ['POST', '/api/chat/clear-status'], ['GET', '/api/priority']];
+export const MINI_ALLOWED = [['GET', '/api/state'], ['GET', '/api/chat'], ['POST', '/api/chat/send'], ['POST', '/api/chat/answer'], ['POST', '/api/chat/clear-status'], ['GET', '/api/priority'],
+  ['GET', '/api/studio/calendar'], ['POST', '/api/studio/plan'], ['POST', '/api/studio/settings']];       // календарь студии: просмотр, «собрать план на дату» и автоплан (то же, что фразы «план дня» и «включи автоплан» в чате)
 const miniOk = (method, p) => MINI_ALLOWED.some(([m, x]) => m === method && x === p);
 let authFails = [];                                                                       // защита от перебора подписи: не больше 20 неудач в минуту
 

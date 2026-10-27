@@ -790,6 +790,29 @@ ${c.hist}
     if (req.method === 'POST' && p === '/api/chat/clear-status') { const b = await body(req); json(res, 200, clearStatus(String(b.agent || ''))); return true; }
     if (req.method === 'GET' && p === '/api/priority') { json(res, 200, priority()); return true; }
     if (req.method === 'POST' && p === '/api/priority') { const b = await body(req); json(res, 200, setPriority({ active: !!b.active, video_id: b.video_id, label: b.label })); return true; }
+    // Календарь студии «неделя × каналы» (чтение планов; ничего не запускает), запуск плана на дату и автоплан
+    if (req.method === 'GET' && p === '/api/studio/calendar') {
+      const st = url.searchParams.get('start') || '';
+      const videoInfo = (id) => {
+        const v = q('SELECT stage FROM videos WHERE id=?', Number(id))[0]; if (!v) return null;
+        let pub = null; try { pub = (JSON.parse(fs.readFileSync(path.join(ROOT, 'smm', 'runs', `video_${Number(id)}`, 'publish.json'), 'utf8')).youtube || []).filter((x) => x.privacy === 'public' || x.scheduledFor).pop() || null; } catch {}
+        return { stage: v.stage, url: pub ? pub.url : '', scheduledFor: pub ? pub.scheduledFor : '', privacy: pub ? pub.privacy : '' };
+      };
+      json(res, 200, STUDIO.calendarWeek(/^\d{4}-\d{2}-\d{2}$/.test(st) ? st : undefined, { videoInfo, now: now() })); return true;
+    }
+    if (req.method === 'POST' && p === '/api/studio/plan') {
+      const b = await body(req), ch = String(b.channel || ''), date = String(b.date || '');
+      if (!STUDIO.calendarChannels().some((c) => c.key === ch) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { json(res, 400, { ok: false, error: 'неизвестный канал или дата' }); return true; }
+      if (date < STUDIO.mskDate(now())) { json(res, 400, { ok: false, error: 'на прошедший день план не собираю' }); return true; }
+      execAction(`splan_new:${ch}:${date}`, b.hint ? String(b.hint).slice(0, 300) : undefined, 'dashboard', null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true }));
+      json(res, 200, { ok: true }); return true;
+    }
+    if (req.method === 'POST' && p === '/api/studio/settings') {
+      const b = await body(req), patch = {};
+      if (typeof b.autoPlan === 'boolean') patch.autoPlan = b.autoPlan;
+      if (typeof b.planAt === 'string' && /^\d{1,2}:\d{2}$/.test(b.planAt)) patch.planAt = b.planAt;
+      const st = STUDIO.writeStudioSettings(patch); json(res, 200, { ok: true, autoPlan: st.autoPlan, planAt: st.planAt }); return true;
+    }
     if (req.method === 'POST' && p === '/api/chat/edit') { const b = await body(req); json(res, 200, await editCard(b.id, b.text, b.buttons)); return true; }
     if (req.method === 'POST' && p === '/api/chat/post') {
       const b = await body(req);

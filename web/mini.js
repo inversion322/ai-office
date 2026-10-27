@@ -76,7 +76,7 @@
   /* ---------- вкладки ---------- */
   function show(v) {
     S.view = v;
-    ['now', 'chat', 'feed'].forEach((x) => $('v-' + x).classList.toggle('hidden', x !== v));
+    ['now', 'chat', 'feed', 'cal'].forEach((x) => $('v-' + x).classList.toggle('hidden', x !== v));
     document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
     $('composer').classList.toggle('hidden', v !== 'chat');
     if (v === 'chat') scrollLog(true);
@@ -84,7 +84,8 @@
     // Из чата нижняя панель скрыта (место нужно клавиатуре), поэтому выход обязателен: штатная «Назад» Telegram и запасная «‹» в шапке.
     $('back').classList.toggle('hidden', v !== 'chat');
     try { if (tg.BackButton) { if (v === 'chat') tg.BackButton.show(); else tg.BackButton.hide(); } } catch {}
-    $('brandText').textContent = v === 'chat' ? (S.who ? agentName(S.who) : 'Чат') : 'Nick G SMM';
+    $('brandText').textContent = v === 'chat' ? (S.who ? agentName(S.who) : 'Чат') : v === 'cal' ? 'Календарь студии' : 'Nick G SMM';
+    if (v === 'cal') { loadCal(); calTimer(); }
     if (S.state) render();
   }
   const goBack = () => { if (S.view === 'chat') { show('now'); tg.HapticFeedback && tg.HapticFeedback.selectionChanged(); } };
@@ -96,7 +97,7 @@
   const agentName = (id) => { const a = S.state && S.state.agents.find((x) => x.id === id); return a ? a.name.split(' ')[0] : id; };
   function render() {
     renderBadge();
-    if (S.view === 'now') renderNow(); else if (S.view === 'chat') renderChat(); else renderFeed();
+    if (S.view === 'now') renderNow(); else if (S.view === 'chat') renderChat(); else if (S.view === 'cal') renderCal(); else renderFeed();
   }
   function renderBadge() {
     const n = C.pendingCards(S.chat && S.chat.messages).length;
@@ -163,6 +164,41 @@
   const nearBottom = () => { const l = $('log'); return l.scrollHeight - l.scrollTop - l.clientHeight < 80; };
   const scrollLog = (force) => { if (force) requestAnimationFrame(() => { $('log').scrollTop = $('log').scrollHeight; }); };
   $('who').addEventListener('click', (e) => { const b = e.target.closest('button[data-w]'); if (b) { S.who = b.dataset.w || null; $('brandText').textContent = S.who ? agentName(S.who) : 'Чат'; renderChat(); scrollLog(true); } });
+
+  /* ---------- календарь студии: неделя × каналы (читает GET /api/studio/calendar; ничего не публикует) ---------- */
+  const CC = window.CalCore;
+  async function loadCal() {
+    try {
+      const r = await raw('/api/studio/calendar' + (S.calStart ? '?start=' + S.calStart : ''), { timeout: 8000 });
+      if (!r.ok) throw new Error(String(r.status)); S.cal = await r.json();
+      const n = CC.needYou(S.cal); $('calBadgeM').textContent = n; $('calBadgeM').classList.toggle('hidden', !n);
+      if (S.view === 'cal') renderCal();
+    } catch {}
+  }
+  function calTimer() { clearTimeout(S.calT); if (S.view === 'cal') S.calT = setTimeout(async () => { await loadCal(); calTimer(); }, 15000); }
+  function renderCal() {
+    const cal = S.cal, body = $('mcBody'); if (!cal) { body.innerHTML = '<p class="mc-empty">Загружаю календарь…</p>'; return; }
+    $('mcWeek').textContent = CC.weekLabel(cal.start, cal.end); $('mcAuto').checked = !!cal.autoPlan; $('mcAutoAt').textContent = cal.planAt;
+    const html = cal.days.map((d) => {
+      const blocks = cal.channels.map((ch) => {
+        const cell = cal.cells.find((c) => c.channel === ch.key && c.date === d), v = CC.cellView(cell, cal.today);
+        const slots = v.slots.map((s) => `<div class="mc-slot ${s.cls}"><span class="t">${CC.esc(s.time)}</span><span class="n">${s.icon} ${CC.esc(s.short)}</span><span class="s">${CC.esc(s.label)}${s.source ? ' · ' + CC.esc(s.source) : ''}${s.url ? ` · <a href="${CC.esc(s.url)}" target="_blank" rel="noopener">открыть</a>` : ''}</span></div>`).join('');
+        const act = cell.plan && cell.plan.status === 'proposed' ? '<p class="mc-note">Выберите темы в чате: карточка плана ждёт вас</p>' : v.canPlan ? `<button type="button" class="mc-plan" data-ch="${CC.esc(ch.key)}" data-date="${d}">＋ Собрать план</button>` : '';
+        return `<div class="mc-ch"><div class="mc-chh"><b>${CC.esc(ch.name)}</b>${v.head ? `<span>${CC.esc(v.head)}</span>` : ''}</div>${slots || `<p class="mc-none">${CC.esc(v.hint)}</p>`}${act}</div>`;
+      }).join('');
+      return `<section class="mc-day ${d === cal.today ? 'today' : ''} ${d < cal.today ? 'past' : ''}"><h3>${CC.dayHead(d)}${d === cal.today ? ' · сегодня' : ''}</h3>${blocks}</section>`;
+    }).join('');
+    put(body, html, 'cal' + cal.start);
+  }
+  $('mcPrev').onclick = () => { if (S.cal) { S.calStart = S.cal.prev; loadCal(); } };
+  $('mcNext').onclick = () => { if (S.cal) { S.calStart = S.cal.next; loadCal(); } };
+  $('mcToday').onclick = () => { S.calStart = ''; loadCal(); };
+  $('mcAuto').onchange = async (e) => { try { const r = await raw('/api/studio/settings', { method: 'POST', body: JSON.stringify({ autoPlan: e.target.checked }) }); if (!r.ok) throw new Error(); } catch { e.target.checked = !e.target.checked; } loadCal(); };
+  $('mcBody').addEventListener('click', async (e) => {
+    const b = e.target.closest('.mc-plan'); if (!b) return; b.disabled = true; b.textContent = 'Запускаю…';
+    try { const r = await raw('/api/studio/plan', { method: 'POST', body: JSON.stringify({ channel: b.dataset.ch, date: b.dataset.date }) }); if (!r.ok) throw new Error(); b.textContent = 'План собирается, карточка придёт в чат'; tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success'); }
+    catch { b.disabled = false; b.textContent = '＋ Собрать план (не вышло, ещё раз)'; }
+  });
 
   function renderFeed() {
     const ev = (S.state.events || []).slice(0, 40);

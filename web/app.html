@@ -44,6 +44,12 @@
     <section id="v-feed" class="view hidden">
       <ul id="feed" class="feed"></ul>
     </section>
+
+    <section id="v-cal" class="view hidden">
+      <div class="mc-bar"><button id="mcPrev" type="button" aria-label="Прошлая неделя">‹</button><b id="mcWeek"></b><button id="mcNext" type="button" aria-label="Следующая неделя">›</button><button id="mcToday" type="button">Сегодня</button></div>
+      <label class="mc-auto"><input type="checkbox" id="mcAuto"> Автоплан: план дня сам в <span id="mcAutoAt">20:00</span></label>
+      <div id="mcBody" class="mc-body"></div>
+    </section>
   </main>
 
   <form id="composer" class="composer hidden">
@@ -54,6 +60,7 @@
   <nav class="tabbar" role="tablist">
     <button role="tab" data-v="now" class="on">Сейчас</button>
     <button role="tab" data-v="chat">Чат<b id="badge" class="badge hidden">0</b></button>
+    <button role="tab" data-v="cal">Календарь<b id="calBadgeM" class="badge hidden">0</b></button>
     <button role="tab" data-v="feed">Лента</button>
   </nav>
 </div>
@@ -69,6 +76,7 @@
 
 <script src="duck.js"></script>
 <script src="mini_core.js"></script>
+<script src="cal_core.js"></script>
 <script src="mini.js"></script>
 </body>
 </html>

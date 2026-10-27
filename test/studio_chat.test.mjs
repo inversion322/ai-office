@@ -131,3 +131,27 @@ test('правка карточки на месте: текст и кнопки 
   const row = db.prepare('SELECT text, buttons FROM messages WHERE id=?').get(id); assert.equal(row.text, 'новый текст'); assert.deepEqual(JSON.parse(row.buttons).flat().map((b) => b.d), ['x:1', 'dismiss:0']);
   db.prepare("UPDATE messages SET status='answered' WHERE id=?").run(id); assert.equal((await chat.editCard(id, 'ещё', null)).ok, false); assert.equal((await chat.editCard(99999, 'x', null)).ok, false);
 });
+
+/* ---- HTTP календаря студии ---- */
+async function call(chat, method, pathq, bodyObj) {
+  let out = null; const url = new URL('http://x' + pathq);
+  const handled = await chat.handle({ method }, {}, url, async () => bodyObj || {}, (res, code, obj) => { out = { code, obj }; });
+  return { handled, ...(out || {}) };
+}
+test('GET /api/studio/calendar: неделя × каналы, ролик берётся из базы; POST /api/studio/plan проверяет канал и дату и запускает поиск; POST /api/studio/settings включает автоплан', async () => {
+  const { chat, db } = make();
+  db.prepare("INSERT INTO videos (id,title,stage,updated_at) VALUES (8801,'Тема','editing',0)").run();
+  const plan = S.newDayPlan({ date: '2027-04-07', channel: 'med_detective', options: S.makeOptions({ video: [mkOpt('Видео тема про сон и усталость?', 9)], posts: [mkOpt('Пост один про воду и почки?', 8), mkOpt('Пост два про кофе и сердце?', 7)] }), slots: S.DEFAULT_SLOTS, now: Date.now() });
+  plan.status = 'approved'; S.slotOf(plan, 'video').videoId = 8801; S.slotOf(plan, 'video').status = 'script'; S.savePlan(plan);
+  const r = await call(chat, 'GET', '/api/studio/calendar?start=2027-04-07'); assert.equal(r.handled, true); assert.equal(r.code, 200);
+  assert.equal(r.obj.start, '2027-04-05'); assert.equal(r.obj.cells.filter((c) => c.channel === 'med_detective').length, 7);
+  const cell = r.obj.cells.find((c) => c.date === '2027-04-07' && c.channel === 'med_detective'); assert.equal(cell.slots.find((s) => s.kind === 'video').label, 'идёт монтаж');
+  assert.equal((await call(chat, 'GET', '/api/studio/calendar?start=мусор')).code, 200, 'битая дата = текущая неделя');
+  const day = S.mskDate(Date.now() + 5 * 86400e3);
+  assert.equal((await call(chat, 'POST', '/api/studio/plan', { channel: 'нет_такого', date: day })).code, 400); assert.equal((await call(chat, 'POST', '/api/studio/plan', { channel: 'med_detective', date: '2020-01-01' })).code, 400);
+  assert.equal((await call(chat, 'POST', '/api/studio/plan', { channel: 'med_detective', date: 'завтра' })).code, 400);
+  const ok = await call(chat, 'POST', '/api/studio/plan', { channel: 'med_detective', date: day, hint: 'про сон' }); assert.deepEqual(ok.obj, { ok: true }); await new Promise((r2) => setTimeout(r2, 30));
+  assert.equal(notStarted(db).at(-1), `studio plan med_detective --date ${day} --hint про сон`);
+  const s1 = await call(chat, 'POST', '/api/studio/settings', { autoPlan: true, planAt: '19:30' }); assert.deepEqual(s1.obj, { ok: true, autoPlan: true, planAt: '19:30' }); assert.equal(S.studioSettings().autoPlan, true);
+  const s2 = await call(chat, 'POST', '/api/studio/settings', { autoPlan: false, planAt: 'вечером' }); assert.deepEqual(s2.obj, { ok: true, autoPlan: false, planAt: '19:30' }, 'мусор вместо времени не принимается'); S.writeStudioSettings({ planAt: '20:00' });
+});

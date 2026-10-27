@@ -296,3 +296,21 @@ details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-weight:700;f
 
 /* группы сотрудников в боковом списке (офис SMM): вид деятельности и площадка */
 .grp{list-style:none;padding:10px 14px 4px;font:800 10.5px 'Manrope',sans-serif;text-transform:uppercase;letter-spacing:.08em;color:var(--accent-ink);border-bottom:1px solid var(--line);cursor:default;background:var(--surface2)}
+
+/* ---------- календарь студии: неделя × каналы ---------- */
+.cal-you{--cb:#FFF4D6;--cl:#E8A317;--ct:#7A4E00}.cal-work{--cb:#E8F1FD;--cl:#2F80ED;--ct:#1D4F99}.cal-ok{--cb:#E6F6EE;--cl:#1F9D63;--ct:#146B43}.cal-done{--cb:#D3EFE0;--cl:#14804E;--ct:#0E5C38}
+.cal-wait{--cb:#F4F2EC;--cl:#D9D3C5;--ct:#6B7280}.cal-bad{--cb:#FDE8E8;--cl:#D64545;--ct:#9B2C2C}.cal-off{--cb:#F7F5F0;--cl:#E6E1D6;--ct:#9AA0A6}
+.cal{align-items:start;padding:4vh 2vw}.cal-card{width:min(1700px,100%);max-height:92vh;display:flex;flex-direction:column;background:var(--surface);border-radius:18px;box-shadow:0 20px 60px #0004;border:1px solid var(--line)}
+.cal-head{display:flex;align-items:center;gap:16px;padding:14px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}.cal-head h2{font-size:18px;font-weight:800}
+.cal-nav{display:flex;align-items:center;gap:8px}.cal-nav b{min-width:150px;text-align:center;font-weight:800}.cal-auto{display:flex;align-items:center;gap:6px;margin-left:auto;font-weight:700;font-size:13px;color:var(--ink);cursor:pointer}.cal-auto input{width:16px;height:16px;accent-color:var(--accent)}
+.cal-body{overflow:auto;padding:14px 16px;flex:1 1 auto}.cal-grid{display:grid;grid-template-columns:170px repeat(7,minmax(172px,1fr));gap:6px;min-width:1400px}
+.cal-dh{font-weight:800;font-size:13px;text-align:center;padding:8px 4px;border-radius:10px;background:var(--surface2);border:1px solid var(--line)}.cal-dh.today{background:var(--accent);border-color:var(--accent);color:#3A2A1F}
+.cal-ch{display:flex;flex-direction:column;gap:2px;justify-content:center;padding:8px 10px;border-radius:10px;background:var(--surface2);border:1px solid var(--line)}.cal-ch b{font-size:13px}.cal-ch span{font-size:11px;color:var(--mut)}
+.cal-cell{display:flex;flex-direction:column;gap:5px;padding:6px;border-radius:10px;border:1px solid var(--line);background:#fff;min-height:150px}.cal-cell.today{border:2px solid var(--accent);background:#FFFCF3}.cal-cell.past{background:var(--surface2)}
+.cal-plan-head{font-size:11px;font-weight:800;color:var(--accent-ink);text-transform:uppercase;letter-spacing:.03em}
+.cal-slot{display:grid;grid-template-columns:auto auto 1fr;gap:2px 6px;align-items:start;padding:5px 7px;border-radius:9px;border:1px solid var(--cl);border-left-width:4px;background:var(--cb);color:var(--ct);font-size:12px;cursor:pointer}
+.cal-slot .t{font:700 11px "JetBrains Mono",monospace}.cal-slot .n{font-weight:700;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.cal-slot.open .n{-webkit-line-clamp:unset}
+.cal-slot .s{grid-column:1/-1;font-size:11px;font-weight:700}.cal-slot a{color:inherit;text-decoration:underline}.cal-off .n{text-decoration:line-through;color:var(--mut)}
+.cal-none{color:var(--mut);font-size:12px;padding:4px 2px}.cal-plan,.cal-open{margin-top:auto;border:1px dashed var(--line2);background:var(--surface);color:var(--accent-ink);border-radius:9px;padding:6px 8px;font:700 12px "Manrope",sans-serif;cursor:pointer}.cal-plan:hover,.cal-open:hover{border-color:var(--accent);background:#FFF9E8}.cal-plan:disabled{opacity:.6;cursor:default}
+.cal-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 20px;border-top:1px solid var(--line)}.cal-leg{padding:2px 9px;border-radius:99px;border:1px solid var(--cl);background:var(--cb);color:var(--ct);font-size:11px;font-weight:700}.cal-hint{margin-left:auto;font-size:12px;color:var(--mut)}
+.cal-empty{padding:30px;text-align:center;color:var(--mut)}
