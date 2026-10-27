@@ -395,13 +395,13 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     }
     if (act === 'splan') {
       const action = parts[3], pick = /^([vp]\d{1,2}|sel|morev|morep)$/.test(action);       // выбор и «другие варианты» правят ту же карточку, она остаётся открытой
-      if (!pick && !['ok', 'more', 'skip'].includes(action)) return { note: 'неизвестное действие' };
+      if (!pick && !['ok', 'more', 'skip'].includes(action)) throw new Error(`кнопка «${action}» этому серверу неизвестна (он старее карточки: нужен перезапуск офиса)`);
       const pl = STUDIO.loadPlan(date, chKey), incomplete = action === 'ok' && pl && pl.options && pl.status === 'proposed' && !STUDIO.selectionComplete(pl);       // «Утвердить» при неполном выборе карточку не закрывает
       if (!pick && !incomplete) supersede(`splan:${chKey}:${date}:`);
       spawnPipeline(['studio', 'plan-act', chKey, date, action, ...note]); return {};
     }
     const slot = parts[3], action = parts[4];
-    if (!['post1', 'post2'].includes(slot) || !['ok', 'edit', 'drop', 'pic', 'pic0'].includes(action)) return { note: 'неизвестное действие' };
+    if (!['post1', 'post2'].includes(slot) || !['ok', 'edit', 'drop', 'pic', 'pic0'].includes(action)) throw new Error(`кнопка «${action}» этому серверу неизвестна (он старее карточки: нужен перезапуск офиса)`);
     if ((action === 'edit' || action === 'pic') && !note.length) {
       kvSet('awaiting', JSON.stringify({ kind: 'spost', data: parts.join(':'), mid: srcMsg && srcMsg.id, ts: now() }));
       cap(action === 'pic' ? 'Напишите одним сообщением, что изменить в картинке (например «без банки, пусть будет лупа над чашкой кофе»). Текст поста останется прежним, Диана перерисует только изображение по вашим правкам.' : 'Напишите одним сообщением, что исправить в посте: Дарья поправит, Павел проверит заново, новое превью придёт сюда.'); return {};
@@ -462,7 +462,13 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       if (via === 'dashboard') tg('sendMessage', { chat_id: chatId(), text: `✅ Ответ из дашборда: ${btn.t}${comment ? ': ' + comment : ''}`, disable_notification: true }).catch(() => {});
     }
     if (echo) post({ office: m.office, thread: m.thread, sender: 'nick', text: comment ? `${btn.t}: ${comment}` : btn.t, source: via });      // напечатанный ответ уже в чате, второй раз не дублируем
-    try { await execAction(choice, comment, via, m); } catch (e) { post({ thread: m.thread, sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message }); return { ok: false, error: e.message }; }
+    try { await execAction(choice, comment, via, m); } catch (e) {
+      if (/^s(post|plan):/.test(String(choice))) {             // карточка студии: нажатие не должно пропадать, кнопки возвращаются
+        run("UPDATE messages SET status='open', choice=NULL, answered_ts=NULL, answered_via=NULL WHERE id=?", m.id);
+        if (m.tg_msg && !NO_TG) tg('editMessageReplyMarkup', { chat_id: chatId(), message_id: m.tg_msg, reply_markup: kbOf(m.buttons) }).catch(() => {});
+      }
+      post({ thread: m.thread, sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true }); return { ok: false, error: e.message };
+    }
     return { ok: true };
   }
 

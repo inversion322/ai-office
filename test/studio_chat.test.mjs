@@ -84,6 +84,16 @@ test('превью поста: «Править картинку» ждёт те
   const c3 = card(chat, B('post1')); await chat.answer({ id: c3, choice: `spost:med_detective:${DATE}:post1:pic`, comment: 'сделай светлее', via: 'dashboard' });
   assert.deepEqual(notStarted(db).at(-1), `studio post-act med_detective ${DATE} post1 pic --comment сделай светлее`);
 });
+test('кнопка студии, которую сервер не знает (карточка новее сервера): нажатие не пропадает молча, карточка открыта, сказано почему', async () => {
+  const { chat, db } = make();
+  const id = card(chat, [[['🖼', `spost:med_detective:${DATE}:post1:новое_действие`], ['✅', `spost:med_detective:${DATE}:post1:ok`]]]);
+  const r = await chat.answer({ id, choice: `spost:med_detective:${DATE}:post1:новое_действие`, via: 'telegram' });
+  assert.equal(r.ok, false); assert.match(r.error, /этому серверу неизвестна[\s\S]*перезапуск офиса/);
+  const row = db.prepare('SELECT status, choice FROM messages WHERE id=?').get(id); assert.equal(row.status, 'open', 'карточка снова открыта'); assert.equal(row.choice, null);
+  assert.match(texts(db).at(-1), /Не получилось выполнить: кнопка «новое_действие»/); assert.equal(notStarted(db).length, 0);
+  const r2 = await chat.answer({ id, choice: `spost:med_detective:${DATE}:post1:ok`, via: 'telegram' }); assert.equal(r2.ok, true, 'другая кнопка той же карточки работает'); assert.deepEqual(notStarted(db).at(-1), `studio post-act med_detective ${DATE} post1 ok`);
+  const idp = card(chat, [[['x', `splan:med_detective:${DATE}:новое`]]]); const rp = await chat.answer({ id: idp, choice: `splan:med_detective:${DATE}:новое`, via: 'dashboard' }); assert.equal(rp.ok, false); assert.equal(db.prepare('SELECT status FROM messages WHERE id=?').get(idp).status, 'open');
+});
 test('битые и чужие данные кнопок не запускают этапов', async () => {
   const { chat, db } = make();
   const id = card(chat, [[['x', 'splan:med_detective:вчера:ok'], ['y', `spost:med_detective:${DATE}:post9:ok`], ['z', `splan:med_detective:${DATE}:hack`]]]);
