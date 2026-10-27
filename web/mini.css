@@ -105,3 +105,10 @@ body.chatting .tabbar{display:none}
 .m .card-btns{margin-top:6px}.m.them{align-items:flex-start}.m .dismiss{margin-top:4px}
 
 .vtag{display:inline-block;font:700 10px/16px system-ui,sans-serif;padding:0 6px;border-radius:8px;background:#EEF0FF;color:#364FC7;border:1px solid #C9D2FF;vertical-align:1px;font-style:normal}
+
+/* блоки сотрудников по площадке (Telegram, YouTube, видео, управление): визуально отделены цветной полосой и заголовком */
+.grp{background:var(--surface2,#F6F7FA);border:1px solid var(--line);border-left:5px solid var(--grp,#B8BECB);border-radius:var(--r);padding:8px 8px 10px}
+.grp h3{font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:800;margin:0 4px 8px;display:flex;justify-content:space-between;align-items:baseline;gap:8px;color:var(--grp-ink,#4A5163)}
+.grp h3 small{font-size:11px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--mut)}
+.grp-body{display:grid;gap:8px}
+.grp.tg{--grp:#4C8DF6;--grp-ink:#2457B5}.grp.yt{--grp:#E5484D;--grp-ink:#A3282D}.grp.video{--grp:#12A594;--grp-ink:#0B6F63}.grp.studio{--grp:#8E6CEF;--grp-ink:#5B3FC0}.grp.core{--grp:#F5A623;--grp-ink:#8A5A00}

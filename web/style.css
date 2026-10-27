@@ -37,7 +37,7 @@ button{cursor:pointer;font:inherit}
 .btn-ghost:hover{color:var(--ink);border-color:var(--line2)}
 
 .floor-wrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:10px}
-.floor{position:relative;width:100%;aspect-ratio:16/9;border:4px solid #3A2A1F;overflow:hidden;background:#E8D5AE;box-shadow:0 4px 0 #0002}
+.floor{position:relative;width:100%;aspect-ratio:var(--office-ar,1.7778);border:4px solid #3A2A1F;overflow:hidden;background:#E8D5AE;box-shadow:0 4px 0 #0002}
 .floor canvas{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated;image-rendering:crisp-edges}
 #cvBack{z-index:1}#cvFront{z-index:6;pointer-events:none}
 .wall{position:absolute;left:0;right:0;top:0;height:22%;z-index:2;pointer-events:none}
@@ -51,7 +51,7 @@ button{cursor:pointer;font:inherit}
 .plate span{display:block;font-size:9px;color:#7A4E00;font-weight:500;line-height:1.1}
 .desk.offline .plate{opacity:.6}
 
-.actor{position:absolute;transform:translate(-50%,-100%);transition:left 1.4s cubic-bezier(.45,.05,.3,1),top 1.4s cubic-bezier(.45,.05,.3,1);z-index:5;cursor:pointer;width:8.5%}
+.actor{position:absolute;transform:translate(-50%,-100%);transition:left 1.4s cubic-bezier(.45,.05,.3,1),top 1.4s cubic-bezier(.45,.05,.3,1);z-index:5;cursor:pointer;width:calc(8.5% * 320 / var(--ow,320))}      /* размер утки: доля от 320-пиксельной ширины, на широком холсте пересчитывается */
 .actor svg{width:100%;height:auto;display:block;overflow:visible}
 .actor.offline{filter:grayscale(1) opacity(.45)}
 
@@ -153,7 +153,7 @@ details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-weight:700;f
 .av .duck .wl,.login-duck .duck .wl{animation:none}
 
 /* KPI-табло в отделе поиска работы и подписи кабинетов */
-.board{left:3.4%;transform:none;width:34.6%;top:7%;height:80%;flex-direction:column;align-items:stretch;gap:2px}
+.board{left:calc(3.4% * 320 / var(--ow,320));transform:none;width:calc(34.6% * 320 / var(--ow,320));top:7%;height:80%;flex-direction:column;align-items:stretch;gap:2px}
 .kpi-title{font:700 9px "Pixelify Sans",sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#7A4E00;text-align:center;line-height:1}
 .kpi-cols{display:flex;gap:1%;align-items:flex-end;flex:1;min-height:0}
 .room-label{position:absolute;z-index:7;pointer-events:none;font:600 9px "Pixelify Sans",sans-serif;text-transform:uppercase;letter-spacing:.05em;color:#3A5568;background:#EAF4FA;border:2px solid #5F7F95;padding:0 5px 1px;box-shadow:0 2px 0 #0002}
@@ -260,12 +260,12 @@ details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-weight:700;f
 /* Пропорции экрана: офис ограничен по высоте окна (на большом мониторе он не съедает весь экран), чат получает остальное место.
    --office-h: высота рамки офиса (с отступами). Ширина считается из неё в формате 16:9, на узком экране офис сжимается до ширины колонки. */
 .stage{--office-h:clamp(390px,40vh,640px);display:grid;grid-template-columns:minmax(0,1fr);gap:14px;flex:none}
-.floor-wrap{width:min(100%,calc((var(--office-h) - 22px) * 16 / 9 + 22px));margin:0 auto}
+.floor-wrap{width:min(100%,calc((var(--office-h) - 22px) * var(--office-ar,1.7778) + 22px));margin:0 auto}
 .dock{flex:1 0 340px;min-height:340px}
 .msg{max-width:min(86%,780px)}
 /* ≥1500 px шириной: три справочные карточки встают справа от офиса (в колонку), а не под ним: высота экрана уходит чату */
 @media (min-width:1500px){
-  .stage{grid-template-columns:calc((var(--office-h) - 22px) * 16 / 9 + 22px) minmax(0,1fr)}
+  .stage{grid-template-columns:calc((var(--office-h) - 22px) * var(--office-ar,1.7778) + 22px) minmax(0,1fr)}
   .floor-wrap{margin:0;width:100%}
   .bottom{grid-template-columns:minmax(0,1fr);grid-template-rows:repeat(3,minmax(0,1fr));contain:size;min-width:0}
   .bottom .panel{max-height:none;height:100%;padding:10px 14px}
@@ -293,3 +293,6 @@ details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-weight:700;f
 
 /* узкая плашка «работает» (столы стоят плотно): только метка и шкала, ширина по шагу между столами */
 .work-badge.narrow{padding:3px 6px 5px;min-width:96px}.work-badge.narrow small{margin-bottom:0}.work-badge.narrow .pbar{margin:3px -2px -1px}.work-badge.narrow .pbar span{font-size:8.5px;letter-spacing:-.2px;padding:0 1px}
+
+/* группы сотрудников в боковом списке (офис SMM): вид деятельности и площадка */
+.grp{list-style:none;padding:10px 14px 4px;font:800 10.5px 'Manrope',sans-serif;text-transform:uppercase;letter-spacing:.08em;color:var(--accent-ink);border-bottom:1px solid var(--line);cursor:default;background:var(--surface2)}

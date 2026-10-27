@@ -121,8 +121,11 @@ async function moveTo(id, x, y) {
 function routeBetween(fromRoom, toRoom) {
   const pts = [];
   if (fromRoom !== toRoom) {
-    if (fromRoom && ROOMS[fromRoom]) { pts.push(px2pct(...ROOMS[fromRoom].door.in), px2pct(...ROOMS[fromRoom].door.out)); }
-    if (toRoom && ROOMS[toRoom]) { pts.push(px2pct(...ROOMS[toRoom].door.out), px2pct(...ROOMS[toRoom].door.in)); }
+    const A = fromRoom && ROOMS[fromRoom], B = toRoom && ROOMS[toRoom];
+    if (A) { pts.push(px2pct(...A.door.in), px2pct(...A.door.out)); }
+    // комнат три (офис SMM): между ними двери выходят в коридор под комнатами, иначе утка прошла бы сквозь стекло соседней
+    if (A && B && Object.keys(ROOMS).length > 2) pts.push(px2pct(A.door.out[0], CORR), px2pct(B.door.out[0], CORR));
+    if (B) { pts.push(px2pct(...B.door.out), px2pct(...B.door.in)); }
   }
   return pts;
 }
@@ -134,6 +137,7 @@ async function walkPath(id, pts) {
 }
 function visitSpot(toId) {
   const room = AGENT_ROOM[toId], h = actors[toId].home;
+  if (VISIT_BESIDE && room && room !== 'cap') return [h[0] - 26 / OW * 100, h[1]];      // комнаты с рядом столов: гость встаёт слева от стола того, к кому пришёл
   if (room === 'jobs') return [72 / OW * 100, h[1]];                       // проход между столами отдела
   if (room === 'cap') return [h[0] - 30 / OW * 100, h[1]];
   return [h[0], h[1] + 26 / OH * 100];                                      // у открытых столов встают спереди
@@ -183,6 +187,8 @@ function switchOffice(id) {
 document.addEventListener('click', (e) => { const t = e.target.closest('[data-office]'); if (t) switchOffice(t.dataset.office); });
 
 /* ---------- отрисовка данных ---------- */
+const OFFICE_TEAM_ORDER = ['core', 'studio', 'tg', 'yt', 'video'];
+const OFFICE_TEAM_TITLES = { core: 'Руководство', studio: 'Управление контентом', tg: 'Telegram-канал', yt: 'YouTube-канал', video: 'Видео-студия' };
 function render(s) {
   const agents = s.agents;
   $('sTotal').textContent = agents.length;
@@ -196,6 +202,8 @@ function render(s) {
   $('lblDept').textContent = L.dept; $('lblCap').textContent = L.cap;
   $('lblDept').style.left = ((ROOMS.jobs.x + 5.5) / OW * 100) + '%'; $('lblDept').style.top = ((ROOMS.jobs.y + 2) / OH * 100) + '%';
   $('lblCap').style.left = ((ROOMS.cap.x + 4.7) / OW * 100) + '%'; $('lblCap').style.top = ((ROOMS.cap.y + 4.7) / OH * 100) + '%';
+  const l2 = $('lblDept2'); l2.classList.toggle('hidden', !ROOMS.right);
+  if (ROOMS.right) { l2.textContent = L.dept2 || ''; l2.style.left = ((ROOMS.right.x + 5.5) / OW * 100) + '%'; l2.style.top = ((ROOMS.right.y + 2) / OH * 100) + '%'; }
   $('listTitle').textContent = isSmm ? 'Ролики' : 'Вакансии';
 
   const ST = isSmm ? VSTAGES : STAGES, FN = isSmm ? (s.vfunnel || {}) : s.funnel;
@@ -206,12 +214,19 @@ function render(s) {
   drawOffice(agents, officeTick);
   if (!sceneRunning) setStatusClasses(agents);
 
-  $('agentList').innerHTML = agents.map((a) => `
+  const agentLi = (a) => `
     <li data-id="${esc(a.id)}" class="${selected === a.id ? 'sel' : ''}">
       <div class="av">${duckSVG(a, { size: 48 })}</div>
       <div><b>${esc(a.name)} <span class="dot ${esc(a.status)}"></span></b>
         <small class="title">${esc(a.title || a.role)}</small><small>${esc(a.task || STATUS[a.status])}</small></div>
-    </li>`).join('');
+    </li>`;
+  // SMM: сотрудники сгруппированы по виду деятельности и площадке (Telegram, YouTube, видео, управление), у Ника это отдельные блоки
+  $('agentList').innerHTML = isSmm && agents.some((a) => OFFICE_TEAM_TITLES[a.team])
+    ? [...OFFICE_TEAM_ORDER, null].map((t) => {
+        const items = agents.filter((a) => (t ? a.team === t : !OFFICE_TEAM_TITLES[a.team]));
+        return items.length ? `<li class="grp">${esc(t ? OFFICE_TEAM_TITLES[t] : 'Прочие')}</li>` + items.map(agentLi).join('') : '';
+      }).join('')
+    : agents.map(agentLi).join('');
 
   $('tasks').innerHTML = s.tasks.map((t) => `<li>${t.status === 'running' ? '▶' : '⏱'} ${esc(t.title)}<small>${esc(t.agent_name || '')}</small></li>`).join('') || '<li>Пока пусто</li>';
   $('jobs').innerHTML = (isSmm
@@ -228,7 +243,7 @@ function renderDetail() {
   if (!a) return box.classList.add('hidden');
   box.classList.remove('hidden');
   box.innerHTML = `<h4>${esc(a.name)}</h4><div class="t">${esc(a.title || a.role)}</div>
-    <p>Статус: <b>${STATUS[a.status] || esc(a.status)}</b></p><p>Модель: <b>${esc(a.model)}</b></p><p>Команда: <b>${esc(a.team)}</b></p>
+    <p>Статус: <b>${STATUS[a.status] || esc(a.status)}</b></p><p>Модель: <b>${esc(a.model)}</b></p><p>Команда: <b>${esc(OFFICE_TEAM_TITLES[a.team] || a.team)}</b></p>
     <p>Задача: <b>${esc(a.task || '—')}</b></p>${pbarHTML(a) || `<div class="bar"><i style="width:${Number(a.progress) || 0}%"></i></div>`}
     <button class="btn-primary wide" id="openCfg" data-open="${esc(a.id)}">Промпт и навыки</button>${a.status === 'waiting' || a.status === 'error' ? `<button class="btn-ghost wide clear-wait" data-clearwait="${esc(a.id)}">${a.status === 'waiting' ? 'Снять ожидание' : 'Сбросить ошибку'}</button>` : ''}`;
 }

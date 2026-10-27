@@ -108,6 +108,19 @@
   const VFMT = { A: 'Лента', B: 'Один объект', C: 'Комикс' };
   const variantLabel = (v) => (v && v.variant && v.variant.letter ? v.variant.letter + ' · ' + (VFMT[v.variant.letter] || '') : '');
 
-  const api = { variantLabel, progressBar, parseApi, gateFor, statusText, ago, targetFor, pendingCards, normButtons, squash, threadFilter, isMine, commentMode, splitButtons, isDismiss, clearLabel, esc, STATUS };
+  // Группы сотрудников по виду деятельности и площадке (решение Ника 2026-10-27): Telegram, YouTube, видео, управление. Монтажёры живут в видео-студии и в штат Telegram не входят.
+  const GROUPS = [
+    { id: 'core', title: 'Руководство', cls: 'core' }, { id: 'studio', title: 'Управление контентом', cls: 'studio' }, { id: 'tg', title: 'Telegram-канал', cls: 'tg' },
+    { id: 'yt', title: 'YouTube-канал', cls: 'yt' }, { id: 'video', title: 'Видео-студия', cls: 'video' },
+  ];
+  function groupAgents(agents) {
+    const list = Array.isArray(agents) ? agents : [];
+    const out = GROUPS.map((g) => ({ ...g, agents: list.filter((a) => a.team === g.id) })).filter((g) => g.agents.length);
+    const known = new Set(GROUPS.map((g) => g.id)), rest = list.filter((a) => !known.has(a.team));
+    if (rest.length) out.push({ id: 'other', title: 'Прочие', cls: 'other', agents: rest });
+    return out.map((g) => ({ ...g, working: g.agents.filter((a) => a.status === 'working').length }));
+  }
+
+  const api = { groupAgents, GROUPS, variantLabel, progressBar, parseApi, gateFor, statusText, ago, targetFor, pendingCards, normButtons, squash, threadFilter, isMine, commentMode, splitButtons, isDismiss, clearLabel, esc, STATUS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.MiniCore = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -114,7 +114,12 @@
       (rest.length ? (S.pinOpen ? rest.map(cardHtml).join('') : '') + `<button class="more-cards" data-pinmore>${S.pinOpen ? 'Свернуть' : 'Ещё ' + rest.length + ' · показать'}</button>` : '') : '', 'pin' + cards.map((c) => c.id).join(',') + S.pinOpen);
     pin.classList.toggle('hidden', !cards.length);
     const prio = S.state.priority && S.state.priority.active ? `<div class="prio">⚡ Приоритет: ${C.esc(S.state.priority.label || 'правки ролика')}</div>` : '';
-    put($('crew'), prio + S.state.agents.map(agentHtml).join(''), 'crew');
+    // сотрудники блоками по виду деятельности и площадке; если команды у сотрудников не заданы (старый сервер), один общий список
+    const groups = C.groupAgents(S.state.agents);
+    const crewHtml = groups.length && groups.some((g) => g.id !== 'other')
+      ? groups.map((g) => `<section class="grp ${C.esc(g.cls)}"><h3>${C.esc(g.title)}<small>${g.working ? g.working + ' из ' + g.agents.length + ' работают' : g.agents.length + ' чел.'}</small></h3><div class="grp-body">${g.agents.map(agentHtml).join('')}</div></section>`).join('')
+      : S.state.agents.map(agentHtml).join('');
+    put($('crew'), prio + crewHtml, 'crew');
     $('crew').querySelectorAll('[data-duck]').forEach((el) => { if (!el.firstChild) { const a = S.state.agents.find((x) => x.id === el.dataset.duck); el.innerHTML = duckSVG(a, { size: 56 }); } });
     const v = (S.state.videos || []).slice(0, 4);
     put($('clips'), v.length ? '<h2>Ролики</h2>' + v.map((x) => `<div class="clip"><b>${C.esc(x.title || 'Ролик ' + x.id)}${C.variantLabel(x) ? ` <i class="vtag">${C.esc(C.variantLabel(x))}</i>` : ''}</b><span>${C.esc(stageName(x.stage))}</span></div>`).join('') : '', 'clips');

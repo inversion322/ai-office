@@ -1,6 +1,6 @@
 // Пиксельный офис на canvas 320x180 (масштабируется с чёткими пикселями).
 // cvBack: стена, пол, полы кабинетов, столешницы, мониторы. cvFront: передние панели столов + стеклянные стены поверх уток.
-const OW = 320, OH = 180, INK = '#3A2A1F';
+let OW = 320; const OH = 180, INK = '#3A2A1F';      // OW зависит от офиса (у SMM холст шире: три комнаты в ряд), см. applyOffice
 // Кабинеты (px на canvas). Стекло рисуется поверх уток, поэтому те, кто внутри, видны «за стеклом».
 let ROOMS;   // геометрия комнат задаётся раскладкой офиса (см. OFFICE_LAYOUTS)
 // Раскладки офисов: jobs (поиск работы) и smm (Nick G SMM). Стеклянный отдел с ключом 'jobs' общий по геометрии, подпись разная.
@@ -12,19 +12,37 @@ const OFFICE_LAYOUTS = {
     plants: [[222, 150], [302, 150], [128, 158]],
     desks: { captain: [54.7, 56.7], scout: [14, 47], sender: [31, 47], analyst: [14, 80.6], writer: [31, 80.6] },
     agentRoom: { captain: 'cap', scout: 'jobs', sender: 'jobs', analyst: 'jobs', writer: 'jobs' } },
-  // Студия SMM шире (3 колонки), кабинет Капитана справа. Цепочка: research -> virality -> scriptwriter -> factcheck -> video.
-  smm: { dept: 'Студия SMM', cap: 'Кабинет руководителя',
-    // Пять колонок столов (с трёх монтажёров A, B, C: Кирилл, Матвей, Роман): студия шире, кабинет Капитана уже; подписи и двери считаются из этих чисел
-    rooms: { jobs: { x: 6, y: 43, w: 232, h: 130, door: { in: [226, 126], out: [244, 126] } },
-             cap:  { x: 250, y: 52, w: 66, h: 98, door: { in: [283, 138], out: [283, 160] } } },
-    plants: [[306, 160], [4, 176], [169, 150]],
-    desks: { captain_smm: [88.4, 56.7], research: [10.6, 47], virality: [24.7, 47], scriptwriter: [38.75, 47], factcheck: [52.8, 47], packager: [66.9, 47], video: [10.6, 80.6], video_b: [24.7, 80.6], video_c: [38.75, 80.6], publisher: [66.9, 80.6] },
-    agentRoom: { captain_smm: 'cap', research: 'jobs', virality: 'jobs', scriptwriter: 'jobs', factcheck: 'jobs', video: 'jobs', video_b: 'jobs', video_c: 'jobs', packager: 'jobs', publisher: 'jobs' } },
+  // Офис SMM (решение Ника 2026-10-27): холст шире, три комнаты в ряд. Слева видео-студия (идеи, сценарий, монтаж), по центру кабинет Капитана,
+  // справа студия каналов: Telegram, YouTube и управление контентом. Монтажёры остаются слева и в штат Telegram не входят.
+  // Двери выходят в общий коридор под комнатами (CORR), между комнатами ходят по нему.
+  smm: { ow: 520, dept: 'Видео-студия', dept2: 'Каналы: Telegram и YouTube', cap: 'Кабинет руководителя', visitBeside: true,
+    rooms: { jobs: { x: 6, y: 43, w: 190, h: 130, door: { in: [184, 126], out: [201, 126] } },
+             cap:  { x: 206, y: 52, w: 66, h: 98, door: { in: [239, 138], out: [239, 160] } },
+             right: { x: 282, y: 43, w: 232, h: 130, door: { side: 'left', in: [294, 126], out: [277, 126] } } },
+    plants: [[4, 176], [511, 176], [160, 150]],
+    wall: { win: [136, 182, 300, 346, 420], poster: [228, 392], shelf: 484 },
+    // слева: research, virality, scriptwriter, factcheck / video, video_b, video_c; справа сверху цепочка Telegram, снизу (под дверью свободно) Telegram и YouTube
+    desks: { captain_smm: [45.9, 56.7],
+             research: [6.5, 47], virality: [15.2, 47], scriptwriter: [23.8, 47], factcheck: [32.5, 47],
+             video: [6.5, 80.6], video_b: [15.2, 80.6], video_c: [23.8, 80.6],
+             studio_chief: [59.6, 47], tg_scout: [68.3, 47], tg_author: [76.9, 47], tg_editor: [85.6, 47], tg_artist: [94.2, 47],
+             tg_publisher: [68.3, 80.6], tg_analyst: [76.9, 80.6], packager: [85.6, 80.6], publisher: [94.2, 80.6] },
+    agentRoom: { captain_smm: 'cap', research: 'jobs', virality: 'jobs', scriptwriter: 'jobs', factcheck: 'jobs', video: 'jobs', video_b: 'jobs', video_c: 'jobs',
+                 studio_chief: 'right', tg_scout: 'right', tg_author: 'right', tg_editor: 'right', tg_artist: 'right', tg_publisher: 'right', tg_analyst: 'right', packager: 'right', publisher: 'right' } },
 };
-let OFFICE_DESKS, AGENT_ROOM, PLANTS;
+let OFFICE_DESKS, AGENT_ROOM, PLANTS, WALL, VISIT_BESIDE = false;
+const WALL_DEFAULT = { win: [150, 240], poster: [200], shelf: 281 };
+const CORR = 160;        // коридор под комнатами: по нему ходят из комнаты в комнату
 function applyOffice(id) {
   const L = OFFICE_LAYOUTS[id] || OFFICE_LAYOUTS.jobs;
-  OFFICE_DESKS = L.desks; AGENT_ROOM = L.agentRoom; ROOMS = L.rooms; PLANTS = L.plants;
+  OFFICE_DESKS = L.desks; AGENT_ROOM = L.agentRoom; ROOMS = L.rooms; PLANTS = L.plants; WALL = L.wall || WALL_DEFAULT; VISIT_BESIDE = !!L.visitBeside;
+  OW = L.ow || 320;
+  // ширина холста и пропорции рамки следуют раскладке: высота та же, шире только офис SMM (элементы в % пересчитываются от OW)
+  const cb = document.getElementById('cvBack'), cf = document.getElementById('cvFront');
+  if (cb && cb.width !== OW) cb.width = OW;
+  if (cf && cf.width !== OW) cf.width = OW;
+  const rs = document.documentElement.style;
+  rs.setProperty('--ow', String(OW)); rs.setProperty('--office-ar', (OW / OH).toFixed(4));
   return L;
 }
 applyOffice('jobs');
@@ -48,18 +66,21 @@ function drawWall(c) {
     }
   }
   R(c, 0, 38, OW, 3, '#8F452E'); R(c, 0, 41, OW, 2, '#B89F72');
-  [150, 240].forEach((x) => {
+  WALL.win.forEach((x) => {
     frame(c, x, 6, 34, 26, '#F6EFE0'); R(c, x + 2, 8, 30, 22, '#BFE6FF');
     R(c, x + 16, 8, 2, 22, '#F6EFE0'); R(c, x + 2, 18, 30, 2, '#F6EFE0');
     R(c, x + 5, 11, 7, 2, '#FFFFFF'); R(c, x + 7, 9, 4, 2, '#FFFFFF'); R(c, x + 21, 22, 8, 2, '#FFFFFF');
   });
-  frame(c, 200, 8, 18, 22, '#FFF9E8'); R(c, 204, 12, 10, 8, '#FFD43B'); R(c, 206, 15, 2, 2, INK); R(c, 211, 15, 2, 2, INK); R(c, 208, 17, 4, 2, '#FF8A2B');
-  R(c, 204, 23, 10, 1, '#B89F72'); R(c, 204, 26, 7, 1, '#B89F72');
-  frame(c, 281, 4, 32, 33, '#8A5A3A');
+  WALL.poster.forEach((px) => {
+    frame(c, px, 8, 18, 22, '#FFF9E8'); R(c, px + 4, 12, 10, 8, '#FFD43B'); R(c, px + 6, 15, 2, 2, INK); R(c, px + 11, 15, 2, 2, INK); R(c, px + 8, 17, 4, 2, '#FF8A2B');
+    R(c, px + 4, 23, 10, 1, '#B89F72'); R(c, px + 4, 26, 7, 1, '#B89F72');
+  });
+  const sx = WALL.shelf;
+  frame(c, sx, 4, 32, 33, '#8A5A3A');
   [0, 1, 2].forEach((r) => {
-    R(c, 283, 14 + r * 11, 28, 1, '#5E3B22');
+    R(c, sx + 2, 14 + r * 11, 28, 1, '#5E3B22');
     const cols = ['#C0392B', '#2E86C1', '#27AE60', '#F1C40F', '#8E44AD', '#E67E22'];
-    for (let i = 0; i < 7; i++) { const h = 6 + ((i * 5 + r * 3) % 4); R(c, 284 + i * 4, 14 + r * 11 - h, 3, h, cols[(i + r * 2) % cols.length]); }
+    for (let i = 0; i < 7; i++) { const h = 6 + ((i * 5 + r * 3) % 4); R(c, sx + 3 + i * 4, 14 + r * 11 - h, 3, h, cols[(i + r * 2) % cols.length]); }
   });
 }
 function drawFloor(c) {
@@ -68,11 +89,15 @@ function drawFloor(c) {
     R(c, 0, y + 9, OW, 1, '#CDB68A');
     for (let x = (row * 17) % 48; x < OW; x += 48) R(c, x, y, 1, 10, '#CDB68A');
   }
-  // пол отдела поиска работы: мятная плитка
-  const j = ROOMS.jobs;
-  R(c, j.x, j.y, j.w, j.h, '#D7E5DC');
-  for (let y = j.y; y < j.y + j.h; y += 12) R(c, j.x, y, j.w, 1, '#C3D6CB');
-  for (let x = j.x; x < j.x + j.w; x += 12) R(c, x, j.y, 1, j.h, '#C3D6CB');
+  // полы отделов: мятная плитка (левый отдел) и голубовато-сиреневая (правая студия каналов, чтобы комнаты читались по цвету)
+  const TILE = { jobs: ['#D7E5DC', '#C3D6CB'], right: ['#DFE6F5', '#CBD6EC'] };
+  for (const [key, j] of Object.entries(ROOMS)) {
+    if (key === 'cap') continue;
+    const [fill, line] = TILE[key] || TILE.jobs;
+    R(c, j.x, j.y, j.w, j.h, fill);
+    for (let y = j.y; y < j.y + j.h; y += 12) R(c, j.x, y, j.w, 1, line);
+    for (let x = j.x; x < j.x + j.w; x += 12) R(c, x, j.y, 1, j.h, line);
+  }
   // пол кабинета Капитана: тёмное дерево
   const k = ROOMS.cap;
   R(c, k.x, k.y, k.w, k.h, '#D2BF9C');
@@ -113,13 +138,22 @@ function glassV(f, x, y, w, h) {
   for (let j = y + 12; j < y + h - 2; j += 24) { R(f, x + 1, j, w - 2, 1, 'rgba(95,127,149,.6)'); R(f, x + 1, j + 2, 2, 1, 'rgba(255,255,255,.75)'); }
 }
 const post = (f, x, y, w, h) => { R(f, x, y, w, h, GP); R(f, x, y, 1, h, '#6F94AD'); };
-function drawGlass(f) {
-  // отдел поиска работы: сверху стена здания, дверь в правой стене
-  const j = ROOMS.jobs, doorY1 = j.door.in[1] - 16, doorY2 = j.door.in[1] + 16;
-  glassV(f, j.x, j.y, 4, j.h);
+function glassDept(f, j) {
+  // отдел: сверху стена здания, дверь в правой стене (по умолчанию) или в левой (door.side = 'left')
+  const doorY1 = j.door.in[1] - 16, doorY2 = j.door.in[1] + 16;
   glassH(f, j.x, j.y + j.h - 8, j.w, 8);
+  if (j.door.side === 'left') {
+    glassV(f, j.x + j.w - 4, j.y, 4, j.h);
+    glassV(f, j.x, j.y, 4, doorY1 - j.y); glassV(f, j.x, doorY2, 4, j.y + j.h - doorY2);
+    post(f, j.x - 1, doorY1 - 2, 6, 3); post(f, j.x - 1, doorY2, 6, 3);
+    return;
+  }
+  glassV(f, j.x, j.y, 4, j.h);
   glassV(f, j.x + j.w - 4, j.y, 4, doorY1 - j.y); glassV(f, j.x + j.w - 4, doorY2, 4, j.y + j.h - doorY2);
   post(f, j.x + j.w - 5, doorY1 - 2, 6, 3); post(f, j.x + j.w - 5, doorY2, 6, 3);
+}
+function drawGlass(f) {
+  for (const [key, r] of Object.entries(ROOMS)) if (key !== 'cap') glassDept(f, r);
   // кабинет Капитана: стекло со всех сторон, дверь снизу
   const k = ROOMS.cap, dx1 = k.door.in[0] - 15, dx2 = k.door.in[0] + 15, by = k.y + k.h - 8;
   glassH(f, k.x, k.y, k.w, 6);
