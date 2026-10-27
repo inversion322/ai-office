@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { cleanReport } from './lib_text.mjs';
-import { topicRequest, formatSwitch, classifyAnswer, quickPick, topicMentioned, stripButtonTalk, studioPlanRequest, studioAutoSwitch } from './lib_intent.mjs';
+import { topicRequest, formatSwitch, classifyAnswer, quickPick, topicMentioned, stripButtonTalk, studioPlanRequest, studioAutoSwitch, studioSelection } from './lib_intent.mjs';
 import * as STUDIO from '../scripts/studio.mjs';
 import { probeVideo, checkFormat, sendFields } from '../scripts/video_format.mjs';
 import { variantOf, groupMembers, isGroup, anchorOf, parseVariantComment, enabledFormats, readSettings, writeSettings, FORMATS as VFORMATS } from '../scripts/variants.mjs';
@@ -99,6 +99,21 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     if (rows && kind === 'action' && !ref) for (const x of rows.flat()) if (x.d && !/^(dismiss|confirm|cancel):/.test(x.d)) supersedeExact(x.d, id);
     if (mirrorTg && !tgMsg && office === 'smm') mirror(id, silent).catch((e) => console.error('mirror', e.message));
     return id;
+  }
+  // Правка открытой карточки на месте (выбор в плане дня: текст и кнопки меняются, карточка остаётся одна и в чате, и в Telegram).
+  async function editCard(id, text, buttons) {
+    const m = q('SELECT * FROM messages WHERE id=?', Number(id))[0];
+    if (!m || m.kind !== 'action') return { ok: false, error: 'нет такой карточки' };
+    if (m.status !== 'open') return { ok: false, error: 'карточка уже закрыта' };
+    let rows = Array.isArray(buttons) ? buttons.map((row) => row.map((x) => (Array.isArray(x) ? { t: x[0], d: x[1] } : x))) : null;
+    if (rows && !m.ref) rows = withDismiss(rows);
+    const b = rows ? JSON.stringify(rows) : null, body = String(text || '').slice(0, 12000);
+    run('UPDATE messages SET text=?, buttons=? WHERE id=?', body, b, m.id);
+    if (m.tg_msg && !NO_TG) {
+      const r = await tg('editMessageText', { chat_id: chatId(), message_id: m.tg_msg, text: tgText({ ...m, text: body }).slice(0, 4000), disable_web_page_preview: true, reply_markup: kbOf(b) || { inline_keyboard: [] } }).catch((e) => ({ ok: false, description: e.message }));
+      if (!r.ok && !/not modified/i.test(r.description || '')) console.error('TG edit:', r.description);
+    }
+    return { ok: true };
   }
   function closeCard(o, status, choice, via) {
     run('UPDATE messages SET status=?, choice=?, answered_ts=?, answered_via=? WHERE id=? AND status=\'open\'', status, choice, now(), via, o.id);
@@ -379,8 +394,10 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       return {};
     }
     if (act === 'splan') {
-      const action = parts[3]; if (!['ok', 'more', 'skip'].includes(action)) return { note: 'неизвестное действие' };
-      supersede(`splan:${chKey}:${date}:`);
+      const action = parts[3], pick = /^([vp]\d{1,2}|sel|morev|morep)$/.test(action);       // выбор и «другие варианты» правят ту же карточку, она остаётся открытой
+      if (!pick && !['ok', 'more', 'skip'].includes(action)) return { note: 'неизвестное действие' };
+      const pl = STUDIO.loadPlan(date, chKey), incomplete = action === 'ok' && pl && pl.options && pl.status === 'proposed' && !STUDIO.selectionComplete(pl);       // «Утвердить» при неполном выборе карточку не закрывает
+      if (!pick && !incomplete) supersede(`splan:${chKey}:${date}:`);
       spawnPipeline(['studio', 'plan-act', chKey, date, action, ...note]); return {};
     }
     const slot = parts[3], action = parts[4];
@@ -429,6 +446,12 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     const btn = JSON.parse(m.buttons || '[]').flat().find((b) => b.d === choice);
     if (!btn) return { ok: false, error: 'нет такой кнопки' };
     // «Внести правки» / «Вернуть на правки» без текста (кнопка в Telegram): карточка остаётся открытой, пока не придёт комментарий, иначе кнопка «Принять» пропала бы зря
+    // Выбор в плане дня (видео/посты/«другие варианты») и «Утвердить» при неполном выборе не закрывают карточку: пайплайн правит её на месте.
+    const planOk = /^splan:([^:]+):(\d{4}-\d{2}-\d{2}):ok$/.exec(String(choice)), planDoc = planOk ? STUDIO.loadPlan(planOk[2], planOk[1]) : null;
+    if (/^splan:[^:]+:\d{4}-\d{2}-\d{2}:([vp]\d{1,2}|morev|morep)$/.test(String(choice)) || (planDoc && planDoc.options && planDoc.status === 'proposed' && !STUDIO.selectionComplete(planDoc))) {
+      try { await execAction(choice, undefined, via, m); } catch (e) { return { ok: false, error: e.message }; }
+      return { ok: true, kept: true };
+    }
     if (/^(rework|revise|title):|^spost:[^:]+:[^:]+:[^:]+:edit$/.test(choice) && !(comment && comment.trim())) {
       try { await execAction(choice, undefined, via, m); } catch (e) { return { ok: false, error: e.message }; }
       return { ok: true, pending: 'comment' };
@@ -559,7 +582,7 @@ ${c.hist}
       const pos = [];
       for (const c of q("SELECT * FROM messages WHERE office=? AND kind='action' AND status='open' AND ref IS NULL ORDER BY id DESC", office)) {
         let b = []; try { b = JSON.parse(c.buttons || '[]').flat(); } catch {}
-        const btn = b.find((x) => /^(approve|accept):\d+$/.test(x.d)); if (btn) pos.push({ c, d: btn.d });
+        const btn = b.find((x) => /^(approve|accept):\d+$|^splan:[^:]+:\d{4}-\d{2}-\d{2}:ok$/.test(x.d)); if (btn) pos.push({ c, d: btn.d });
       }
       if (pos.length === 1) {
         answer({ id: pos[0].c.id, choice: pos[0].d, via: source, echo: false }).then((r) => { if (r && r.ok === false) post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + (r.error || ''), mirrorTg: true }); }).catch((e) => console.error('fastAnswer', e.message));
@@ -619,7 +642,17 @@ ${c.hist}
     const tr = office === 'smm' && t === 'captain_smm' ? topicRequest(body, { scored: q("SELECT id, title FROM videos WHERE stage='scored'") }) : null;
     if (tr) { execAction('topics:0', tr.hint, source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true })); return { ok: true, id, note: 'topics' }; }
     const sa = office === 'smm' && t === 'captain_smm' ? studioAutoSwitch(body) : null;
-    if (sa) { const s = STUDIO.writeStudioSettings({ autoPlan: sa.on }); post({ office, thread: 'captain_smm', sender: 'captain_smm', text: sa.on ? `Принято: план дня собирается сам каждый день в ${s.planAt} МСК на следующий день (канал: ${s.autoChannels.join(', ')}). Он придёт карточкой, в работу ничего не пойдёт без вашего «да». Выключить: «выключи автоплан».` : 'Принято: автоматический план дня выключен. Собрать вручную можно в любой момент: «план дня».', mirrorTg: true }); return { ok: true, id, note: 'studio-auto' }; }
+    if (sa) { const s = STUDIO.writeStudioSettings({ autoPlan: sa.on }); post({ office, thread: 'captain_smm', sender: 'captain_smm', text: sa.on ? `Принято: план дня (видео и посты вместе) собирается сам каждый день в ${s.planAt} МСК на следующий день (канал: ${s.autoChannels.join(', ')}). Придёт одна карточка: варианты для видео и отдельно для постов, выбор нажатием номеров или словами («видео 2, посты 1 и 4»). В работу ничего не пойдёт без вашего «да». Выключить: «выключи автоплан».` : 'Принято: автоматический план дня выключен. Собрать вручную можно в любой момент: «план дня».', mirrorTg: true }); return { ok: true, id, note: 'studio-auto' }; }
+    const ss = office === 'smm' && t === 'captain_smm' ? studioSelection(body) : null;
+    if (ss) {
+      const card = q("SELECT buttons FROM messages WHERE office=? AND kind='action' AND status='open' AND buttons LIKE ? ORDER BY id DESC LIMIT 1", office, '%"d":"splan:%:ok"%')[0];
+      const key = card && (/splan:([^:]+):(\d{4}-\d{2}-\d{2}):ok/.exec(card.buttons) || [])[0];
+      if (key) {
+        const [, chKey, date] = key.split(':');
+        execAction(`splan:${chKey}:${date}:${ss.more ? (ss.more === 'video' ? 'morev' : 'morep') : 'sel'}`, ss.more ? undefined : JSON.stringify({ video: ss.video, posts: ss.posts }), source, null).catch((e) => post({ thread: 'captain_smm', sender: 'captain_smm', text: 'Не получилось выполнить: ' + e.message, mirrorTg: true }));
+        return { ok: true, id, note: 'studio-select' };
+      }
+    }
     const sp = office === 'smm' && t === 'captain_smm' ? studioPlanRequest(body) : null;
     if (sp) {
       const ch = STUDIO.studioSettings().autoChannels[0];
@@ -757,6 +790,7 @@ ${c.hist}
     if (req.method === 'POST' && p === '/api/chat/clear-status') { const b = await body(req); json(res, 200, clearStatus(String(b.agent || ''))); return true; }
     if (req.method === 'GET' && p === '/api/priority') { json(res, 200, priority()); return true; }
     if (req.method === 'POST' && p === '/api/priority') { const b = await body(req); json(res, 200, setPriority({ active: !!b.active, video_id: b.video_id, label: b.label })); return true; }
+    if (req.method === 'POST' && p === '/api/chat/edit') { const b = await body(req); json(res, 200, await editCard(b.id, b.text, b.buttons)); return true; }
     if (req.method === 'POST' && p === '/api/chat/post') {
       const b = await body(req);
       const id = post({ office: b.office || 'smm', thread: b.thread, sender: b.sender || b.thread, kind: b.buttons ? 'action' : (b.kind || 'text'), text: b.text, buttons: b.buttons, source: b.source || 'pipeline', tgMsg: b.tg_msg || null, mirrorTg: b.mirror !== false && !b.tg_msg && (b.mirror === true || !!b.buttons) });
@@ -780,5 +814,5 @@ ${c.hist}
     if (o.tg_msg && !NO_TG) tg('editMessageReplyMarkup', { chat_id: chatId(), message_id: o.tg_msg, reply_markup: kbOf(nb) }).catch(() => {});
   }
   const pending = (office) => q("SELECT COUNT(*) c FROM messages WHERE office=? AND status='open'", office)[0].c;
-  return { handle, pending, post, say, answer, incoming, priority, clearStatus };
+  return { handle, pending, post, say, answer, incoming, priority, clearStatus, editCard };
 }

@@ -83,3 +83,51 @@ test('автоплан включается и выключается слово
   assert.equal(chat.incoming({ text: 'включи автоплан', source: 'telegram' }).note, 'studio-auto'); assert.equal(S.studioSettings().autoPlan, true); assert.match(texts(db).at(-1), /собирается сам каждый день в 20:00 МСК/);
   assert.equal(chat.incoming({ text: 'выключи автоплан', source: 'telegram' }).note, 'studio-auto'); assert.equal(S.studioSettings().autoPlan, false); assert.match(texts(db).at(-1), /выключен/);
 });
+
+/* ---- единый план: выбор на карточке ---- */
+const mkOpt = (title, reach) => ({ title, demand: { reach, index: reach / 25 }, evidence: [{ url: 'https://a.org/' + encodeURIComponent(title) }], clear_answer: true, rubric: 'myth' });
+const VT = ['Гомеопатия работает лучше плацебо?', 'Эффект Моцарта делает детей умнее?', 'Давление можно почувствовать по самочувствию?', 'Хруст пальцев вызывает артрит?'], PT = ['Быстрая ходьба продлевает жизнь?', 'Мобильный телефон вызывает рак мозга?', 'Восемь стаканов воды в день обязательны?', 'Чтение в темноте портит зрение навсегда?', 'Сахар делает детей гиперактивными?'];
+function planCard(chat, date, { complete = true } = {}) {
+  const plan = S.newDayPlan({ date, channel: 'med_detective', options: S.makeOptions({ video: VT.map((x, i) => mkOpt(x, 20 - i)), posts: PT.map((x, i) => ({ ...mkOpt(x, 10 - i), freshness: 2 })) }), slots: S.DEFAULT_SLOTS, now: Date.now() });
+  if (!complete) { plan.selection.posts = [0]; S.syncSlots(plan); }
+  const id = chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: S.planCardTextV2(plan, 'Медицинский детектив'), buttons: S.planButtonsV2(plan) }); plan.card_id = id; S.savePlan(plan); return { id, plan };
+}
+const status = (db, id) => db.prepare('SELECT status FROM messages WHERE id=?').get(id).status;
+
+test('выбор кнопкой в плане: карточка остаётся открытой, пайплайн получает выбор; в Telegram кнопки не снимаются (kept)', async () => {
+  const { chat, db } = make(); const { id } = planCard(chat, '2026-12-30');
+  for (const [tok, cmd] of [['v2', 'v2'], ['p3', 'p3'], ['morep', 'morep'], ['morev', 'morev']]) {
+    const r = await chat.answer({ id, choice: `splan:med_detective:2026-12-30:${tok}`, via: 'telegram' });
+    assert.deepEqual([r.ok, r.kept], [true, true], tok); assert.equal(status(db, id), 'open', 'карточка не закрыта после ' + tok);
+    assert.equal(notStarted(db).at(-1), `studio plan-act med_detective 2026-12-30 ${cmd}`);
+  }
+  assert.equal(chat.pending('smm'), 1);
+});
+test('«Утвердить»: при полном выборе карточка закрывается и работа стартует; при неполном карточка остаётся и пайплайн напоминает, чего не хватает', async () => {
+  const { chat, db } = make(); const full = planCard(chat, '2026-12-31');
+  const r = await chat.answer({ id: full.id, choice: 'splan:med_detective:2026-12-31:ok', via: 'dashboard' }); assert.equal(r.kept, undefined); assert.equal(status(db, full.id), 'answered'); assert.equal(notStarted(db).at(-1), 'studio plan-act med_detective 2026-12-31 ok');
+  const part = planCard(chat, '2027-01-01', { complete: false });
+  const r2 = await chat.answer({ id: part.id, choice: 'splan:med_detective:2027-01-01:ok', via: 'dashboard' }); assert.deepEqual([r2.ok, r2.kept], [true, true]); assert.equal(status(db, part.id), 'open');
+  assert.equal(notStarted(db).at(-1), 'studio plan-act med_detective 2027-01-01 ok');
+});
+test('выбор текстом или голосом: «видео 2, посты 1 и 4», «другое видео», «другие посты» работают при открытой карточке плана и молчат без неё', async () => {
+  const { chat, db } = make();
+  assert.notEqual(chat.incoming({ text: 'видео 2, посты 1 и 4', source: 'telegram' }).note, 'studio-select', 'карточки плана нет: это обычное сообщение');
+  const { id } = planCard(chat, '2027-01-02');
+  assert.equal(chat.incoming({ text: 'Возьми видео второе, а посты первый и четвёртый', source: 'telegram' }).note, 'studio-select'); await new Promise((r) => setTimeout(r, 30));
+  assert.equal(notStarted(db).at(-1), 'studio plan-act med_detective 2027-01-02 sel --comment {"video":2,"posts":[1,4]}');
+  chat.incoming({ text: 'другое видео', source: 'telegram' }); await new Promise((r) => setTimeout(r, 30)); assert.equal(notStarted(db).at(-1), 'studio plan-act med_detective 2027-01-02 morev');
+  chat.incoming({ text: 'давай другие посты', source: 'telegram' }); await new Promise((r) => setTimeout(r, 30)); assert.equal(notStarted(db).at(-1), 'studio plan-act med_detective 2027-01-02 morep');
+  assert.equal(status(db, id), 'open', 'ни одна из фраз не закрыла карточку');
+});
+test('«да» / «утверждаю» утверждает единственную открытую карточку плана', async () => {
+  const { chat, db } = make(); const { id } = planCard(chat, '2027-01-03');
+  assert.equal(chat.incoming({ text: 'утверждаю', source: 'telegram' }).note, 'approve'); await new Promise((r) => setTimeout(r, 60));
+  assert.equal(status(db, id), 'answered'); assert.equal(notStarted(db).at(-1), 'studio plan-act med_detective 2027-01-03 ok');
+});
+test('правка карточки на месте: текст и кнопки меняются, закрытую карточку править нельзя', async () => {
+  const { chat, db } = make(); const { id } = planCard(chat, '2027-01-04');
+  assert.deepEqual(await chat.editCard(id, 'новый текст', [[['A', 'x:1']]]), { ok: true });
+  const row = db.prepare('SELECT text, buttons FROM messages WHERE id=?').get(id); assert.equal(row.text, 'новый текст'); assert.deepEqual(JSON.parse(row.buttons).flat().map((b) => b.d), ['x:1', 'dismiss:0']);
+  db.prepare("UPDATE messages SET status='answered' WHERE id=?").run(id); assert.equal((await chat.editCard(id, 'ещё', null)).ok, false); assert.equal((await chat.editCard(99999, 'x', null)).ok, false);
+});

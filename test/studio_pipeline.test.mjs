@@ -1,4 +1,5 @@
-// Конвейер студии: план дня, утверждение, посты (автор → редактор → обложка → превью), публикация по расписанию. Модели, сеть и время подменены.
+// Конвейер студии: единый план дня (варианты для видео и для постов, выбор вместе), посты (автор → редактор → обложка → превью), публикация по расписанию.
+// Модели, сеть, источники канала и время подменены.
 import { test as baseTest } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,82 +13,155 @@ const S = await import('../scripts/studio.mjs');
 const X = await import('../scripts/studio_pipeline.mjs');
 
 const NOW = Date.parse('2026-10-28T05:00:00Z');                    // 08:00 МСК
-const CH = { med: { key: 'med', name: 'Медицинский детектив', tg: 'med_detective_ru', brief: 'Миф о здоровье по первоисточникам, медицина', lang: 'ru', postFormat: 'short', slots: S.DEFAULT_SLOTS, planAt: '08:00' } };
+const CH = { med: { key: 'med', name: 'Медицинский детектив', tg: 'med_detective_ru', brief: 'Миф о здоровье по первоисточникам, медицина', lang: 'ru', postFormat: 'short', slots: S.DEFAULT_SLOTS, planAt: '20:00' } };
 const EV = [{ source: 'Cochrane', url: 'https://www.cochrane.org/a', finding: 'x' }];
 const cand = (title, extra = {}) => ({ title, rubric: 'myth', why_massive: 'почему', evidence: EV, clear_answer: true, queries: [title.split(' ').slice(0, 2).join(' ') + ' ещё'], ...extra });
 const GOOD = (t) => `**${t}** 🤔\n\nКрупный обзор сравнил десятки исследований и не нашёл эффекта сильнее пустышки\n\nСамовнушение помогает чувствовать себя лучше, но это не лечение\n\nА вы как думаете, почему это так популярно?\n\n🔬 Источники: [NHMRC](https://www.nhmrc.gov.au/x), [Cochrane](https://www.cochrane.org/y)\n\nБольше разборов: [подписывайтесь](https://t.me/med_detective_ru)`;
+const DAY = 86400e3;
 
-function mk({ cands = [], reach = {}, used = [], agentFn, cover = 'ok', sendFail = 0, now = NOW } = {}) {
-  const log = { notify: [], agent: [], say: [], spawn: [], script: [], api: [], photos: [], texts: [], runs: [], covers: 0 };
+// Шесть тем для видео и шесть для постов (разные по смыслу), материалы источников разной свежести.
+const VT = ['Гомеопатия работает лучше плацебо?', 'Эффект Моцарта делает детей умнее?', 'Давление можно почувствовать по самочувствию?', 'Хруст пальцев вызывает артрит?', 'Кофе обезвоживает организм?', 'Полнолуние влияет на психику людей?'];
+const PT = ['Быстрая ходьба продлевает жизнь?', 'Мобильный телефон вызывает рак мозга?', 'Восемь стаканов воды в день обязательны?', 'Чтение в темноте портит зрение навсегда?', 'Сахар делает детей гиперактивными?', 'Витамин С лечит простуду быстрее?'];
+const T = [...VT, ...PT];
+const REACH = { [VT[2]]: 17, [VT[0]]: 10, [VT[3]]: 6, [VT[1]]: 4, [VT[4]]: 3, [VT[5]]: 2, [PT[0]]: 20, [PT[1]]: 15, [PT[2]]: 10, [PT[3]]: 5, [PT[4]]: 5, [PT[5]]: 5 };
+const AGE = [0.5, 1, 5, 20, 3, 40];                                 // возраст материала поста в сутках
+const ITEMS = PT.map((t, i) => ({ source: i % 2 ? 'Medical Xpress' : 'ВОЗ (WHO), новости', type: 'rss', title: 'Материал: ' + t, link: `https://example.org/news/${i + 1}`, date: NOW - AGE[i] * DAY, summary: 'суть материала' }));
+const postCand = (i, extra = {}) => cand(PT[i], { items: ['i' + (i + 1)], evidence: [], ...extra });
+const FX = () => ({ cands: VT.map((t) => cand(t)), postCands: PT.map((_, i) => postCand(i)), items: { items: ITEMS, errors: [], okSources: 2 }, reach: REACH });
+
+function mk({ cands = [], postCands = [], items = { items: [], errors: [], okSources: 0 }, reach = {}, used = [], agentFn, cover = 'ok', sendFail = 0, now = NOW, srcs = [{ type: 'rss', identifier: 'https://example.org/feed', name: 'Пример' }], editFail = false } = {}) {
+  const log = { notify: [], agent: [], say: [], spawn: [], script: [], api: [], photos: [], texts: [], runs: [], covers: 0, measure: [], edits: [] };
   let nid = 900, sendFailLeft = sendFail;
   const deps = X.makeDeps({
     api: async (p, b) => { log.api.push([p, b]); return { id: 501 }; },
     agent: async (...a) => { log.agent.push(a); }, say: async (...a) => { log.say.push(a); },
     notify: async (t, b) => { log.notify.push({ t, b }); return ++nid; }, promptOf: async (id) => `persona ${id}`,
-    runAgent: async (o) => { log.runs.push(o); if (o.label === 'scout' || o.label.startsWith('scout')) fs.writeFileSync(o.outFile, JSON.stringify(cands)); else if (agentFn) await agentFn(o); return { code: 0 }; },
-    measureAll: async (list) => list.map((c) => ({ reach: reach[c.title] ?? 0, line: `охват ${reach[c.title] ?? 0}`, level: 'measured' })),
+    editCard: async (id, text, buttons) => { if (editFail) throw new Error('карточка закрыта'); log.edits.push({ id, text, buttons }); },
+    runAgent: async (o) => { log.runs.push(o); if (/^scout/.test(o.label)) fs.writeFileSync(o.outFile, JSON.stringify(cands)); else if (o.label === 'postscout') fs.writeFileSync(o.outFile, JSON.stringify(postCands)); else if (agentFn) await agentFn(o); return { code: 0 }; },
+    measureAll: async (list, ctx = {}) => { log.measure.push({ n: list.length, ctx }); return list.map((c) => ({ reach: reach[c.title] ?? 0, index: (reach[c.title] ?? 0) / 25, line: `охват ${reach[c.title] ?? 0}`, level: 'measured', wiki: null, suggest: { google: 3 }, trends: { matched: [] }, youtube: ctx.youtube === false ? null : { n: 5, median: 2000, max: 90000, hits: 0 } })); },
+    trendsNow: async () => ({ ok: true, items: [{ title: 'Хруст пальцев', traffic: '200+' }, { title: 'Погода завтра', traffic: '1000+' }] }),
+    collectItems: async () => items, sources: () => srcs,
     usedTopics: async () => ({ all: used, counts: {}, feed: { titles: [] } }), spawn: (a) => log.spawn.push(a), spawnScript: (id) => log.script.push(id),
     generateCover: async ({ outFile, prompt }) => { log.covers++; log.lastPrompt = prompt; if (cover === 'ok') { fs.mkdirSync(path.dirname(outFile), { recursive: true }); fs.writeFileSync(outFile, Buffer.alloc(3000, 1)); return { ok: true, file: outFile }; } return { ok: false, error: cover }; },
     sendPhoto: async (chat, file, html) => { if (sendFailLeft-- > 0) throw new Error('Bad Request: chat not found'); log.photos.push({ chat, file, html }); return { message_id: 77 }; },
     sendText: async (chat, html) => { if (sendFailLeft-- > 0) throw new Error('Bad Request: chat not found'); log.texts.push({ chat, html }); return { message_id: 78 }; },
-    now: () => now, channels: () => CH,
+    now: () => NOW === now ? now : now, channels: () => CH,
   });
   return { deps, log };
 }
-const T = ['Гомеопатия работает лучше плацебо?', 'Эффект Моцарта делает детей умнее?', 'Давление можно почувствовать по самочувствию?', 'Хруст пальцев вызывает артрит?', 'Кофе обезвоживает организм?', 'Полнолуние влияет на психику людей?', 'Лёгкие сигареты менее вредны?', 'Витамин С лечит простуду быстрее?', 'Мобильный телефон вызывает рак мозга?', 'Восемь стаканов воды в день обязательны?', 'Чтение в темноте портит зрение навсегда?', 'Сахар делает детей гиперактивными?'];
-const REACH = { [T[2]]: 17, [T[0]]: 10, [T[3]]: 6, [T[1]]: 4, [T[4]]: 3, [T[5]]: 2, [T[6]]: 9, [T[7]]: 1, [T[8]]: 8, [T[9]]: 7, [T[10]]: 5, [T[11]]: 5 };
-const run = (ch, date, slot) => `${date}_${ch}_${slot}`;
-let dayN = 0; const nextDate = () => `2026-11-${String(10 + ++dayN).padStart(2, '0')}`;     // свой день на каждый тест: файлы плана не пересекаются
+let dayN = 0; const nextDate = () => new Date(Date.UTC(2026, 11, 1 + ++dayN)).toISOString().slice(0, 10);     // свой день на каждый тест (настоящие даты, без «31 ноября»): файлы плана не пересекаются
+const btnData = (rows) => rows.flat().map((b) => b[1]);
 
-test('план дня: три разные темы, самая востребованная на ролик, карточка с тремя кнопками', async () => {
-  const date = nextDate(), { deps, log } = mk({ cands: [...T.map((t) => cand(t)), { title: 'Без источников тема про погоду', evidence: [], clear_answer: true }], reach: REACH, used: ['Хруст пальцев и артрит: правда ли'] });
-  const r = await X.studioPlan('med', { date, deps });
-  assert.equal(r.plan.slots.length, 3);
-  assert.equal(S.slotOf(r.plan, 'video').title, T[2], 'самый востребованный (17) на видео');
-  assert.deepEqual(r.plan.slots.map((x) => x.slot), ['post1', 'video', 'post2']);
-  const titles = r.plan.slots.map((x) => x.title); assert.ok(!titles.includes(T[3]), 'тема, уже занятая в ленте канала, отсеяна'); assert.ok(!titles.some((x) => /погод/.test(x)), 'без первоисточника тема не берётся');
-  const card = log.notify.at(-1); assert.match(card.t, /План дня/); assert.equal(card.b.flat().length, 3); assert.match(card.b[0][0][1], new RegExp(`^splan:med:${date}:ok$`));
-  assert.ok(log.agent.some((a) => a[0] === 'tg_scout' && a[1] === 'working') && log.agent.some((a) => a[0] === 'studio_chief' && a[1] === 'waiting'));
-  const scout = log.runs.find((x) => x.label === 'scout'); assert.equal(scout.profile, 'studio_research'); assert.equal(scout.agentId, 'tg_scout');
-  assert.equal(S.loadPlan(date, 'med').status, 'proposed');
+test('единый план: варианты для видео и для постов раздельно, выбор по умолчанию, карточка с кнопками выбора', async () => {
+  const date = nextDate(), { deps, log } = mk({ ...FX() });
+  const r = await X.studioPlan('med', { date, deps }); const plan = r.plan;
+  assert.equal(plan.options.video.length, 4); assert.equal(plan.options.posts.length, 5); assert.equal(plan.options.video[0].title, VT[2], 'самый востребованный по замеру первым');
+  assert.equal(plan.options.posts[0].title, PT[0], 'у постов выше свежий материал и интерес'); assert.ok(plan.options.posts.every((c) => c.from_sources && c.evidence.length), 'у каждого поста есть первоисточник из материалов канала');
+  assert.equal(plan.options.posts[0].evidence[0].url, 'https://example.org/news/1'); assert.equal(plan.options.posts[0].sources_meta[0].name, 'ВОЗ (WHO), новости');
+  assert.deepEqual(plan.selection, { video: 0, posts: [0, 1] }); assert.deepEqual(plan.slots.map((s) => [s.slot, s.title]), [['post1', PT[0]], ['video', VT[2]], ['post2', PT[1]]]);
+  const scout = log.runs.find((x) => x.label === 'scout'), ps = log.runs.find((x) => x.label === 'postscout');
+  assert.equal(scout.profile, 'studio_research'); assert.match(scout.task, /Хруст пальцев, Погода завтра/, 'тренды Google переданы поиску видео'); assert.match(scout.task, /РОЛИКА Shorts/);
+  assert.equal(ps.agentId, 'tg_scout'); assert.match(ps.task, /source_items\.json/); assert.match(ps.task, /ПОСТОВ Telegram/);
+  assert.equal(log.measure.length, 2); assert.equal(log.measure[0].ctx.trends.ok, true); assert.equal(log.measure[1].ctx.youtube, false, 'темы постов не тратят квоту YouTube'); assert.equal(log.measure[1].ctx.trends.ok, true);
+  const card = log.notify.at(-1); assert.match(card.t, /🎬 ВИДЕО в 18:30[\s\S]*📝 ПОСТЫ в 12:00 и 19:00/); assert.match(card.t, /📰 ВОЗ \(WHO\), новости, сегодня|📰 ВОЗ \(WHO\), новости, 0 дн|📰 ВОЗ/);
+  const d = btnData(card.b); assert.equal(d[0], `splan:med:${date}:ok`); assert.deepEqual(d.slice(1, 5), [1, 2, 3, 4].map((n) => `splan:med:${date}:v${n}`)); assert.deepEqual(d.slice(5, 10), [1, 2, 3, 4, 5].map((n) => `splan:med:${date}:p${n}`)); assert.deepEqual(d.slice(10), [`splan:med:${date}:morev`, `splan:med:${date}:morep`, `splan:med:${date}:skip`]);
+  assert.match(card.b[0][0][0], /Утвердить: видео 1 \+ посты 1, 2/); assert.ok(card.t.length < 3900); assert.equal(plan.card_id, 901);
+  assert.equal(S.loadPlan(date, 'med').status, 'proposed'); assert.ok(log.agent.some((a) => a[0] === 'studio_chief' && a[1] === 'waiting'));
 });
-test('план дня: тем с источниками меньше трёх или все похожи — плана нет, кнопка «Повторить»', async () => {
-  const d1 = nextDate(), a = mk({ cands: [cand(T[0]), cand(T[1])], reach: REACH });
-  assert.equal((await X.studioPlan('med', { date: d1, deps: a.deps })).plan, null); assert.match(a.log.notify.at(-1).t, /2 из трёх/); assert.match(a.log.notify.at(-1).b[0][0][1], /:more$/); assert.equal(S.loadPlan(d1, 'med'), null);
-  const d2 = nextDate(), b = mk({ cands: [cand('Лёгкие сигареты менее вредны для здоровья?'), cand('Правда ли, что лёгкие сигареты менее вредны?'), cand('Лёгкие сигареты менее вредны: миф?')], reach: { 'Лёгкие сигареты менее вредны для здоровья?': 9 } });
-  assert.equal((await X.studioPlan('med', { date: d2, deps: b.deps })).plan, null);
+test('источники канала молчат: посты берутся из общего поиска (запас видео), в плане честная пометка', async () => {
+  const date = nextDate(), f = FX(), { deps, log } = mk({ ...f, items: { items: [], errors: [{ source: 'ВОЗ', error: 'HTTP 403' }], okSources: 0 }, postCands: [] });
+  const r = await X.studioPlan('med', { date, deps });
+  assert.equal(r.plan.options.posts.length >= 2, true); assert.ok(r.plan.options.posts.every((c) => c.fallback), 'посты из запаса видео-поиска помечены'); assert.equal(log.runs.filter((x) => x.label === 'postscout').length, 0, 'без материалов второй Opus не запускается');
+  assert.equal(r.plan.sources.ok, 0);
+});
+test('мало тем — плана нет, кнопка «Повторить»', async () => {
+  const d1 = nextDate(), a = mk({ cands: [cand(VT[0])], reach: REACH });
+  assert.equal((await X.studioPlan('med', { date: d1, deps: a.deps })).plan, null); assert.match(a.log.notify.at(-1).t, /набралось 1/); assert.equal(a.log.notify.at(-1).b[0][0][1], `splan_new:med:${d1}`); assert.equal(S.loadPlan(d1, 'med'), null);
 });
 test('второй план на тот же день: прежний уходит в архив, его темы остаются занятыми; утверждённый план не затирается', async () => {
-  const date = nextDate(), a = mk({ cands: T.map((t) => cand(t)), reach: REACH });
-  await X.studioPlan('med', { date, deps: a.deps });
-  const b = mk({ cands: T.map((t) => cand(t)), reach: REACH, used: [] });
-  const r2 = await X.studioPlan('med', { date, deps: b.deps });
-  const first = new Set(S.plannedTitles('med', { now: NOW })); assert.ok(first.size >= 3);
-  const used = fs.readFileSync(path.join(r2.dir, 'used_topics.txt'), 'utf8'); assert.ok(used.includes(T[2]), 'темы прежнего плана переданы Глебу как занятые');
+  const date = nextDate(), a = mk({ ...FX() }); await X.studioPlan('med', { date, deps: a.deps });
+  const b = mk({ ...FX() }); const r2 = await X.studioPlan('med', { date, deps: b.deps });
+  const used = fs.readFileSync(path.join(r2.dir, 'used_topics.txt'), 'utf8'); assert.ok(used.includes(VT[2]) && used.includes(PT[0]), 'темы прежнего плана переданы Глебу как занятые');
+  assert.ok(!r2.plan.options.video.some((c) => c.title === VT[2]), 'выбранные вчера темы в новый список не вернулись');
   await X.studioPlanAct('med', date, 'ok', { deps: b.deps });
-  const c = mk({ cands: T.map((t) => cand(t)), reach: REACH }); const r3 = await X.studioPlan('med', { date, deps: c.deps });
-  assert.equal(r3.kept, true); assert.equal(S.loadPlan(date, 'med').status, 'approved'); assert.match(c.log.notify.at(-1).t, /уже утверждён/);
+  const c = mk({ ...FX() }); const r3 = await X.studioPlan('med', { date, deps: c.deps });
+  assert.equal(r3.kept, true); assert.equal(S.loadPlan(date, 'med').status, 'approved'); assert.match(c.log.notify.at(-1).t, /уже утверждён/); assert.equal(c.log.runs.length, 0, 'поиск не запускался');
+});
+const sel = async (deps, date, action, comment) => X.studioPlanAct('med', date, action, { deps, comment });
+test('выбор кнопками: видео, посты (повторное нажатие снимает, третий вытесняет), карточка правится на месте', async () => {
+  const date = nextDate(), { deps, log } = mk({ ...FX() }); await X.studioPlan('med', { date, deps });
+  await sel(deps, date, 'v2'); let plan = S.loadPlan(date, 'med'); assert.equal(plan.selection.video, 1); assert.equal(S.slotOf(plan, 'video').title, plan.options.video[1].title);
+  assert.equal(log.edits.length, 1); assert.equal(log.edits[0].id, 901); assert.match(log.edits[0].text, /Выбрано: видео 2; посты 1 и 2/); assert.equal(log.notify.length, 1, 'новая карточка не создавалась');
+  await sel(deps, date, 'p2'); plan = S.loadPlan(date, 'med'); assert.deepEqual(plan.selection.posts, [0]); assert.match(log.edits.at(-1).buttons[0][0][0], /Выберите: ещё один пост/);
+  await sel(deps, date, 'p3'); await sel(deps, date, 'p4'); plan = S.loadPlan(date, 'med'); assert.equal(plan.selection.posts.length, 2); assert.ok(plan.selection.posts.includes(3) && !plan.selection.posts.includes(0), 'третий вытеснил самый давний');
+  assert.match(log.edits.at(-1).buttons[0][0][0], /Утвердить: видео 2 \+ посты 3, 4/);
+  assert.equal(S.slotOf(plan, 'post1').title, plan.options.posts[2].title, 'первый по номеру пост идёт в первый слот');
+});
+test('похожие темы в одном дне не выбираются: карточка остаётся прежней и объясняет почему', async () => {
+  const date = nextDate(), { deps, log } = mk({ ...FX() });
+  const vid = [cand('Лёгкие сигареты менее вредны для здоровья?', { demand: { reach: 20, index: 0.8 } }), cand(VT[0], { demand: { reach: 10, index: 0.4 } })];
+  const posts = [cand(PT[0], { freshness: 3, from_sources: true }), cand('Правда ли, что лёгкие сигареты менее вредны?', { freshness: 2, from_sources: true }), cand(PT[2], { freshness: 1, from_sources: true })];
+  const plan = S.newDayPlan({ date, channel: 'med', options: { video: vid, video_spare: [], posts, posts_spare: [] }, slots: S.DEFAULT_SLOTS, now: NOW }); plan.card_id = 901; S.savePlan(plan);
+  assert.deepEqual(plan.selection.posts, [0, 2], 'по умолчанию похожий пост не берётся');
+  const before = JSON.stringify(S.loadPlan(date, 'med').selection); const res = await sel(deps, date, 'p2');
+  assert.equal(res.ok, false); assert.equal(JSON.stringify(S.loadPlan(date, 'med').selection), before); assert.match(log.edits.at(-1).text, /⚠️ Пост «.*» слишком похож на выбранное видео/);
+  assert.equal((await sel(deps, date, 'sel', JSON.stringify({ video: 2, posts: [1, 2] }))).ok, true, 'видео другое: теперь пост 2 не конфликтует'); assert.equal((await sel(deps, date, 'v1')).ok, false);
+});
+test('выбор текстом: видео и посты сразу; больше двух постов и несуществующие номера отклоняются', async () => {
+  const date = nextDate(), { deps, log } = mk({ ...FX() }); await X.studioPlan('med', { date, deps });
+  const ok = await sel(deps, date, 'sel', JSON.stringify({ video: 3, posts: [1, 4] })); assert.equal(ok.ok, true); const plan = S.loadPlan(date, 'med'); assert.deepEqual([plan.selection.video, plan.selection.posts], [2, [0, 3]]);
+  assert.equal((await sel(deps, date, 'sel', JSON.stringify({ video: null, posts: [1, 2, 3] }))).ok, false); assert.match(log.edits.at(-1).text, /не больше двух/);
+  assert.equal((await sel(deps, date, 'sel', JSON.stringify({ video: 9, posts: null }))).ok, false); assert.match(log.edits.at(-1).text, /Видео №9 нет в списке/);
+  assert.equal((await sel(deps, date, 'sel', 'не json')).ok, false);
+});
+test('«Утвердить» при неполном выборе не запускает работу; закрытая карточка заменяется новой', async () => {
+  const date = nextDate(), { deps, log } = mk({ ...FX(), editFail: true }); await X.studioPlan('med', { date, deps });
+  await sel(deps, date, 'p1'); await sel(deps, date, 'p2');
+  const n = log.notify.length; const r = await X.studioPlanAct('med', date, 'ok', { deps }); assert.equal(r.ok, false); assert.equal(r.incomplete, true); assert.equal(log.script.length, 0); assert.equal(S.loadPlan(date, 'med').status, 'proposed');
+  assert.ok(log.notify.length > n, 'карточку нельзя править на месте (закрыта): пришла новая'); assert.match(log.notify.at(-1).t, /Утвердить нельзя: сначала выберите два поста/); assert.equal(S.loadPlan(date, 'med').card_id, log.notify.length ? 900 + log.notify.length : 0);
+});
+test('«Другие посты» и «Другое видео»: запас показывается сразу, без поиска; без запаса идёт отдельный поиск только для этого вида', async () => {
+  const date = nextDate(), f = FX(); f.postCands = [...PT, 'Корь можно вылечить народными средствами?', 'Холодная вода закаливает иммунитет?'].map((t, i) => postCand(Math.min(i, 5), { title: t })); f.reach = { ...f.reach, 'Корь можно вылечить народными средствами?': 4, 'Холодная вода закаливает иммунитет?': 3 };
+  const { deps, log } = mk(f); await X.studioPlan('med', { date, deps });
+  let plan = S.loadPlan(date, 'med'); assert.equal(plan.options.posts.length, 5); assert.equal(plan.options.posts_spare.length, 3);
+  const runs0 = log.runs.length; const r = await sel(deps, date, 'morep'); assert.equal(r.from, 'spare'); plan = S.loadPlan(date, 'med');
+  assert.equal(plan.options.posts.length, 3); assert.equal(plan.options.posts_spare.length, 0); assert.equal(log.runs.length, runs0, 'запас показан без поиска'); assert.match(log.edits.at(-1).text, /Показал следующие варианты для постов/);
+  assert.equal(plan.selection.posts.length, 2, 'выбор пересчитан под новые варианты');
+  const r2 = await sel(deps, date, 'morep'); assert.equal(r2.from, 'search'); plan = S.loadPlan(date, 'med'); assert.ok(plan.busy); assert.deepEqual(log.spawn.at(-1), ['plan-more', 'med', date, 'posts']); assert.match(log.edits.at(-1).text, /⏳ Ищу другие варианты для постов/); assert.ok(!btnData(log.edits.at(-1).buttons).some((d) => /more/.test(d)), 'пока идёт поиск, кнопок «другие» нет');
+  const r3 = await sel(deps, date, 'morep'); assert.equal(r3.ok, false); assert.match(log.notify.at(-1).t, /уже идёт/);
+});
+test('plan-more: новый поиск обновляет только свой вид, старые показанные темы не возвращаются, busy снимается', async () => {
+  const date = nextDate(), f = FX(); const { deps, log } = mk(f); await X.studioPlan('med', { date, deps });
+  for (let i = 0; i < 2; i++) { await sel(deps, date, 'morev'); }      // запас видео (2 темы) показан, затем запрос нового поиска
+  let plan = S.loadPlan(date, 'med'); assert.ok(plan.busy || plan.options.video.length === 2);
+  if (!plan.busy) await sel(deps, date, 'morev'); plan = S.loadPlan(date, 'med'); assert.ok(plan.busy, 'запас кончился: поиск заказан');
+  const fresh = ['Сквозняк вызывает простуду?', 'Холодный душ укрепляет иммунитет?'];
+  const m2 = mk({ cands: fresh.map((t) => cand(t)), reach: { [fresh[0]]: 30, [fresh[1]]: 8 }, used: [] }); const shownBefore = new Set(plan.seen);
+  const res = await X.studioPlanMore('med', date, 'video', { deps: m2.deps }); assert.equal(res.ok, true);
+  plan = S.loadPlan(date, 'med'); assert.equal(plan.busy, null); assert.equal(plan.options.video[0].title, fresh[0]); assert.ok(plan.options.video.every((c) => !shownBefore.has(c.title) || fresh.includes(c.title)), 'ранее показанные темы не вернулись');
+  assert.equal(plan.options.posts.length, 5, 'посты не тронуты'); assert.match(m2.log.edits.at(-1).text, /Новые варианты для видео показаны/);
+  const used = fs.readFileSync(path.join(plan.run_dir, 'used_topics.txt'), 'utf8'); assert.ok(used.includes(VT[2]), 'показанное вошло в список занятых для поиска');
 });
 test('утверждение плана: ролик уходит Ксении (строка в базе, сценарий), посты Дарье; второе «да» ничего не запускает', async () => {
-  const date = nextDate(), { deps, log } = mk({ cands: T.map((t) => cand(t)), reach: REACH });
-  await X.studioPlan('med', { date, deps });
+  const date = nextDate(), { deps, log } = mk({ ...FX() }); await X.studioPlan('med', { date, deps });
   const r = await X.studioPlanAct('med', date, 'ok', { deps }); assert.equal(r.ok, true);
-  const v = log.api.find(([p]) => p === '/api/video')[1]; assert.equal(v.title, T[2]); assert.equal(v.stage, 'script'); assert.equal(JSON.parse(v.notes).source, 'studio');
+  const v = log.api.find(([p]) => p === '/api/video')[1]; assert.equal(v.title, VT[2]); assert.equal(v.stage, 'script'); const notes = JSON.parse(v.notes); assert.equal(notes.source, 'studio'); assert.equal(notes.studio.slot_time, '18:30');
   assert.deepEqual(log.script, [501]); assert.deepEqual(log.spawn.at(-1), ['posts', 'med', date]);
   const plan = S.loadPlan(date, 'med'); assert.equal(plan.status, 'approved'); assert.equal(S.slotOf(plan, 'video').videoId, 501); assert.equal(S.slotOf(plan, 'post1').status, 'queued');
-  assert.match(log.notify.at(-1).t, /План на .* принят/);
+  assert.match(log.notify.at(-1).t, /План на .* принят/); assert.equal((await sel(deps, date, 'v2')).ok, false, 'после утверждения выбор не меняется');
   const n = log.spawn.length; const again = await X.studioPlanAct('med', date, 'ok', { deps }); assert.equal(again.ok, false); assert.equal(log.spawn.length, n); assert.equal(log.script.length, 1);
 });
-test('«Другие темы» и «Пропустить день»', async () => {
-  const d1 = nextDate(), a = mk({ cands: T.map((t) => cand(t)), reach: REACH }); await X.studioPlan('med', { date: d1, deps: a.deps });
-  await X.studioPlanAct('med', d1, 'more', { deps: a.deps }); assert.deepEqual(a.log.spawn.at(-1).slice(0, 4), ['plan', 'med', '--date', d1]); assert.equal(S.loadPlan(d1, 'med').status, 'replaced');
-  assert.equal((await X.studioPlanAct('med', d1, 'ok', { deps: a.deps })).ok, false, 'заменённый план утвердить нельзя'); assert.equal(a.log.script.length, 0);
-  const d2 = nextDate(), b = mk({ cands: T.map((t) => cand(t)), reach: REACH }); await X.studioPlan('med', { date: d2, deps: b.deps });
+test('старый план без вариантов (прежний формат) утверждается как раньше; «Пропустить день»; нет такого плана', async () => {
+  const date = nextDate(), { deps, log } = mk({}); const picks = S.pickDayTopics([{ title: 'Тема раз про сон', demand: { reach: 9 }, evidence: EV }, { title: 'Тема два про зубы', demand: { reach: 8 }, evidence: EV }, { title: 'Тема три про спину', demand: { reach: 7 }, evidence: EV }]);
+  S.savePlan(S.buildPlan({ date, channel: 'med', picks, slots: S.DEFAULT_SLOTS, now: NOW }));
+  assert.equal((await sel(deps, date, 'v2')).ok, false); assert.match(log.notify.at(-1).t, /старом формате/);
+  assert.equal((await X.studioPlanAct('med', date, 'ok', { deps })).ok, true); assert.equal(log.script.length, 1);
+  const d2 = nextDate(), b = mk({ ...FX() }); await X.studioPlan('med', { date: d2, deps: b.deps });
   await X.studioPlanAct('med', d2, 'skip', { deps: b.deps }); assert.equal(S.loadPlan(d2, 'med').status, 'skipped'); assert.equal(b.log.spawn.length, 0);
-  assert.equal((await X.studioPlanAct('med', '2000-01-01', 'ok', { deps: b.deps })).ok, false, 'нет такого плана');
+  assert.equal((await X.studioPlanAct('med', d2, 'v1', { deps: b.deps })).ok, false, 'пропущенный план не меняется'); assert.equal((await X.studioPlanAct('med', '2000-01-01', 'ok', { deps: b.deps })).ok, false, 'нет такого плана');
 });
 
-async function planned() { const date = nextDate(), m = mk({ cands: T.map((t) => cand(t)), reach: REACH }); await X.studioPlan('med', { date, deps: m.deps }); return { date, ...m }; }
+async function planned() { const date = nextDate(), m = mk({ ...FX() }); await X.studioPlan('med', { date, deps: m.deps }); return { date, ...m }; }
 const author = (text) => async (o) => {
   if (o.label.startsWith('author')) fs.writeFileSync(o.outFile, JSON.stringify({ text: typeof text === 'function' ? text(o) : text, cover_brief: { scene: 'a magnifying glass over a pill', mood: 'calm', text_on_image: '' } }));
   else fs.writeFileSync(o.outFile, JSON.stringify({ verdict: 'ok', text: fs.existsSync(path.join(path.dirname(o.outFile), 'candidate.json')) ? JSON.parse(fs.readFileSync(path.join(path.dirname(o.outFile), 'candidate.json'), 'utf8')).text : '', issues: [], facts_ok: true }));
@@ -113,7 +187,7 @@ test('пост: замечания кода (нет CTA) возвращаютс�
     return { code: 0 };
   };
   const r = await X.studioPost('med', date, 'post1', { deps: { ...deps, runAgent: fn } }); assert.equal(r.ok, true);
-  const labels = log.runs.map((x) => x.label); assert.deepEqual(labels.filter((l) => l !== 'scout'), ['author1', 'author2', 'editor2', 'author3', 'editor3'], 'редактора не зовут, пока код видит нарушение');
+  const labels = log.runs.map((x) => x.label); assert.deepEqual(labels.filter((l) => !/scout/.test(l)), ['author1', 'author2', 'editor2', 'author3', 'editor3'], 'редактора не зовут, пока код видит нарушение');
   assert.match(log.runs.find((x) => x.label === 'author2').task, /CTA-подписки/); assert.match(log.runs.find((x) => x.label === 'author3').task, /факт про 2015 год не подтверждён[\s\S]*Прошлый текст/);
 });
 test('пост: три круга без успеха — пост «не прошёл проверку», обложка не тратится, кнопки «Ещё раз» и «Снять»', async () => {
@@ -126,7 +200,7 @@ test('пост: обложка не получилась (ключ не прин
   const { date, deps, log } = await planned(); const bad = { ...deps, runAgent: async (o) => { log.runs.push(o); await author(GOOD('Хук без картинки'))(o); return { code: 0 }; }, generateCover: async () => { log.covers++; return { ok: false, error: 'fal.ai ответил 401 (ключ не принят)' }; } };
   const r = await X.studioPost('med', date, 'post1', { deps: bad }); assert.equal(r.ok, true); assert.equal(r.cover, null); assert.equal(log.covers, 1, 'при отказе по ключу вторая попытка не нужна');
   assert.equal(log.photos.length, 0); assert.equal(log.texts.length, 1); assert.match(log.notify.at(-1).t, /Обложки нет: fal\.ai ответил 401/);
-  const day = nextDate(); const pl2 = mk({ cands: T.map((t) => cand(t)), reach: REACH }); await X.studioPlan('med', { date: day, deps: pl2.deps });
+  const day = nextDate(); const pl2 = mk({ ...FX() }); await X.studioPlan('med', { date: day, deps: pl2.deps });
   fs.writeFileSync(path.join(S.studioDir(), 'image_count.json'), JSON.stringify({ day, count: 99 }));
   const m2 = mk({ cands: [], agentFn: author(GOOD('Хук лимит')) }); const r2 = await X.studioPost('med', day, 'post2', { deps: { ...pl2.deps, runAgent: m2.deps.runAgent, notify: m2.deps.notify, generateCover: async () => { throw new Error('не должен вызываться'); } } });
   assert.equal(r2.cover, null); assert.match(m2.log.notify.at(-1).t, /лимит картинок/);

@@ -140,3 +140,25 @@ export function studioAutoSwitch(text) {
   if (/(^|\s)(включи|включай|включить|запусти|запускай|включаем)(?=\s|$)/.test(t)) return { on: true };
   return null;
 }
+
+// Выбор на карточке плана дня текстом или голосом: «видео 2, посты 1 и 4», «возьми видео второе, а посты первый и четвёртый», «другое видео», «другие посты».
+// -> { video: n|null, posts: [n…]|null } (номера с единицы) | { more: 'video'|'posts' } | null. Применяется, только когда в чате висит карточка плана.
+const NUM_WORD = { один: 1, одна: 1, одно: 1, первый: 1, первое: 1, первую: 1, первая: 1, два: 2, две: 2, второй: 2, второе: 2, вторую: 2, вторая: 2, три: 3, третий: 3, третье: 3, третью: 3, третья: 3, четыре: 4, четвертый: 4, четвертое: 4, четвертую: 4, четвертая: 4, пять: 5, пятый: 5, пятое: 5, пятую: 5, пятая: 5 };
+export function studioSelection(text) {
+  const t = norm(text), w = t.split(' ').filter(Boolean); if (!w.length || w.length > 30 || QUESTION.test(t)) return null;
+  const isVideo = (x) => x === 'видео' || /^ролик/.test(x), isPost = (x) => /^пост/.test(x);
+  const hasVideo = w.some(isVideo), hasPost = w.some(isPost), hasNum = w.some((x) => /^\d{1,2}$/.test(x) || NUM_WORD[x]);
+  if (!hasNum) {      // «другое видео» / «другие посты» / «ещё варианты для постов»
+    const more = w.some((x) => /^(друг(ое|ие|ой|ую)|нов(ое|ые|ый|ую)|еще|других|другим)$/.test(x));
+    if (more && hasVideo !== hasPost) return { more: hasVideo ? 'video' : 'posts' };
+    return null;
+  }
+  if (!hasVideo && !hasPost) return null;
+  let mode = '', video = null; const posts = [];
+  for (const x of w) {
+    if (isVideo(x)) mode = 'v'; else if (isPost(x)) mode = 'p';
+    else if (mode && (/^\d{1,2}$/.test(x) || NUM_WORD[x])) { const n = /^\d/.test(x) ? Number(x) : NUM_WORD[x]; if (n < 1 || n > 9) continue; if (mode === 'v') { if (video === null) video = n; } else if (!posts.includes(n)) posts.push(n); }
+  }
+  if (video === null && !posts.length) return null;
+  return { video, posts: posts.length ? posts : null };
+}

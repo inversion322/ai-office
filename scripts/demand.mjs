@@ -159,7 +159,7 @@ export async function collectRaw(cand, ctx = {}) {
   const [wiki, sug, yt] = await Promise.all([
     wikiMeasure(cand.wiki_article, queries, { fetch, now }).catch(() => ({ ok: false, error: 'сбой' })),
     suggestCounts(queries, { fetch }).catch(() => null),
-    youtubeStats(queries, { fetch, keys, now }).catch(() => ({ ok: false, error: 'сбой' })),
+    ctx.youtube === false ? Promise.resolve({ ok: false, error: 'нет ключа' }) : youtubeStats(queries, { fetch, keys, now }).catch(() => ({ ok: false, error: 'сбой' })),      // youtube:false: темы для постов не тратят квоту YouTube
   ]);
   if (wiki.ok) raw.wiki = { article: wiki.article, how: wiki.how, last30: wiki.last30, prev30: wiki.prev30, change: wiki.change }; else errors.wiki = wiki.error;
   if (sug) raw.suggest = sug; else errors.suggest = 'нет ответа';
@@ -227,7 +227,7 @@ export async function measureDemand(cand, ctx = {}) {
 }
 /** Замер пачки тем (лента трендов берётся один раз, темы — по 3 параллельно). Возвращает массив в том же порядке. */
 export async function measureAll(cands, ctx = {}) {
-  const trends = process.env.OFFICE_NO_DEMAND === '1' || process.env.OFFICE_DEMAND_STUB ? { ok: false, error: 'выключено', items: [] } : await trendsNow({ fetch: ctx.fetch }).catch(() => ({ ok: false, error: 'сбой', items: [] }));
+  const trends = ctx.trends || (process.env.OFFICE_NO_DEMAND === '1' || process.env.OFFICE_DEMAND_STUB ? { ok: false, error: 'выключено', items: [] } : await trendsNow({ fetch: ctx.fetch }).catch(() => ({ ok: false, error: 'сбой', items: [] })));       // ленту трендов можно передать готовую (одна загрузка на весь план дня)
   const out = new Array(cands.length); let next = 0;
   await Promise.all(Array.from({ length: Math.min(3, cands.length) }, async () => { while (next < cands.length) { const i = next++; out[i] = await measureDemand(cands[i], { ...ctx, trends }); } }));
   return out;
