@@ -70,7 +70,13 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     if (cur.trim()) parts.push(cur.trimEnd());
     for (let i = 0; i < parts.length; i++) {
       const r = await tg('sendMessage', { chat_id: chatId(), text: parts[i], disable_web_page_preview: true, disable_notification: silent, reply_markup: i === parts.length - 1 ? kbOf(m.buttons) : undefined });
-      if (r.ok && i === parts.length - 1) run('UPDATE messages SET tg_msg=? WHERE id=?', r.result.message_id, id);
+      if (r.ok && i === parts.length - 1) {
+        run('UPDATE messages SET tg_msg=? WHERE id=?', r.result.message_id, id);
+        // Карточку могли закрыть, пока шла отправка (автоутверждение отвечает через ~30 мс после публикации): ответ не нашёл tg_msg и кнопки не снял.
+        // Тогда снимаем их здесь, иначе в Telegram остаётся живая кнопка «Утвердить» на уже утверждённом сценарии (так было с карточкой №641, 2026-10-27).
+        const cur2 = q('SELECT status FROM messages WHERE id=?', id)[0];
+        if (cur2 && cur2.status && cur2.status !== 'open' && m.buttons) tg('editMessageReplyMarkup', { chat_id: chatId(), message_id: r.result.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+      }
       if (!r.ok && r.description !== 'telegram off') console.error('TG:', r.description);
     }
   }
