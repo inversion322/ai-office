@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, check, miniAppUrl } from '../scripts/tunnel_watch.mjs';
+import { decide, check, miniAppUrl, parseTunnelUrl } from '../scripts/tunnel_watch.mjs';
 
 const base = { now: 1_000_000, apiLocalOk: true, startedAt: 0, lastRestartAt: 0, readyConnections: 1, deadReadyCount: 0, noReadyCount: 0, outsideFails: 0 };
 
@@ -40,4 +40,18 @@ test('check(): когда cloudflared говорит «0 соединений»,
 test('адрес Mini App: ссылка постоянная, меняется только параметр api, кодируется целиком', () => {
   const u = miniAppUrl('https://a-b-c.trycloudflare.com');
   assert.ok(u.startsWith('https://inversion322.github.io/ai-office/app.html?api=')); assert.equal(new URL(u).searchParams.get('api'), 'https://a-b-c.trycloudflare.com');
+});
+
+// Без сети cloudflared печатает ошибку с api.trycloudflare.com; её принимали за адрес туннеля (2026-10-27: кнопка Mini App вела на заглушку)
+test('адрес туннеля берётся из баннера и строки с рамкой', () => {
+  assert.equal(parseTunnelUrl('2026-10-27T08:28:17Z INF |  https://weighted-shortly-surplus-infinite.trycloudflare.com                                        |'), 'https://weighted-shortly-surplus-infinite.trycloudflare.com');
+  assert.equal(parseTunnelUrl('INF Your quick Tunnel has been created! Visit it at (it may take some time to be reachable): https://routine-forty-pizza-mitchell.trycloudflare.com'), 'https://routine-forty-pizza-mitchell.trycloudflare.com');
+  assert.equal(parseTunnelUrl('|  https://Some-Big-Name-Here.trycloudflare.com  |'), 'https://some-big-name-here.trycloudflare.com');
+});
+test('ошибки без сети и служебные имена адресом не считаются', () => {
+  for (const x of ['INF Requesting new quick Tunnel on trycloudflare.com... failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel": dial tcp: lookup api.trycloudflare.com on 127.0.0.11:53: no such host',
+    'failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel": context deadline exceeded', 'ERR error="https://api.trycloudflare.com/tunnel connection refused"',
+    'https://api.trycloudflare.com', '|  https://api.trycloudflare.com  |', 'https://www.trycloudflare.com/', 'https://dash.trycloudflare.com', '', null, 'просто текст', 'https://example.com',
+    'https://weighted-shortly.trycloudflare.com.evil.io', 'https://evil-trycloudflare.com'])
+    assert.equal(parseTunnelUrl(x), null, String(x));
 });

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { check } from './tunnel_watch.mjs';
+import { check, parseTunnelUrl } from './tunnel_watch.mjs';
 import { updateMenuButtonPatiently, makeTg, readBotToken } from './menu_button.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -79,6 +79,6 @@ setInterval(async () => {
 keepAlive('api', process.execPath, ['server.mjs'], { cwd: path.join(root, 'server'), env: { ...process.env, PORT: String(API_PORT) } }, (l) => log('api: ' + l));
 if (!DRY) keepAlive('smm-bot', process.execPath, ['scripts/smm_bot.mjs'], { cwd: root }, (l) => log('smm-bot: ' + l));
 setTimeout(() => keepAlive('tunnel', CF, ['tunnel', '--url', `http://127.0.0.1:${API_PORT}`, '--no-autoupdate', '--metrics', `127.0.0.1:${METRICS_PORT}`], {}, (l) => {
-  const m = l.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-  if (m) saveUrl(m[0]);
+  const u = parseTunnelUrl(l);          // строки с ошибкой и служебный api.trycloudflare.com адресом не считаются
+  if (u) saveUrl(u);
 }), 3000);

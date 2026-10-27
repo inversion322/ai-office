@@ -31,3 +31,15 @@ export async function check(s, io, opts) {
   const d = decide(n, opts);
   return { state: n, decision: d };
 }
+
+/** Адрес быстрого туннеля из строки вывода cloudflared или null. Без сети cloudflared пишет `failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel": dial tcp: lookup api.trycloudflare.com ...`,
+ *  и прежняя регулярка принимала служебный api.trycloudflare.com за адрес туннеля: tunnel-url.txt и кнопка Mini App указывали на него, а приложение «зависало» (так было 2026-10-27 после часа без сети).
+ *  Настоящий адрес печатается в баннере (`Your quick Tunnel has been created! Visit it at ...` и следующая строка с рамкой), поэтому строки с ошибкой и служебные имена отбрасываются. */
+export const RESERVED_HOSTS = new Set(['api', 'www', 'dash', 'dashboard', 'update', 'quick', 'trycloudflare']);
+export function parseTunnelUrl(line) {
+  const s = String(line || '');
+  if (/failed to|error|ERR\b|dial tcp|lookup |no such host|connection refused|timeout|context deadline|provisioning failed/i.test(s)) return null;
+  const m = s.match(/https:\/\/([a-z0-9]+(?:-[a-z0-9]+)+)\.trycloudflare\.com(?![a-z0-9.-])/i);      // у настоящих адресов минимум два слова через дефис
+  if (!m || RESERVED_HOSTS.has(m[1].toLowerCase())) return null;
+  return m[0].toLowerCase();
+}
