@@ -70,6 +70,20 @@ test('превью поста: «Поставить» и «Убрать» зап
   const c3 = card(chat, B('post1')); await chat.answer({ id: c3, choice: `spost:med_detective:${DATE}:post1:edit`, comment: 'сделай хук короче', via: 'dashboard' });
   assert.deepEqual(notStarted(db).at(-1), `studio post-act med_detective ${DATE} post1 edit --comment сделай хук короче`);
 });
+test('превью поста: «Править картинку» ждёт текст и запускает этап cover с правкой, «Другая картинка» запускает его сразу; текст поста не трогается', async () => {
+  const { chat, db } = make();
+  const B = (slot) => [[['✅', `spost:med_detective:${DATE}:${slot}:ok`]], [['✏️', `spost:med_detective:${DATE}:${slot}:edit`], ['🎨', `spost:med_detective:${DATE}:${slot}:pic`]], [['🖼', `spost:med_detective:${DATE}:${slot}:pic0`], ['🗑', `spost:med_detective:${DATE}:${slot}:drop`]]];
+  const c1 = card(chat, B('post1')); const r = await chat.answer({ id: c1, choice: `spost:med_detective:${DATE}:post1:pic`, via: 'telegram' });
+  assert.deepEqual([r.ok, r.pending], [true, 'comment']); assert.equal(db.prepare('SELECT status FROM messages WHERE id=?').get(c1).status, 'open', 'карточка ждёт текст правки картинки');
+  assert.match(texts(db).at(-1), /что изменить в картинке[\s\S]*Текст поста останется прежним/);
+  assert.equal(chat.incoming({ text: 'убери банку, пусть будет лупа над чашкой кофе', source: 'telegram' }).note, 'comment'); await new Promise((r2) => setTimeout(r2, 30));
+  assert.equal(db.prepare('SELECT status FROM messages WHERE id=?').get(c1).status, 'answered');
+  assert.deepEqual(notStarted(db).at(-1), `studio post-act med_detective ${DATE} post1 pic --comment убери банку, пусть будет лупа над чашкой кофе`);
+  const c2 = card(chat, B('post2')); await chat.answer({ id: c2, choice: `spost:med_detective:${DATE}:post2:pic0`, via: 'dashboard' });
+  assert.deepEqual(notStarted(db).at(-1), `studio post-act med_detective ${DATE} post2 pic0`); assert.equal(db.prepare('SELECT status FROM messages WHERE id=?').get(c2).status, 'answered');
+  const c3 = card(chat, B('post1')); await chat.answer({ id: c3, choice: `spost:med_detective:${DATE}:post1:pic`, comment: 'сделай светлее', via: 'dashboard' });
+  assert.deepEqual(notStarted(db).at(-1), `studio post-act med_detective ${DATE} post1 pic --comment сделай светлее`);
+});
 test('битые и чужие данные кнопок не запускают этапов', async () => {
   const { chat, db } = make();
   const id = card(chat, [[['x', 'splan:med_detective:вчера:ok'], ['y', `spost:med_detective:${DATE}:post9:ok`], ['z', `splan:med_detective:${DATE}:hack`]]]);

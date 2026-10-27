@@ -55,14 +55,16 @@ export function publishShape(text, hasCover) {
 }
 
 /** Запрос обложки для fal.ai (Nano Banana Pro читает кириллицу). Без людей с лицами, без текста, если он не нужен. */
-export function coverPrompt(brief = {}, { palette = '', styleClause = '' } = {}) {
+export function coverPrompt(brief = {}, { palette = '', styleClause = '', edits = [] } = {}) {
   const scene = String(brief.scene || '').trim(), mood = String(brief.mood || 'спокойное, внимательное').trim();
   const text = String(brief.text_on_image || '').trim().slice(0, 40);
+  const wishes = (Array.isArray(edits) ? edits : []).map((e) => String(e || '').trim()).filter(Boolean).slice(-5);
   const parts = [
     `Editorial cover illustration for a Telegram channel post. Square composition with safe margins; the key subject is centered.`,
     `Scene: ${scene || 'a calm abstract composition about the topic'}.`, `Mood: ${mood}.`,
     palette ? `Palette: ${palette}.` : '', styleClause ? `Channel visual identity: ${styleClause}.` : '',
     text ? `Render exactly this short Russian text, large and perfectly legible, nothing else written: «${text}».` : 'Do not write any text, letters or numbers on the image.',
+    wishes.length ? `Art director's corrections from the channel owner, apply them strictly (they override the scene above where they conflict): ${wishes.join(' | ')}.` : '',
     'No real people faces, no logos, no watermarks, no medical before/after, no shocking imagery.',
   ];
   return parts.filter(Boolean).join(' ');

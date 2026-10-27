@@ -356,6 +356,7 @@ test('«Утвердить после проверки» кнопкой дела
   db.prepare("INSERT INTO videos VALUES (4,'Шаги','script',0)").run(); const id = failedCard(chat);
   await chat.answer({ id, choice: 'approve:4', via: 'telegram' });
   const id2 = failedCard(chat); await chat.answer({ id: id2, choice: 'approve:4', via: 'dashboard' }); await tick(300);
+  for (let i = 0; i < 40 && !spawned().length; i++) await tick(150);       // запуск процесса под нагрузкой полного прогона бывает позже 300 мс: ждём появления записи, а не фиксированную паузу
   assert.equal(spawned().length, 1, 'один запуск'); assert.ok(msgs(db).some((m) => /Ксения с Верой ещё работают/.test(m.text)));
 }));
 

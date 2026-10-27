@@ -4,7 +4,8 @@
 //   plan-more <канал> <дата> video|posts              новый поиск вариантов для одного вида (запас показывается без поиска)
 //   posts <канал> <дата>                              оба поста дня по очереди (Дарья пишет, Павел проверяет, Диана рисует обложку, карточка превью)
 //   post <канал> <дата> <слот> [--comment …]          один пост (слот post1|post2), с правкой Ника
-//   post-act <канал> <дата> <слот> ok|edit|drop       ответ Ника на превью поста (ok: пост ставится на время слота)
+//   post-act <канал> <дата> <слот> ok|edit|drop|pic   ответ Ника на превью поста (ok: пост ставится на время слота; pic: только картинка, текст не трогается)
+//   cover <канал> <дата> <слот> [--comment "правка"]   новая обложка по правкам Ника при неизменном тексте поста
 //   publish-due                                       Григорий выкладывает утверждённые посты, чьё время пришло (вызывает сервер раз в минуту)
 // Всё, что идёт наружу (пост в канал), только после «да» Ника на превью. Сеть, модели и время подменяются через deps (тесты).
 import fs from 'node:fs';
@@ -308,9 +309,63 @@ export async function studioPost(chKey, date, slotName, { comment = '', deps = m
     else { if (cover) await deps.sendPhoto(chatId(), cover, `<b>Обложка</b> · ${slot.title}`.slice(0, 1000)); await deps.sendText(chatId(), html); }
   } catch (e) { await deps.say('tg_publisher', 'Превью в Telegram не ушло: ' + String(e.message).slice(0, 120)); }
   const head = `📝 Пост ${hm} готов: «${slot.title}»\nДарья написала, Павел проверил${notes.length ? ` (замечания учтены: ${notes.slice(0, 2).join('; ').slice(0, 160)})` : ''}.${cover ? ' Обложка Дианы выше.' : `\n⚠️ Обложки нет: ${coverNote}. Можно выйти без неё или повторить.`}\nПревью выше выглядит так же, как выйдет в канале (${shape.mode === 'photo' ? 'фото с подписью' : shape.mode === 'photo_then_text' ? 'обложка и текст отдельными сообщениями' : 'текст'}). Выйдет сам в ${hm} МСК после вашего «да».`;
-  const id = await deps.notify(head, [[[`✅ Поставить на ${hm}`, `spost:${chKey}:${date}:${slotName}:ok`], ['✏️ Править', `spost:${chKey}:${date}:${slotName}:edit`]], [['🗑 Убрать пост', `spost:${chKey}:${date}:${slotName}:drop`]]]);
+  const id = await deps.notify(head, previewButtons(chKey, date, slotName, hm));
   await deps.agent('tg_author', 'waiting', `Пост ${hm} ждёт вашего «да»`, 100);
   return { ok: true, card: id, cover, text };
+}
+/** Кнопки превью: текст и картинка правятся отдельно (решение Ника 2026-10-28: согласованный текст остаётся, меняется только картинка). */
+const previewButtons = (chKey, date, slotName, hm) => [[[`✅ Поставить на ${hm}`, `spost:${chKey}:${date}:${slotName}:ok`]], [['✏️ Править текст', `spost:${chKey}:${date}:${slotName}:edit`], ['🎨 Править картинку', `spost:${chKey}:${date}:${slotName}:pic`]], [['🖼 Другая картинка', `spost:${chKey}:${date}:${slotName}:pic0`], ['🗑 Убрать пост', `spost:${chKey}:${date}:${slotName}:drop`]]];
+
+const COVER_TASK = (ch, slot, post, edits, outFile, again = false) => `Ты Диана Обложкина, художник-постановщик Telegram-канала «${ch.name}». Нужно переделать ТОЛЬКО картинку к уже согласованному посту; текст поста менять нельзя, он утверждён владельцем.
+Тема поста: «${slot.title}». Текст поста (для понимания смысла, не копируй его на картинку): ${String(post.text || '').slice(0, 900)}
+Прежний сценарий картинки (JSON): ${JSON.stringify(post.brief || {})}
+Правки владельца к картинке, от старых к новым (последняя главнее; всё, что он не просил менять, оставь как было в прежнем сценарии): ${edits.length ? edits.map((e, i) => `${i + 1}) ${e}`).join(' ') : '(правок нет)'}${again || !edits.length ? `\nВладелец просит ДРУГОЙ вариант картинки: предложи заметно другое решение той же мысли (другой ракурс, композиция и предмет, но тот же стиль канала)${edits.length ? ', сохранив все его правки выше' : ''}.` : ''}
+Правила обложки: без лиц реальных людей, без логотипов и водяных знаков, без «до/после», без шокирующих образов. Текст на картинке только если владелец сам просит: тогда короткий (до 40 знаков), русский. Если он просит убрать текст или не просит его, поле text_on_image пустое.
+Формат файла ${outFile}: JSON {"scene":"что нарисовать, по-английски, 2-3 предложения с учётом ВСЕХ правок","mood":"настроение","text_on_image":"текст на картинке или пустая строка"}.`;
+
+/** Только картинка: текст поста остаётся прежним, сценарий картинки пересобирается с правками Ника (накопительно), старые версии сохраняются в covers/. */
+export async function studioCover(chKey, date, slotName, { comment = '', deps = makeDeps() } = {}) {
+  const ch = deps.channels()[chKey]; const plan = S.loadPlan(date, chKey); const slot = plan && S.slotOf(plan, slotName);
+  if (!ch || !slot || slot.kind !== 'post') throw new Error(`нет поста ${slotName} в плане ${date} «${chKey}»`);
+  const hm = slot.time.slice(0, 5);
+  if (!['preview', 'approved'].includes(slot.status)) { await deps.notify(`Картинку поста ${hm} сейчас менять нельзя: статус «${slot.status}»${slot.status === 'published' ? ' (пост уже вышел)' : ''}.`); return { ok: false }; }
+  const dir = postDir(date, chKey, slotName), file = path.join(dir, 'post.json'), post = readJson(file);
+  if (!post || !post.text) { await deps.notify(`Не нашёл файл поста ${hm}: картинку менять не к чему. Нажмите «Править текст», Дарья напишет пост заново.`); return { ok: false }; }
+  const wasApproved = slot.status === 'approved';
+  const edits = [...(Array.isArray(post.cover_edits) ? post.cover_edits : []), ...(comment && comment.trim() ? [comment.trim()] : [])];
+  await deps.agent('tg_artist', 'working', 'Переделываю обложку', 20, `Обложка поста ${hm} по правкам: ${edits.slice(-1)[0] || 'другое решение'}`.slice(0, 160));
+  let brief = post.brief || {}, note = '';
+  const outB = path.join(dir, 'cover_brief.json'); try { fs.rmSync(outB, { force: true }); } catch {}
+  try { await deps.runAgent({ label: 'cover_brief', agentId: 'tg_artist', profile: 'studio_text', outFile: outB, persona: await deps.promptOf('tg_artist'), task: COVER_TASK(ch, slot, post, edits, outB, !(comment && comment.trim())), maxTurns: 20, budgetSec: 300 }); } catch (e) { note = 'художник не ответил'; }
+  const nb = readJson(outB); if (nb && nb.scene) brief = { scene: String(nb.scene), mood: String(nb.mood || brief.mood || ''), text_on_image: String(nb.text_on_image || '').slice(0, 40) }; else note = note || 'сценарий картинки не получен';
+  const budget = imageBudget({ file: path.join(S.studioDir(), 'image_count.json'), day: S.mskDate(deps.now()) });
+  if (!budget.left) { await deps.agent('tg_artist', 'idle', 'Лимит картинок', 0); await deps.notify(`Суточный лимит картинок (${budget.max}) исчерпан: прежняя обложка поста ${hm} остаётся, текст не менялся.`); return { ok: false, limit: true }; }
+  let cover = null, coverNote = '';
+  const next = path.join(dir, `cover_new_${deps.now().toString(36)}.jpg`);
+  for (let attempt = 1; attempt <= 2 && !cover; attempt++) {
+    budget.take();
+    const r = await deps.generateCover({ prompt: P.coverPrompt(brief, { palette: ch.palette || '', styleClause: ch.coverStyle || '', edits }), outFile: next });
+    if (r.ok) cover = r.file; else coverNote = r.error;
+    if (!cover && /ключ|средств/.test(coverNote)) break;
+  }
+  if (!cover) { await deps.agent('tg_artist', 'error', 'Картинка не получилась', 0, `Обложка поста ${hm}: ${coverNote}`, 'error'); await deps.notify(`⚠️ Новая картинка поста ${hm} не получилась: ${coverNote}. Прежняя осталась, текст не менялся.`, [[['🖼 Другая картинка', `spost:${chKey}:${date}:${slotName}:pic0`]]]); return { ok: false, error: coverNote }; }
+  const keep = path.join(dir, 'covers'); fs.mkdirSync(keep, { recursive: true });
+  const old = post.cover && fs.existsSync(post.cover) ? post.cover : null, n = fs.readdirSync(keep).length + 1;
+  if (old) fs.copyFileSync(old, path.join(keep, `v${n}.jpg`));            // прежняя картинка не пропадает: к ней можно вернуться
+  fs.copyFileSync(cover, path.join(dir, 'cover.jpg')); try { fs.rmSync(cover, { force: true }); } catch {}
+  const finalCover = path.join(dir, 'cover.jpg');
+  const upd = { ...post, cover: finalCover, brief, cover_edits: edits, cover_versions: n };      // text, html, notes остаются прежними
+  fs.writeFileSync(file, JSON.stringify(upd, null, 1), 'utf8');
+  S.updateSlot(date, chKey, slotName, { cover: finalCover });
+  await deps.agent('tg_artist', 'idle', 'Обложка готова', 100, `Новая обложка поста ${hm}`);
+  const shape = P.publishShape(upd.text, true);
+  try {
+    if (shape.mode === 'photo') await deps.sendPhoto(chatId(), finalCover, upd.html || P.toTgHtml(upd.text));
+    else await deps.sendPhoto(chatId(), finalCover, `<b>Обложка</b> · ${slot.title}`.slice(0, 1000));
+  } catch (e) { await deps.say('tg_publisher', 'Превью в Telegram не ушло: ' + String(e.message).slice(0, 120)); }
+  const head = `🖼 Новая картинка к посту ${hm}: «${slot.title}»\nТекст остался прежним, как вы его согласовали${edits.length ? `. Учтено: «${edits.slice(-1)[0].slice(0, 140)}»` : ''}${note ? ` (${note}, поэтому только другое решение той же сцены)` : ''}.\n${wasApproved ? `Пост уже в расписании на ${hm} МСК: выйдет с этой картинкой. ` : `Выйдет сам в ${hm} МСК после вашего «да». `}Прежняя картинка сохранена (версия ${n}).`;
+  const id = await deps.notify(head, wasApproved ? [[['🎨 Править картинку', `spost:${chKey}:${date}:${slotName}:pic`], ['🖼 Другая картинка', `spost:${chKey}:${date}:${slotName}:pic0`]], [['🗑 Убрать пост', `spost:${chKey}:${date}:${slotName}:drop`]]] : previewButtons(chKey, date, slotName, hm));
+  return { ok: true, card: id, cover: finalCover, edits };
 }
 
 /** Оба поста дня по очереди (подписка Claude: сначала первый слот, потом второй; параллельно не гоним). */
@@ -330,6 +385,10 @@ export async function studioPostAct(chKey, date, slotName, action, { deps = make
   if (!slot) { await deps.notify('Этот пост не найден (план мог измениться).'); return { ok: false }; }
   const hm = slot.time.slice(0, 5);
   if (action === 'drop') { S.updateSlot(date, chKey, slotName, { status: 'dropped' }); await deps.agent('tg_author', 'idle', 'Пост снят', 0); await deps.notify(`Пост ${hm} «${slot.title}» снят, в канал не выйдет.`); return { ok: true }; }
+  if (action === 'pic' || action === 'pic0') {
+    if (action === 'pic' && (!comment || !comment.trim())) { await deps.notify(`Что изменить в картинке поста ${hm}? Напишите правку одним сообщением (например «без банки, пусть будет лупа над чашкой кофе»). Текст останется прежним.`, null); return { ok: true, pending: 'comment' }; }
+    deps.spawn(['cover', chKey, date, slotName, ...(action === 'pic' ? ['--comment', comment.trim()] : [])]); await deps.notify(action === 'pic' ? `Принято, Диана перерисует картинку поста ${hm}: «${comment.trim().slice(0, 160)}». Текст не трогаю. Новое превью пришлю сюда.` : `Принято, Диана нарисует другую картинку к посту ${hm}. Текст не трогаю.`); return { ok: true };
+  }
   if (action === 'edit') {
     if (!comment || !comment.trim()) { await deps.notify(`Что исправить в посте ${hm}? Напишите правку одним сообщением, я передам Дарье.`, null); return { ok: true, pending: 'comment' }; }
     deps.spawn(['post', chKey, date, slotName, '--comment', comment.trim()]); await deps.notify(`Принято, Дарья поправит пост ${hm}: «${comment.trim().slice(0, 160)}». Новое превью пришлю сюда.`); return { ok: true };
@@ -380,6 +439,7 @@ export async function runStudio(argv, deps = makeDeps()) {
   if (stage === 'posts') return studioPosts(a, b, { deps });
   if (stage === 'post') return studioPost(a, b, c, { comment: opt('--comment'), deps });
   if (stage === 'post-act') return studioPostAct(a, b, c, d, { deps, comment: opt('--comment') });
+  if (stage === 'cover') return studioCover(a, b, c, { deps, comment: opt('--comment') });
   if (stage === 'publish-due') return studioPublishDue({ deps });
-  throw new Error('Команды studio: plan <канал> | plan-act <канал> <дата> ok|more|skip | posts <канал> <дата> | post <канал> <дата> <слот> | post-act … | publish-due');
+  throw new Error('Команды studio: plan <канал> | plan-act <канал> <дата> ok|more|skip | posts <канал> <дата> | post <канал> <дата> <слот> | post-act … | cover <канал> <дата> <слот> [--comment …] | publish-due');
 }

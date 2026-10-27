@@ -54,3 +54,10 @@ test('запрос обложки: без лиц и логотипов, текс
   const a = P.coverPrompt({ scene: 'magnifying glass over pills', mood: 'calm' }), b = P.coverPrompt({ scene: 'x', text_on_image: 'Плацебо?' }, { palette: 'navy and orange' });
   assert.match(a, /Do not write any text/); assert.match(a, /No real people faces/); assert.match(b, /«Плацебо\?»/); assert.match(b, /navy and orange/); assert.doesNotMatch(b, /Do not write any text/);
 });
+
+test('запрос картинки: правки владельца идут отдельным указанием и главнее сцены; пустые отбрасываются, берутся последние пять', () => {
+  const base = P.coverPrompt({ scene: 'a cup', mood: 'calm', text_on_image: '' }); assert.doesNotMatch(base, /Art director/);
+  const withEdits = P.coverPrompt({ scene: 'a cup', mood: 'calm', text_on_image: '' }, { edits: ['', 'без банки', '  светлее ', 'a', 'b', 'c', 'd'] });
+  assert.match(withEdits, /Art director's corrections[^\n]*override the scene above[^\n]*светлее \| a \| b \| c \| d\./); assert.doesNotMatch(withEdits, /без банки/, 'старее пяти правок отбрасывается');
+  assert.match(P.coverPrompt({ scene: 's', text_on_image: 'Что внутри?' }, { edits: ['крупнее'] }), /Render exactly this short Russian text[^\n]*Что внутри\?[\s\S]*крупнее/);
+});

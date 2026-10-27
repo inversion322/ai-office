@@ -378,7 +378,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
   /* ---------- студия каналов: план дня и посты (scripts/studio_pipeline.mjs, этапы `studio …`) ----------
      splan:<канал>:<дата>:ok|more|skip          ответ на карточку «План дня»
      splan_new:<канал>:<дата>                   просьба Ника «план дня» (подсказка в comment)
-     spost:<канал>:<дата>:<слот>:ok|edit|drop   ответ на превью поста
+     spost:<канал>:<дата>:<слот>:ok|edit|drop|pic|pic0   ответ на превью поста (edit: текст, pic: правка картинки с текстом Ника, pic0: другая картинка без правок; текст поста не меняется)
      В эфир пост уходит только после «ok» Ника на превью; сам выход делает минутный сторож studioTick (Григорий). */
   function execStudio(act, parts, comment, srcMsg, cap) {
     const chKey = parts[1], date = parts[2], note = comment && comment.trim() ? ['--comment', comment.trim()] : [];
@@ -401,10 +401,10 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       spawnPipeline(['studio', 'plan-act', chKey, date, action, ...note]); return {};
     }
     const slot = parts[3], action = parts[4];
-    if (!['post1', 'post2'].includes(slot) || !['ok', 'edit', 'drop'].includes(action)) return { note: 'неизвестное действие' };
-    if (action === 'edit' && !note.length) {
+    if (!['post1', 'post2'].includes(slot) || !['ok', 'edit', 'drop', 'pic', 'pic0'].includes(action)) return { note: 'неизвестное действие' };
+    if ((action === 'edit' || action === 'pic') && !note.length) {
       kvSet('awaiting', JSON.stringify({ kind: 'spost', data: parts.join(':'), mid: srcMsg && srcMsg.id, ts: now() }));
-      cap('Напишите одним сообщением, что исправить в посте: Дарья поправит, Павел проверит заново, новое превью придёт сюда.'); return {};
+      cap(action === 'pic' ? 'Напишите одним сообщением, что изменить в картинке (например «без банки, пусть будет лупа над чашкой кофе»). Текст поста останется прежним, Диана перерисует только изображение по вашим правкам.' : 'Напишите одним сообщением, что исправить в посте: Дарья поправит, Павел проверит заново, новое превью придёт сюда.'); return {};
     }
     supersede(`spost:${chKey}:${date}:${slot}:`);
     spawnPipeline(['studio', 'post-act', chKey, date, slot, action, ...note]); return {};
@@ -452,7 +452,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
       try { await execAction(choice, undefined, via, m); } catch (e) { return { ok: false, error: e.message }; }
       return { ok: true, kept: true };
     }
-    if (/^(rework|revise|title):|^spost:[^:]+:[^:]+:[^:]+:edit$/.test(choice) && !(comment && comment.trim())) {
+    if (/^(rework|revise|title):|^spost:[^:]+:[^:]+:[^:]+:(edit|pic)$/.test(choice) && !(comment && comment.trim())) {
       try { await execAction(choice, undefined, via, m); } catch (e) { return { ok: false, error: e.message }; }
       return { ok: true, pending: 'comment' };
     }

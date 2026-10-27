@@ -208,16 +208,64 @@ const author = (text) => async (o) => {
   else fs.writeFileSync(o.outFile, JSON.stringify({ verdict: 'ok', text: fs.existsSync(path.join(path.dirname(o.outFile), 'candidate.json')) ? JSON.parse(fs.readFileSync(path.join(path.dirname(o.outFile), 'candidate.json'), 'utf8')).text : '', issues: [], facts_ok: true }));
 };
 
-test('пост: автор → код → редактор → обложка → превью «как выйдет» и карточка с тремя кнопками; в эфир ничего не ушло', async () => {
+test('пост: автор → код → редактор → обложка → превью «как выйдет» и карточка с кнопками текста и картинки; в эфир ничего не ушло', async () => {
   const { date, deps, log } = await planned(); const mm = mk({ cands: [], agentFn: author((o) => GOOD('Хук про ' + o.label)) }); Object.assign(deps, { runAgent: mm.deps.runAgent });
   const r = await X.studioPost('med', date, 'post1', { deps: { ...deps, runAgent: async (o) => { log.runs.push(o); await author(GOOD('Гомеопатия работает лучше плацебо'))(o); return { code: 0 }; } } });
   assert.equal(r.ok, true); assert.ok(r.cover);
   const author1 = log.runs.find((x) => x.label === 'author1'), ed = log.runs.find((x) => x.label === 'editor1');
   assert.equal(author1.profile, 'studio_text'); assert.equal(author1.agentId, 'tg_author'); assert.equal(ed.agentId, 'tg_editor'); assert.match(author1.task, /post_rules\.md/); assert.match(author1.task, /https:\/\/t\.me\/med_detective_ru/);
   assert.equal(log.photos.length, 1); assert.equal(log.photos[0].chat, 323028999, 'превью только Нику'); assert.match(log.photos[0].html, /<b>Гомеопатия работает лучше плацебо<\/b>/); assert.ok(!log.photos[0].html.includes('**'));
-  const card = log.notify.at(-1); assert.match(card.t, /Пост 12:00 готов/); assert.deepEqual(card.b.flat().map((b) => b[1].split(':').pop()), ['ok', 'edit', 'drop']);
+  const card = log.notify.at(-1); assert.match(card.t, /Пост 12:00 готов/); assert.deepEqual(card.b.flat().map((b) => b[1].split(':').pop()), ['ok', 'edit', 'pic', 'pic0', 'drop'], 'текст и картинка правятся отдельными кнопками');
   assert.equal(S.slotOf(S.loadPlan(date, 'med'), 'post1').status, 'preview'); assert.ok(log.photos.every((p) => p.chat !== '@med_detective_ru'));
   assert.match(log.lastPrompt, /magnifying glass/);
+});
+/* ---- только картинка: текст согласован и остаётся, меняется изображение по правкам Ника ---- */
+const artist = (brief) => async (o) => { if (o.label === 'cover_brief') fs.writeFileSync(o.outFile, JSON.stringify(brief)); };
+async function previewed() {
+  const { date, deps, log } = await planned();
+  await X.studioPost('med', date, 'post1', { deps: { ...deps, runAgent: async (o) => { log.runs.push(o); await author(GOOD('Хук про банку'))(o); return { code: 0 }; } } });
+  const file = path.join(process.env.OFFICE_STUDIO_DIR, 'posts', `${date}_med_post1`, 'post.json');
+  return { date, deps, log, file, post: () => JSON.parse(fs.readFileSync(file, 'utf8')) };
+}
+test('картинка: текст поста остаётся байт в байт, сценарий картинки пересобирается с правкой Ника, старая версия сохраняется, новое превью с кнопками', async () => {
+  const { date, deps, log, file, post } = await previewed(); const before = post(), textBefore = fs.readFileSync(file, 'utf8'), n0 = log.photos.length, runs0 = log.runs.length;
+  const r = await X.studioCover('med', date, 'post1', { comment: 'убери банку, пусть будет лупа над чашкой кофе', deps: { ...deps, runAgent: async (o) => { log.runs.push(o); await artist({ scene: 'a magnifying glass over a coffee cup', mood: 'calm', text_on_image: '' })(o); return { code: 0 }; } } });
+  assert.equal(r.ok, true); const after = post();
+  assert.equal(after.text, before.text); assert.equal(after.html, before.html); assert.deepEqual(after.notes, before.notes, 'текст, разметка и замечания не тронуты');
+  const run = log.runs.slice(runs0).find((x) => x.label === 'cover_brief'); assert.equal(run.agentId, 'tg_artist'); assert.equal(run.profile, 'studio_text');
+  assert.match(run.task, /ТОЛЬКО картинку[\s\S]*текст поста менять нельзя/); assert.match(run.task, /убери банку, пусть будет лупа над чашкой кофе/); assert.match(run.task, /a magnifying glass over a pill/, 'прежний сценарий передан');
+  assert.deepEqual(after.brief, { scene: 'a magnifying glass over a coffee cup', mood: 'calm', text_on_image: '' }); assert.deepEqual(after.cover_edits, ['убери банку, пусть будет лупа над чашкой кофе']);
+  assert.match(log.lastPrompt, /Art director's corrections[^\n]*убери банку, пусть будет лупа над чашкой кофе/); assert.match(log.lastPrompt, /a magnifying glass over a coffee cup/); assert.match(log.lastPrompt, /Do not write any text, letters or numbers/, 'без текста на картинке, пока Ник его не просил');
+  assert.ok(fs.existsSync(after.cover) && fs.existsSync(path.join(path.dirname(file), 'covers', 'v1.jpg')), 'прежняя картинка сохранена'); assert.equal(S.slotOf(S.loadPlan(date, 'med'), 'post1').status, 'preview'); assert.equal(S.slotOf(S.loadPlan(date, 'med'), 'post1').cover, after.cover);
+  assert.equal(log.photos.length, n0 + 1, 'в чат ушла только новая картинка'); const card = log.notify.at(-1); assert.match(card.t, /Текст остался прежним, как вы его согласовали[\s\S]*убери банку/); assert.match(card.t, /версия 1/);
+  const d = btnData(card.b); assert.deepEqual(d, [`spost:med:${date}:post1:ok`, `spost:med:${date}:post1:edit`, `spost:med:${date}:post1:pic`, `spost:med:${date}:post1:pic0`, `spost:med:${date}:post1:drop`]);
+  assert.equal(fs.readFileSync(file, 'utf8').includes('"text"'), true); assert.notEqual(fs.readFileSync(file, 'utf8'), textBefore, 'файл обновился (картинка, правки), но текст в нём прежний');
+});
+test('картинка: правки копятся (вторая правка не стирает первую), «другая картинка» без правок просит иное решение той же мысли', async () => {
+  const { date, deps, log, post } = await previewed(); const mk2 = (brief) => ({ ...deps, runAgent: async (o) => { log.runs.push(o); await artist(brief)(o); return { code: 0 }; } });
+  await X.studioCover('med', date, 'post1', { comment: 'светлее и без банки', deps: mk2({ scene: 'bright desk with a magnifier', mood: 'light', text_on_image: '' }) });
+  await X.studioCover('med', date, 'post1', { comment: 'добавь надпись «Что внутри?»', deps: mk2({ scene: 'bright desk with a magnifier', mood: 'light', text_on_image: 'Что внутри?' }) });
+  const p = post(); assert.deepEqual(p.cover_edits, ['светлее и без банки', 'добавь надпись «Что внутри?»']); assert.equal(p.cover_versions, 2); assert.match(log.lastPrompt, /светлее и без банки \| добавь надпись/); assert.match(log.lastPrompt, /Render exactly this short Russian text[^\n]*Что внутри\?/);
+  assert.ok(fs.existsSync(path.join(process.env.OFFICE_STUDIO_DIR, 'posts', `${date}_med_post1`, 'covers', 'v2.jpg')));
+  await X.studioCover('med', date, 'post1', { deps: mk2({ scene: 'a different angle: coffee cup from above', mood: 'calm', text_on_image: '' }) });
+  const last = log.runs.filter((x) => x.label === 'cover_brief').at(-1); assert.match(last.task, /ДРУГОЙ вариант картинки[\s\S]*сохранив все его правки выше/); assert.match(last.task, /1\) светлее и без банки 2\) добавь надпись/); assert.doesNotMatch(log.runs.filter((x) => x.label === 'cover_brief')[0].task, /ДРУГОЙ вариант/, 'обычная правка не просит другое решение'); assert.equal(post().cover_edits.length, 2, 'без комментария список правок не растёт'); assert.equal(post().cover_versions, 3);
+});
+test('картинка: в расписании пост остаётся утверждённым и выйдет с новой картинкой; ошибка fal.ai не трогает ни текст, ни прежнюю картинку; лимит и чужие статусы', async () => {
+  const { date, deps, log, post } = await previewed(); await X.studioPostAct('med', date, 'post1', 'ok', { deps }); assert.equal(S.slotOf(S.loadPlan(date, 'med'), 'post1').status, 'approved');
+  const fail = { ...deps, runAgent: async (o) => { await artist({ scene: 'x scene', mood: 'm', text_on_image: '' })(o); return { code: 0 }; }, generateCover: async () => ({ ok: false, error: 'fal.ai ответил 500' }) }; const before = post();
+  const r0 = await X.studioCover('med', date, 'post1', { comment: 'проба', deps: fail }); assert.equal(r0.ok, false); assert.deepEqual(post(), before, 'после ошибки пост цел'); assert.match(log.notify.at(-1).t, /не получилась: fal\.ai ответил 500\. Прежняя осталась, текст не менялся/); assert.equal(btnData(log.notify.at(-1).b)[0], `spost:med:${date}:post1:pic0`);
+  const ok = { ...deps, runAgent: async (o) => { await artist({ scene: 'new scene', mood: 'm', text_on_image: '' })(o); return { code: 0 }; } };
+  const r1 = await X.studioCover('med', date, 'post1', { comment: 'теплее', deps: ok }); assert.equal(r1.ok, true); assert.equal(S.slotOf(S.loadPlan(date, 'med'), 'post1').status, 'approved', 'пост остался в расписании'); assert.match(log.notify.at(-1).t, /Пост уже в расписании на \d\d:\d\d МСК: выйдет с этой картинкой/);
+  assert.deepEqual(btnData(log.notify.at(-1).b), [`spost:med:${date}:post1:pic`, `spost:med:${date}:post1:pic0`, `spost:med:${date}:post1:drop`], 'у утверждённого поста нет второй кнопки «Поставить»');
+  S.updateSlot(date, 'med', 'post1', { status: 'published' }); assert.equal((await X.studioCover('med', date, 'post1', { comment: 'поздно', deps: ok })).ok, false); assert.match(log.notify.at(-1).t, /нельзя: статус «published» \(пост уже вышел\)/);
+  S.updateSlot(date, 'med', 'post1', { status: 'preview' }); fs.writeFileSync(path.join(process.env.OFFICE_STUDIO_DIR, 'image_count.json'), JSON.stringify({ day: S.mskDate(NOW), count: 99 }));
+  const lim = await X.studioCover('med', date, 'post1', { comment: 'ещё', deps: { ...ok, generateCover: async () => { throw new Error('не должен вызываться'); } } }); assert.equal(lim.limit, true); assert.match(log.notify.at(-1).t, /лимит картинок[\s\S]*остаётся, текст не менялся/);
+});
+test('ответ на превью: «Править картинку» без текста спрашивает правку, с текстом и «Другая картинка» запускают этап cover; текст поста не пересобирается', async () => {
+  const { date, deps, log } = await planned();
+  const a = await X.studioPostAct('med', date, 'post1', 'pic', { deps }); assert.deepEqual([a.ok, a.pending], [true, 'comment']); assert.match(log.notify.at(-1).t, /Что изменить в картинке[\s\S]*Текст останется прежним/); assert.equal(log.spawn.length, 0);
+  await X.studioPostAct('med', date, 'post1', 'pic', { deps, comment: ' без банки ' }); assert.deepEqual(log.spawn.at(-1), ['cover', 'med', date, 'post1', '--comment', 'без банки']); assert.match(log.notify.at(-1).t, /Диана перерисует картинку[\s\S]*Текст не трогаю/);
+  await X.studioPostAct('med', date, 'post2', 'pic0', { deps }); assert.deepEqual(log.spawn.at(-1), ['cover', 'med', date, 'post2']); assert.ok(!log.spawn.some((a) => a[0] === 'post'), 'Дарья не запускалась');
 });
 test('пост: замечания кода (нет CTA) возвращаются автору без редактора; замечания редактора передаются во втором круге вместе с прошлым текстом', async () => {
   const { date, deps, log } = await planned(); let n = 0;
