@@ -16,7 +16,7 @@ const FAKE = path.join(ROOT, 'test', 'fixtures', 'fake_agent.mjs');
 let tmp, server, token, feedFile;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const api = async (p, body) => (await fetch(API + p, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json();
-const run = (extra = {}) => new Promise((resolve) => { const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'daily_topics.mjs'), '--channel', 'med_detective'], { cwd: ROOT, env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE, CHANNEL_FEED_FILE: feedFile, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] }); let out = ''; p.stdout.on('data', (b) => (out += b)); p.stderr.on('data', (b) => (out += b)); p.on('exit', (code) => resolve({ code, out })); });
+const run = (extra = {}) => new Promise((resolve) => { const p = spawn(process.execPath, [path.join(ROOT, 'scripts', 'daily_topics.mjs'), '--channel', 'med_detective'], { cwd: ROOT, env: { ...process.env, OFFICE_API: API, OFFICE_NO_TG: '1', HERMES_BIN: FAKE, CHANNEL_FEED_FILE: feedFile, OFFICE_NO_DEMAND: '1', OFFICE_DEMAND_KEYS_FILE: path.join(tmp, 'no-keys.json'), ...extra }, stdio: ['ignore', 'pipe', 'pipe'] }); let out = ''; p.stdout.on('data', (b) => (out += b)); p.stderr.on('data', (b) => (out += b)); p.on('exit', (code) => resolve({ code, out })); });
 const RUNS = path.join(ROOT, 'smm', 'runs'), isDaily = (d) => /_daily_med_detective$/.test(d);
 let keep = new Set();      // настоящие подборки (их создаёт cron) тест не трогает: по ним считаются повторы
 const chat = async () => (await api('/api/chat?office=smm')).messages;
@@ -69,4 +69,33 @@ test('если новых тем нет совсем: честное сообщ�
   const added0 = await newer(before0);
   assert.equal(added0.length, 0, 'новые темы не добавлены, а добавлено: ' + added0.map((v) => `№${v.id} «${v.title}» (${v.stage})`).join('; '));
   const m = (await chatSince(c0)).filter((x) => /новых тем без повторов не нашлось/.test(x.text)); assert.equal(m.length, 1); assert.ok(!(m[0].buttons || []).length);
+});
+
+test('замер спроса: охват в баллах считает код по замерам, в карточке строка «📊 Спрос» вместо «не проверялся», замеры сохранены в заметках темы', { skip: !can }, async () => {
+  const stub = path.join(tmp, 'demand_stub.json');
+  fs.writeFileSync(stub, JSON.stringify({
+    '*': { queries: ['тема'], wiki: { article: 'Малая статья', how: 'поиск по Википедии', last30: 150, prev30: 140, change: 7 }, suggest: { google: 3, youtube: 2, yandex: 2 } },
+    'Можно ли выспаться впрок в выходные?': { queries: ['выспаться впрок'], wiki: { article: 'Сон', how: 'подсказка Виктора', last30: 50000, prev30: 40000, change: 25 }, suggest: { google: 10, youtube: 10, yandex: 10 }, wordstat: { count: 800000 } },
+  }));
+  const before0 = await maxId(), c0 = await chatMaxId();
+  const r = await run({ FAKE_DAILY_MODE: 'new3', OFFICE_NO_DEMAND: '', OFFICE_DEMAND_STUB: stub }); assert.equal(r.code, 0, r.out);
+  const added = await newer(before0); assert.ok(added.length >= 3);
+  const notes = Object.fromEntries(added.map((v) => [v.title, JSON.parse(v.notes)]));
+  const top = notes['Можно ли выспаться впрок в выходные?']; assert.ok(top, 'тема с высоким спросом в подборке');
+  assert.equal(top.reach_lev, 8, 'прежняя оценка охвата Льва сохранена для сверки'); assert.equal(top.demand.level, 'measured'); assert.equal(top.demand.reach, 25);
+  assert.match(top.demand_line, /Википедия «Сон»: 50.000 просмотров за 30 дн/); assert.match(top.demand_line, /Яндекс: 800.000 запросов/);
+  const low = added.find((v) => v.title !== 'Можно ли выспаться впрок в выходные?'); assert.ok(notes[low.title].demand.reach < 12, 'малый спрос = малый охват: ' + notes[low.title].demand.reach);
+  const best = added.slice().sort((a, b) => b.score - a.score)[0]; assert.equal(best.title, 'Можно ли выспаться впрок в выходные?', 'выше всех тема с наибольшим измеренным спросом');
+  const runDir = fs.readdirSync(RUNS).filter((d) => isDaily(d) && !keep.has(d)).sort().pop();
+  assert.ok(JSON.parse(fs.readFileSync(path.join(RUNS, runDir, 'scored.json'), 'utf8')).every((x) => x.saw_demand === true), 'Лев получил замеры в файле кандидатов'); assert.ok(fs.existsSync(path.join(RUNS, runDir, 'demand.json')));
+  const card = (await chatSince(c0)).find((m) => /Темы на сегодня/.test(m.text)); assert.ok(card);
+  assert.match(card.text, /📊 Спрос: Википедия «Сон»/); assert.doesNotMatch(card.text, /не проверялся|гипотеза, не прогноз/);
+  assert.ok(card.text.indexOf('Можно ли выспаться впрок') < card.text.indexOf('Малая статья') || !card.text.includes('Малая статья'), 'порядок в карточке по новому баллу');
+});
+test('без замера (сеть недоступна): карточка честно пишет «не измерено», охват 0, подборка не падает', { skip: !can }, async () => {
+  const before0 = await maxId(), c0 = await chatMaxId();
+  const r = await run({ FAKE_DAILY_MODE: 'new4' }); assert.equal(r.code, 0, r.out);
+  const added = await newer(before0); assert.ok(added.length >= 3);
+  for (const v of added) { const n = JSON.parse(v.notes); assert.equal(n.demand.level, 'none'); assert.equal(n.demand.reach, 0); assert.match(n.demand_line, /не измерено/); }
+  const card = (await chatSince(c0)).find((m) => /Темы на сегодня/.test(m.text)); assert.match(card.text, /📊 Спрос: не измерено/);
 });

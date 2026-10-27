@@ -163,10 +163,10 @@ export function topicsMessage(vs) {
   const rows = vs.filter((v) => v.stage === 'scored').sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   if (!rows.length) return null;
   const note = (v) => { try { return JSON.parse(v.notes || '{}'); } catch { return {}; } };
-  const lines = rows.slice(0, 8).map((v, i) => { const n = note(v); return `${i + 1}. [${v.score}] ${v.title}\n   ${n.recommendation || ''}, уверенность ${n.confidence || '—'}. ${n.reason || ''}`; });
+  const lines = rows.slice(0, 8).map((v, i) => { const n = note(v); return `${i + 1}. [${v.score}] ${v.title}\n   ${n.recommendation || ''}, уверенность ${n.confidence || '—'}. ${n.reason || ''}${n.demand_line ? `\n   📊 ${n.demand_line}` : ''}`; });
   const open = rows.slice(0, 4);
   return {
-    text: `🦆 Темы для следующего ролика оценены (балл 0-100 это гипотеза, не прогноз).\n\n${lines.join('\n\n')}\n\nВыберите тему кнопкой.`,
+    text: `🦆 Темы для следующего ролика оценены (балл 0-100: охват посчитан по замерам спроса, остальное оценка Льва; это не прогноз просмотров).\n\n${lines.join('\n\n')}\n\nВыберите тему кнопкой.`,
     buttons: [open.map((v, i) => [`Тема ${i + 1}`, `pick:${v.id}`]), [['Другие темы', 'more:0']]],
   };
 }

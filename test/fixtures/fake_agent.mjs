@@ -120,11 +120,28 @@ if (/кандидатов на тему следующего ролика кан
   const NEW = [mk('Правда ли, что мокрые волосы на холоде вызывают простуду?'), mk('Магний от судорог ночью: работает ли?'), mk('Утренний кофе натощак вредит желудку?'), mk('Холодный душ укрепляет иммунитет?'), mk('Пить воду во время еды вредно для пищеварения?'), mk('Мёд лучше сахара при диабете?'), mk('Бабушкина горчица в носках лечит кашель?'), mk('Нужно ли пить пробиотики после антибиотиков?'), mk('Фрукты вечером превращаются в жир?'), mk('Лишний вес только от переедания?'), mk('Блюдо без Е-добавок всегда безопаснее?'),
     mk('Тема без источника', { evidence: [] })];
   const NEW2 = [mk('Правда ли, что от жвачки болит живот?'), mk('Чеснок защищает от вирусов осенью?'), mk('Нужна ли детоксикация организма смузи?'), mk('Лимон с водой по утрам щелочит организм?')];
-  const payload = mode === 'all_dups' ? DUPS : mode === 'dups_then_new' ? (n === 1 ? DUPS : NEW2) : mode === 'ok' ? [...DUPS.slice(0, 1), ...NEW] : NEW;
+  // new3 / new4: отдельные наборы тем для тестов замера спроса (после «ok» и «dups_then_new» прежние темы уже заняты, и повторы отсеивались бы)
+  const NEW3 = ['Можно ли выспаться впрок в выходные?', 'Вредно ли засыпать с включённым телевизором?', 'Правда ли, что тёмный шоколад улучшает память?', 'Помогает ли чай с малиной сбить температуру?'].map((t) => mk(t));
+  const NEW4 = ['Правда ли, что от жёсткой воды выпадают волосы?', 'Нужно ли греть уши в мороз, чтобы не заболеть менингитом?', 'Правда ли, что сидеть нога на ногу вредно для спины?', 'Правда ли, что зелёные клубни картофеля ядовиты?'].map((t) => mk(t));
+  const payload = mode === 'all_dups' ? DUPS : mode === 'new3' ? NEW3 : mode === 'new4' ? NEW4 : mode === 'dups_then_new' ? (n === 1 ? DUPS : NEW2) : mode === 'ok' ? [...DUPS.slice(0, 1), ...NEW] : NEW;
   fs.writeFileSync(out, JSON.stringify(payload));
 }
 if (/Оцени кандидатов из файла/.test(q) && /daily_fresh\.json/.test(q)) {
   const out = /Формат файла (.+?\.json)/.exec(q)[1].trim(), inp = /кандидатов из файла (.+?\.json)/.exec(q)[1].trim();
   const cands = JSON.parse(fs.readFileSync(inp, 'utf8'));
-  fs.writeFileSync(out, JSON.stringify(cands.map((c, i) => ({ title: c.title, rubric: 'myth', gates_passed: true, scores: { reach: 8 }, total: 90 - i * 3, confidence: 'medium', data_sources: ['PubMed'], main_risk: '-', recommendation: 'снимать', reason: 'массовый вопрос, ответ однозначный' }))));
+  fs.writeFileSync(out, JSON.stringify(cands.map((c, i) => ({ title: c.title, rubric: 'myth', gates_passed: true, scores: { reach: 8 }, saw_demand: !!c.demand, total: 90 - i * 3, confidence: 'medium', data_sources: ['PubMed'], main_risk: '-', recommendation: 'снимать', reason: 'массовый вопрос, ответ однозначный' }))));
+}
+
+// ---- Подбор тем по кнопке «Другие темы» (smm_pipeline.mjs topics): Виктор отдаёт 8 кандидатов с формулировками запроса, Лев оценивает по файлу candidates.json
+if (/Найди 8 кандидатов на тему следующего ролика/.test(q) && !/УЖЕ ЕСТЬ, НЕ ПОВТОРЯТЬ/.test(q)) {
+  const out = /Итог запиши строго в файл (.+?\.json)/.exec(q)[1].trim();
+  const ev = [{ source: 'PubMed', url: 'https://pubmed.ncbi.nlm.nih.gov/2/', pmid: '2', finding: 'ответ однозначный' }];
+  const T = ['Правда ли, что в тёплой ванне можно «выпарить» простуду?', 'Правда ли, что от шоколада бывают прыщи?', 'Правда ли, что мозгу нужна глюкоза и без сладкого он не думает?', 'Правда ли, что хруст пальцев приводит к артриту?',
+    'Правда ли, что жвачка проглоченная лежит в желудке семь лет?', 'Правда ли, что волосы после бритья растут гуще?', 'Правда ли, что ногти и волосы растут после смерти?', 'Правда ли, что от близкого экрана портится зрение у детей?'];
+  fs.writeFileSync(out, JSON.stringify(T.map((title, k) => ({ title, rubric: 'myth', why_massive: 'массовый', evidence: ev, clear_answer: true, detective_angle: 'откуда миф', competitors: '-', risks: '-', links: [], queries: ['запрос ' + k], wiki_article: '' }))));
+}
+if (/Оцени кандидатов из файла/.test(q) && /candidates\.json/.test(q) && !/daily_fresh\.json/.test(q)) {
+  const out = /Итог запиши строго в файл (.+?\.json)/.exec(q)[1].trim(), inp = /кандидатов из файла (.+?\.json)/.exec(q)[1].trim();
+  const cands = JSON.parse(fs.readFileSync(inp, 'utf8'));
+  fs.writeFileSync(out, JSON.stringify(cands.map((c, i) => ({ title: c.title, rubric: 'myth', gates_passed: true, scores: { reach: 8, urgency: 5 }, total: 80 - i * 2, confidence: 'medium', data_sources: ['PubMed'], main_risk: '-', recommendation: 'снимать', reason: 'массовый вопрос', saw_demand: !!c.demand }))));
 }

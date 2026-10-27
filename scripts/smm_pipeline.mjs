@@ -36,6 +36,7 @@ import { craftIssues, craftFeedback, craftSummary } from './script_craft.mjs';
 import { evidenceIssues, evidenceFeedback, ledgerPath } from './agent_skills.mjs';
 import { skillUsageNote } from './skill_usage.mjs';
 import { fireReminders } from './reminders.mjs';
+import { measureAll, applyDemand, demandLookup, demandForPrompt, VIKTOR_DEMAND_RULES, LEV_DEMAND_RULES } from './demand.mjs';
 import { publishYouTube, publishCard, loadPublishMeta, queueInfo, queueText } from './publisher.mjs';
 import { ytStatus } from './youtube.mjs';
 const speechSeconds = async (segments) => { await yieldToPriority('scriptwriter'); return measureSpeech(segments, { root: ROOT }); };   // { sec, estimated, perSeg }
@@ -57,11 +58,12 @@ async function topics(hint) {
     label: 'research', outFile: cand, persona: await promptOf('research'),
     task: `Найди 8 кандидатов на тему следующего ролика канала «Медицинский детектив» (русскоязычная аудитория). Рубрика «Миф»: популярное заблуждение о здоровье, которое можно разоблачить по первоисточникам. Цель: максимально широкий охват, массовые заблуждения, не узкая ниша.
 Уже снято или есть в работе или уже предлагалось, не повторять: ${already}.${hint ? `\nПожелание Ника: ${hint}` : ''}
+${VIKTOR_DEMAND_RULES}
 С помощью веб-поиска и чтения страниц:
 1) Найди, что реально спрашивают и обсуждают люди («правда ли что…», «миф ли», вопросы на форумах и в Q&A, обсуждения под роликами).
 2) Посмотри популярные русскоязычные ролики и каналы про мифы о здоровье (YouTube, Telegram): какие темы собирают просмотры, о чём спорят в комментариях, что уже разобрано и что осталось.
 3) Для каждого кандидата найди сильный первоисточник (PubMed, Cochrane, ВОЗ, Mayo Clinic) и проверь, что ответ однозначный; без источника тему не включай.
-Формат файла: JSON-массив из 8 объектов: {"title": "миф вопросом", "rubric": "myth", "why_massive": "почему массовый + данные", "evidence": [{"source": "…", "url": "…", "pmid": "…", "finding": "что установлено"}], "clear_answer": true/false, "detective_angle": "происхождение мифа или поворот", "competitors": "что уже сняли конкуренты, просмотры если видно", "risks": "медицинские и юридические риски", "links": ["…откуда данные про популярность"]}.`,
+Формат файла: JSON-массив из 8 объектов: {"title": "миф вопросом", "rubric": "myth", "why_massive": "почему массовый + данные", "evidence": [{"source": "…", "url": "…", "pmid": "…", "finding": "что установлено"}], "clear_answer": true/false, "detective_angle": "происхождение мифа или поворот", "competitors": "что уже сняли конкуренты, просмотры если видно", "risks": "медицинские и юридические риски", "links": ["…откуда данные про популярность"], "queries": ["…", "…"], "wiki_article": "…"}.`,
   });
   const cands = readJson(cand);
   if (!Array.isArray(cands) || !cands.length) {
@@ -70,6 +72,12 @@ async function topics(hint) {
     await safeNotify('⚠️ Поиск тем не дал результата. Подробности: ' + dir);
     throw new Error('нет candidates.json, смотри ' + dir);
   }
+  // Замер спроса делает КОД (Википедия, подсказки, тренды; с ключами Вордстат и YouTube). Охват в балле считается по нему, а не «на глаз» (решение Ника 2026-10-27).
+  await agent('research', 'working', 'Замеряю спрос на темы', 60, 'Замеряю спрос: просмотры, подсказки, тренды');
+  const demands = await measureAll(cands);
+  fs.writeFileSync(path.join(dir, 'candidates_raw.json'), JSON.stringify(cands, null, 1), 'utf8');
+  fs.writeFileSync(path.join(dir, 'demand.json'), JSON.stringify(cands.map((c, i) => ({ title: c.title, ...demands[i] })), null, 1), 'utf8');
+  fs.writeFileSync(cand, JSON.stringify(cands.map((c, i) => ({ ...c, demand: demandForPrompt(demands[i]) })), null, 1), 'utf8');
   await agent('research', 'idle', 'Темы переданы Льву на оценку', 100, `Нашёл ${cands.length} кандидатов`);
   await say('research', `Нашёл ${cands.length} кандидатов с первоисточниками, передал Льву на оценку.`);
   await scene('research', 'virality', `Лев, вот ${cands.length} кандидатов. Оцени виральность по рубрике.`, 'chat');
@@ -77,9 +85,11 @@ async function topics(hint) {
   const t2 = await runAgent({
     label: 'virality', outFile: scored, persona: await promptOf('virality'), maxTurns: 60, budgetSec: 1200,
     task: `Оцени кандидатов из файла ${cand} (читай его). Для каждого: сначала ворота (первоисточник с однозначным ответом; нет рекомендаций лечения и дозировок; не про бренд или рецептурный препарат), затем баллы по рубрике из твоего промпта (охват 25, насущность 15, распространённость 15, доказательства 15, ниша 15, сюжет 10, скорость 5), итог 0-100. Проверь данные веб-поиском там, где можешь; где данных нет, пиши «нет данных» и снижай уверенность, не выдумывай.
+${LEV_DEMAND_RULES}
 Формат файла: JSON-массив, отсортированный по total по убыванию: {"title","rubric","gates_passed":true/false,"scores":{"reach","urgency","prevalence","evidence","niche","plot","speed"},"total","confidence":"low|medium|high","data_sources":["…"],"main_risk","recommendation":"снимать|отложить|отклонить","reason":"1-2 предложения"}.`,
   });
-  const res = readJson(scored);
+  const levRes = readJson(scored);
+  const res = Array.isArray(levRes) ? applyDemand(levRes, demandLookup(cands, demands)) : levRes;      // охват = по замерам, итог пересчитан, строки пересортированы
   if (!Array.isArray(res) || !res.length) {
     await agent('virality', 'error', 'Не удалось оценить темы', 0, `Оценка не удалась (код ${t2.code}), см. ${dir}`, 'error');
     await safeNotify('⚠️ Оценка тем не удалась. Подробности: ' + dir);
@@ -89,16 +99,16 @@ async function topics(hint) {
   const made = [];
   for (const r of res) {
     const c = byTitle.get(r.title) || {};
-    const notes = JSON.stringify({ gates: r.gates_passed, scores: r.scores, confidence: r.confidence, reason: r.reason, risk: r.main_risk, recommendation: r.recommendation, sources: r.data_sources, evidence: c.evidence, why_massive: c.why_massive, angle: c.detective_angle, competitors: c.competitors });
+    const notes = JSON.stringify({ gates: r.gates_passed, scores: r.scores, confidence: r.confidence, reason: r.reason, risk: r.main_risk, recommendation: r.recommendation, sources: r.data_sources, evidence: c.evidence, why_massive: c.why_massive, angle: c.detective_angle, competitors: c.competitors, demand: r.demand, demand_line: r.demand_line, reach_lev: r.reach_lev });
     const rejected = r.recommendation === 'отклонить' || r.gates_passed === false;
     const { id } = await api('/api/video', { title: r.title, rubric: r.rubric || c.rubric || 'myth', stage: rejected ? 'rejected' : 'scored', score: r.total, notes });
     made.push({ id, ...r, rejected });
   }
   await agent('virality', 'idle', 'Оценка готова, ход за Ником', 100, `Оценил ${res.length} тем`);
-  await say('virality', `Оценил ${res.length} тем. Лучшая: «${res[0].title}» (${res[0].total}). Балл это гипотеза, не прогноз; список у Капитана в «Требуют ответа».`);
+  await say('virality', `Оценил ${res.length} тем. Лучшая: «${res[0].title}» (${res[0].total}). Охват в балле посчитан по замерам спроса, остальное моя оценка; это не прогноз просмотров. Список у Капитана в «Требуют ответа».`);
   await agent('captain_smm', 'waiting', 'Ждёт, какую тему выберет Ник', 0, `Темы оценены (${res.length}), нужен выбор Ника`);
   await scene('virality', 'captain_smm', 'Темы оценены, пусть Ник выберет.', 'chat');
-  fs.writeFileSync(path.join(dir, 'summary.md'), res.map((r, i) => `${i + 1}. [${r.total}] ${r.title} (${r.recommendation}; ${r.confidence}) ${r.reason || ''}`).join('\n'), 'utf8');
+  fs.writeFileSync(path.join(dir, 'summary.md'), res.map((r, i) => `${i + 1}. [${r.total}] ${r.title} (${r.recommendation}; ${r.confidence}) ${r.reason || ''} | ${r.demand_line || ''}`).join('\n'), 'utf8');
 
   const tm = topicsMessage(await videos());
   if (tm) await safeNotify(tm.text, tm.buttons);
