@@ -297,6 +297,7 @@ export function planCardTextV2(plan, chName, { note = '', now = Date.now() } = {
     if (note) L.push(note);
     L.push('Нажмите номера или напишите: «видео 2, посты 1 и 4». «Утвердить» запустит ролик и два поста; каждый пост перед выходом вы ещё раз увидите и подтвердите.');
     if (plan.sources && plan.sources.errors && plan.sources.errors.length) L.push(`⚠️ Источники без ответа: ${plan.sources.errors.map((e) => e.source).slice(0, 4).join(', ')}.`);
+    const fl = plan.filtered; if (fl && (fl.video || fl.posts || fl.items)) L.push(`🧭 Отсеяно по профилю канала (тяжёлые болезни, лечение, узкая аудитория): тем для видео ${fl.video || 0}, для постов ${fl.posts || 0}, материалов источников ${fl.items || 0}.`);
     return L.join('\n');
   };
   let text = build(true); if (text.length > 3700) text = build(false);

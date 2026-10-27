@@ -21,7 +21,7 @@ const DAY = 86400e3;
 
 // Шесть тем для видео и шесть для постов (разные по смыслу), материалы источников разной свежести.
 const VT = ['Гомеопатия работает лучше плацебо?', 'Эффект Моцарта делает детей умнее?', 'Давление можно почувствовать по самочувствию?', 'Хруст пальцев вызывает артрит?', 'Кофе обезвоживает организм?', 'Полнолуние влияет на психику людей?'];
-const PT = ['Быстрая ходьба продлевает жизнь?', 'Мобильный телефон вызывает рак мозга?', 'Восемь стаканов воды в день обязательны?', 'Чтение в темноте портит зрение навсегда?', 'Сахар делает детей гиперактивными?', 'Витамин С лечит простуду быстрее?'];
+const PT = ['Быстрая ходьба продлевает жизнь?', 'Мобильный телефон вызывает головную боль?', 'Восемь стаканов воды в день обязательны?', 'Чтение в темноте портит зрение навсегда?', 'Сахар делает детей гиперактивными?', 'Витамин С лечит простуду быстрее?'];
 const T = [...VT, ...PT];
 const REACH = { [VT[2]]: 17, [VT[0]]: 10, [VT[3]]: 6, [VT[1]]: 4, [VT[4]]: 3, [VT[5]]: 2, [PT[0]]: 20, [PT[1]]: 15, [PT[2]]: 10, [PT[3]]: 5, [PT[4]]: 5, [PT[5]]: 5 };
 const AGE = [0.5, 1, 5, 20, 3, 40];                                 // возраст материала поста в сутках
@@ -159,6 +159,47 @@ test('старый план без вариантов (прежний форма
   const d2 = nextDate(), b = mk({ ...FX() }); await X.studioPlan('med', { date: d2, deps: b.deps });
   await X.studioPlanAct('med', d2, 'skip', { deps: b.deps }); assert.equal(S.loadPlan(d2, 'med').status, 'skipped'); assert.equal(b.log.spawn.length, 0);
   assert.equal((await X.studioPlanAct('med', d2, 'v1', { deps: b.deps })).ok, false, 'пропущенный план не меняется'); assert.equal((await X.studioPlanAct('med', '2000-01-01', 'ok', { deps: b.deps })).ok, false, 'нет такого плана');
+});
+
+/* ---- профиль канала: контекст для агентов и отсев тяжёлых тем ---- */
+const MD = { med_detective: { ...CH.med, key: 'med_detective' } };
+const HEAVY_V = ['Правда ли, что сахарный диабет бывает от сладкого?', 'Правда ли, что инфаркт всегда начинается с боли в груди?', 'Правда ли, что если в семье не было рака груди, он не грозит?'];
+test('профиль канала: тяжёлые темы и материалы про болезни отсеиваются до замера спроса, агенты получают профиль, карточка говорит об отсеве, файл профиля создан', async () => {
+  const date = nextDate(), fx = FX(), heavyItem = { source: 'PLOS Medicine', type: 'rss', title: 'Новый препарат от лейкоза прошёл испытания', link: 'https://example.org/news/99', date: NOW - DAY, summary: 'суть' };
+  const { deps, log } = mk({ ...fx, cands: [...fx.cands, ...HEAVY_V.map((t) => cand(t, { audience_fit: 5 }))], postCands: [...fx.postCands, postCand(0, { title: 'Правда ли, что лейкоз — всегда смертный приговор?' }), postCand(1, { title: 'Правда ли, что витамин D нужен всем?', audience_fit: 2, fit_note: 'про пожилых' })], items: { ...fx.items, items: [...fx.items.items, heavyItem] } });
+  deps.channels = () => MD;
+  const r = await X.studioPlan('med_detective', { date, deps }), plan = r.plan;
+  assert.equal(plan.options.video.length, 4); assert.ok(plan.options.video.every((c) => VT.includes(c.title)), 'видео: только бытовые');
+  const all = [...plan.options.video, ...plan.options.video_spare, ...plan.options.posts, ...plan.options.posts_spare].map((c) => c.title);
+  assert.ok(all.length >= 9 && all.every((t) => !/диабет|инфаркт|рака|лейкоз|витамин D/.test(t)), 'ни одной тяжёлой темы и темы с низкой оценкой');
+  assert.equal(log.measure[0].n, VT.length, 'тяжёлые темы не попали в замер YouTube (квота не тратится)'); assert.equal(log.measure[1].n, PT.length);
+  assert.deepEqual(plan.filtered, { video: 3, posts: 2, items: 1 }); assert.equal(plan.sources.filtered, 1);
+  const scout = log.runs.find((x) => x.label === 'scout'), ps = log.runs.find((x) => x.label === 'postscout');
+  for (const t of [scout.task, ps.task]) { assert.match(t, /ПРОФИЛЬ КАНАЛА/); assert.match(t, /18-45/); assert.match(t, /НЕ ПОДХОДИТ[^\n]*рак, инфаркт, инсульт, диабет/); assert.match(t, /"audience_fit"/); assert.match(t, /Сахарный диабет бывает от сладкого/); }
+  assert.match(scout.task, /только myth/); assert.match(ps.task, /body «Что будет с телом, если…»/); assert.match(ps.task, /лучше меньше тем, чем тяжёлые/);
+  const items = JSON.parse(fs.readFileSync(path.join(path.dirname(ps.outFile), 'source_items.json'), 'utf8')); assert.ok(!items.some((x) => /лейкоз/.test(x.title)), 'материал про лейкоз разведчик не видит'); assert.equal(items.length, PT.length);
+  assert.match(log.notify.at(-1).t, /🧭 Отсеяно по профилю канала[^\n]*для видео 3, для постов 2, материалов источников 1/);
+  const dirOf = path.dirname(scout.outFile); assert.equal(JSON.parse(fs.readFileSync(path.join(dirOf, 'rejected_by_profile_video.json'), 'utf8')).length, 3); assert.equal(JSON.parse(fs.readFileSync(path.join(dirOf, 'rejected_by_profile_posts.json'), 'utf8')).length, 2);
+  assert.match(fs.readFileSync(path.join(process.env.OFFICE_STUDIO_DIR, 'channels', 'med_detective.md'), 'utf8'), /профиль и голос канала/);
+});
+test('профиль канала: если после отсева мало тем, второй круг поиска просит бытовые темы и называет, сколько отсеяно; у канала без профиля отсева нет', async () => {
+  const date = nextDate(), fx = FX(), { deps, log } = mk({ ...fx, cands: [...VT.slice(0, 3).map((t) => cand(t)), ...HEAVY_V.map((t) => cand(t))] });
+  deps.channels = () => MD; await X.studioPlan('med_detective', { date, deps });
+  const scouts = log.runs.filter((x) => /^scout/.test(x.label)); assert.equal(scouts.length, 2); assert.match(scouts[1].task, /3 отсеяно как тяжёлые или не для широкой аудитории/); assert.match(scouts[1].task, /еда и напитки, сон, спорт, мозг и память/);
+  const d2 = nextDate(), m2 = mk({ ...fx, cands: [...VT.map((t) => cand(t)), ...HEAVY_V.map((t) => cand(t))] }); const r2 = await X.studioPlan('med', { date: d2, deps: m2.deps });
+  assert.ok([...r2.plan.options.video, ...r2.plan.options.video_spare].some((c) => /диабет/.test(c.title)), 'без профиля канал не отсеивает'); assert.ok(!m2.log.runs[0].task.includes('ПРОФИЛЬ КАНАЛА')); assert.equal(r2.plan.filtered.video, 0);
+});
+test('профиль канала: слова из пожелания Ника снимают запрет («план дня про диабет»)', async () => {
+  const date = nextDate(), fx = FX(), { deps } = mk({ ...fx, cands: [...fx.cands, cand('Правда ли, что сахарный диабет бывает от сладкого?')], reach: { ...REACH, 'Правда ли, что сахарный диабет бывает от сладкого?': 24 } });
+  deps.channels = () => MD; const r = await X.studioPlan('med_detective', { date, hint: 'про диабет', deps });
+  assert.equal(r.plan.options.video[0].title, 'Правда ли, что сахарный диабет бывает от сладкого?'); assert.equal(r.plan.filtered.video, 0);
+});
+test('пост: автор и редактор получают профиль канала и проверяют соответствие; файл голоса канала есть', async () => {
+  const date = nextDate(), m = mk({ ...FX() }); m.deps.channels = () => MD; await X.studioPlan('med_detective', { date, deps: m.deps });
+  const r = await X.studioPost('med_detective', date, 'post1', { deps: { ...m.deps, runAgent: async (o) => { m.log.runs.push(o); await author(GOOD('Хук про профиль'))(o); return { code: 0 }; } } }); assert.equal(r.ok, true);
+  const a = m.log.runs.find((x) => x.label === 'author1'), e = m.log.runs.find((x) => x.label === 'editor1');
+  assert.match(a.task, /Аудитория: Широкая русскоязычная[\s\S]*не должен звучать как справочник про болезни/); assert.match(e.task, /5\) тема и подача подходят профилю канала/); assert.match(e.task, /тема не подходит каналу/); assert.match(a.task, /channels[\\/]med_detective\.md/);
+  assert.ok(fs.existsSync(path.join(process.env.OFFICE_STUDIO_DIR, 'channels', 'med_detective.md')));
 });
 
 async function planned() { const date = nextDate(), m = mk({ ...FX() }); await X.studioPlan('med', { date, deps: m.deps }); return { date, ...m }; }

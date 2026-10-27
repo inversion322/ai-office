@@ -8,15 +8,17 @@ import { studioDir } from './studio.mjs';
 const UA = 'Mozilla/5.0 (compatible; AIOfficeTopicResearch/1.0)';       // с адресом проекта в User-Agent Mayo Clinic отвечает 403
 const DAY = 86400e3;
 
-/** Источники по умолчанию. Для канала «Медицинский детектив» это первичные источники из его брифа (ВОЗ, клиники) и научные новости; свой список Ник задаёт в server/data/studio.json (channels.<канал>.sources). */
+/** Источники по умолчанию. Для канала «Медицинский детектив» (выбор Ника 2026-10-28, проверены живьём): доказательность (Cochrane, PLOS Medicine), клиника (Mayo), разборы мифов (Science-Based Medicine, The Conversation), научная журналистика (Science News), по-русски (СО РАН, ВОЗ); lenta.ru в этом списке никогда не было (она в отслеживании WorkFlow AI); свой список Ник задаёт в server/data/studio.json (channels.<канал>.sources). */
 export const DEFAULT_SOURCES = {
   med_detective: [
-    { type: 'rss', identifier: 'https://www.who.int/rss-feeds/news-english.xml', name: 'ВОЗ (WHO), новости' },
+    { type: 'rss', identifier: 'https://www.cochrane.org/news/rss', name: 'Cochrane, новости' },
+    { type: 'rss', identifier: 'https://journals.plos.org/plosmedicine/feed/atom', name: 'PLOS Medicine' },
     { type: 'rss', identifier: 'https://newsnetwork.mayoclinic.org/feed/', name: 'Mayo Clinic, новости' },
-    { type: 'rss', identifier: 'https://medicalxpress.com/rss-feed/', name: 'Medical Xpress' },
-    { type: 'rss', identifier: 'https://www.sciencedaily.com/rss/health_medicine.xml', name: 'ScienceDaily: здоровье и медицина' },
-    { type: 'rss', identifier: 'https://www.news-medical.net/syndication.axd?format=rss', name: 'News-Medical' },
-    { type: 'rss', identifier: 'https://nplus1.ru/rss', name: 'N+1 (наука, по-русски)' },
+    { type: 'rss', identifier: 'https://sciencebasedmedicine.org/feed/', name: 'Science-Based Medicine' },
+    { type: 'rss', identifier: 'https://theconversation.com/us/health/articles.atom', name: 'The Conversation: здоровье' },
+    { type: 'rss', identifier: 'https://www.sciencenews.org/topic/health-medicine/feed', name: 'Science News: здоровье' },
+    { type: 'rss', identifier: 'http://feeds.feedburner.com/scfh/news', name: 'Наука из первых рук (СО РАН)' },
+    { type: 'rss', identifier: 'https://www.who.int/rss-feeds/news-russian.xml', name: 'ВОЗ на русском' },
   ],
 };
 export const sourcesOf = (chKey, chCfg = {}) => (Array.isArray(chCfg.sources) && chCfg.sources.length ? chCfg.sources : DEFAULT_SOURCES[chKey] || []).filter((s) => s && s.type && s.identifier);

@@ -43,6 +43,7 @@ test('сбор материалов: отказ одного источника 
 });
 test('свежесть для ранжирования и источники канала (по умолчанию и свои)', () => {
   assert.deepEqual([NOW - 1 * DAY, NOW - 5 * DAY, NOW - 20 * DAY, NOW - 90 * DAY, 0].map((d) => SRC.freshness(d, NOW)), [3, 2, 1, 0, 1]);
-  assert.ok(SRC.sourcesOf('med_detective').length >= 5); assert.deepEqual(SRC.sourcesOf('other'), []);
+  const def = SRC.sourcesOf('med_detective'); assert.equal(def.length, 8, 'выбор Ника 2026-10-28: восемь источников'); assert.equal(new Set(def.map((s) => s.identifier)).size, 8); assert.ok(def.every((s) => ['rss', 'telegram', 'website'].includes(s.type) && /^https?:\/\//.test(s.identifier) && s.name));
+  assert.ok(!def.some((s) => /lenta/i.test(s.identifier)), 'lenta.ru в списке нет'); for (const must of ['cochrane.org', 'plos.org', 'mayoclinic.org', 'sciencebasedmedicine.org', 'theconversation.com', 'sciencenews.org', 'feedburner.com/scfh', 'who.int/rss-feeds/news-russian']) assert.ok(def.some((s) => s.identifier.includes(must)), must); assert.deepEqual(SRC.sourcesOf('other'), []);
   assert.deepEqual(SRC.sourcesOf('med_detective', { sources: [{ type: 'telegram', identifier: '@a' }, { type: '', identifier: 'x' }] }), [{ type: 'telegram', identifier: '@a' }], 'свой список главнее умолчания, мусор отбрасывается');
 });

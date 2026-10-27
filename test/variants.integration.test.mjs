@@ -80,7 +80,9 @@ test('«Утвердить все три»: три монтажа стартую
   assert.ok(Math.max(...spans.map((s) => s.start)) < Math.min(...spans.map((s) => s.end)), 'монтажи шли одновременно: ' + JSON.stringify(spans.map((s) => [s.start % 100000, s.end % 100000])));
   assert.deepEqual(ids.map((id) => JSON.parse(fs.readFileSync(path.join(projDir(id), 'format.json'), 'utf8')).format), ['A', 'B', 'C']);
   const ag = (await state()).agents; assert.deepEqual(['video', 'video_b', 'video_c'].map((id) => ag.find((a) => a.id === id).status), ['idle', 'idle', 'idle']);
-  const msgs = (await api('/api/chat?office=smm')).messages; const acc = msgs.filter((m) => m.kind === 'action' && /accept:/.test(JSON.stringify(m.buttons)) && ids.some((id) => JSON.stringify(m.buttons).includes(`accept:${id}`)));
+  // стадия `produced` ставится раньше, чем уходит карточка приёмки: под нагрузкой (полный прогон) последняя карточка приходит на долю секунды позже, поэтому ждём её, а не считаем сразу
+  const getAcc = async () => ((await api('/api/chat?office=smm')).messages).filter((m) => m.kind === 'action' && /accept:/.test(JSON.stringify(m.buttons)) && ids.some((id) => JSON.stringify(m.buttons).includes(`accept:${id}`)));
+  const acc = (await waitFor(async () => { const a = await getAcc(); return a.length >= 3 ? a : null; }, 20000)) || await getAcc();
   assert.equal(acc.length, 3, 'три карточки приёмки'); assert.ok(acc.some((m) => /вариант B «Один объект»/.test(m.text))); assert.ok(acc.some((m) => /вариант C «Комикс»/.test(m.text)));
 });
 
