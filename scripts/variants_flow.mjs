@@ -18,7 +18,7 @@ const first = (t) => String(t || '').split(/(?<=[.!?…])\s/)[0];
 const MAXV = Math.max(1, Number(process.env.SCRIPT_ROUNDS) || 3);   // кругов на один вариант (запись, проверки, исправления); как у сценария A: три (решение Ника 2026-10-21)
 
 export function makeFlow(deps) {
-  const { ROOT, api, videos, getVideo, setVideo, runAgent, promptOf, agent, say, scene, safeNotify, speechSeconds, withCta, MAX_SPEECH, MAX_WORDS, ledgerPath, log = console.log } = deps;
+  const { ROOT, api, videos, getVideo, setVideo, runAgent, promptOf, agent, say, scene, safeNotify, speechSeconds, withCta, MAX_SPEECH, MAX_WORDS, log = console.log } = deps;
   const runDir = (id) => path.join(ROOT, 'smm', 'runs', `video_${id}`);
   const rel = (p) => path.relative(ROOT, p).replaceAll('\\', '/');
 
@@ -46,8 +46,7 @@ export function makeFlow(deps) {
   function copyMaterials(fromDir, toDir) {
     fs.mkdirSync(toDir, { recursive: true });
     for (const f of ['FACTS.md', 'check.json']) if (fs.existsSync(path.join(fromDir, f))) fs.copyFileSync(path.join(fromDir, f), path.join(toDir, f));
-    try { const lf = ledgerPath(fromDir), lt = ledgerPath(toDir); if (fs.existsSync(lf)) { fs.mkdirSync(path.dirname(lt), { recursive: true }); fs.copyFileSync(lf, lt); } } catch {}
-  }
+      }
 
   /** Написать (или исправить) один вариант. Возвращает { ok, segments, hook_type, warnings[] }. */
   async function writeVariant({ letter, rec, A, others, title, rubric, comment = '' }) {

@@ -28,12 +28,12 @@ function mkFlow() {
   };
   return makeFlow({ ROOT, api, videos: async () => db, getVideo, setVideo, runAgent, promptOf: async () => 'persona', agent: async (id, st, task) => { statuses.push([id, st, task]); }, say: async () => {}, scene: async () => {},
     safeNotify: async (text, buttons) => { notified.push({ text, buttons }); return 100 + notified.length; },
-    speechSeconds: async (segs) => ({ sec: segs.join(' ').split(/\s+/).length * 0.33, estimated: false }), withCta: (s) => [...s, 'Ставь лайк и подписывайся.'], MAX_SPEECH: 53, MAX_WORDS: 100, ledgerPath: (d) => path.join(d, 'ledger.json'), log: () => {} });
+    speechSeconds: async (segs) => ({ sec: segs.join(' ').split(/\s+/).length * 0.33, estimated: false }), withCta: (s) => [...s, 'Ставь лайк и подписывайся.'], MAX_SPEECH: 53, MAX_WORDS: 100, log: () => {} });
 }
 function seedA(id = 1, rotationFromPrev = false) {
   db.push({ id, title: 'Кофе', rubric: 'myth', stage: 'checked', notes: J({ evidence: ['PMID 24416202'], angle: 'пробирки' }) });
   const d = path.join(ROOT, 'smm', 'runs', `video_${id}`); fs.mkdirSync(d, { recursive: true });
-  fs.writeFileSync(path.join(d, 'script.json'), J(mk(SA, 'вопрос-ловушка'))); fs.writeFileSync(path.join(d, 'FACTS.md'), 'Killer 2014, 50 мужчин, 3 дня, PMID 24416202'); fs.writeFileSync(path.join(d, 'check.json'), J({ verdict: 'pass' })); fs.writeFileSync(path.join(d, 'ledger.json'), '{"sources":[]}');
+  fs.writeFileSync(path.join(d, 'script.json'), J(mk(SA, 'вопрос-ловушка'))); fs.writeFileSync(path.join(d, 'FACTS.md'), 'Killer 2014, 50 мужчин, 3 дня, PMID 24416202'); fs.writeFileSync(path.join(d, 'check.json'), J({ verdict: 'pass' }));
 }
 beforeEach(() => { ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vflow-')); db = []; nextId = 2; notified = []; statuses = []; calls = []; veraPlan = []; plans = { B: [mk(SB, 'цифра')], C: [mk(SC, 'контраст', { panels: [{ scene: 'Мужчина в белом халате ставит на весы чашку кофе', caption: 'Кофе сушит?' }, { scene: 'Учёные в лаборатории наливают воду в пробирки', caption: 'Опыт на пятидесяти' }, { scene: 'Три дня подряд по очереди кофе и вода', caption: '' }, { scene: 'Утка-детектив смотрит в лупу на график', caption: 'Вровень' }], reveal: 'Кофе воду не отнимает' })] }; delete process.env.VARIANT_FORMATS; delete process.env.VARIANT_VERA; });
 const done = () => fs.rmSync(ROOT, { recursive: true, force: true });
@@ -46,7 +46,7 @@ test('счастливый путь: записи B и C с метками, сц
     assert.deepEqual(['A', 'B', 'C'].map((L, i) => variantOf(db[i]).letter), ['A', 'B', 'C']); assert.equal(variantOf(A).group, 1); assert.equal(variantOf(B).group, 1); assert.equal(variantOf(C).format, 'C'); assert.equal(variantOf(A).rotation, 0);
     assert.equal(B.stage, 'checked'); assert.equal(C.stage, 'checked'); assert.equal(B.title, 'Кофе');
     const dB = path.join(ROOT, 'smm', 'runs', 'video_2'), dC = path.join(ROOT, 'smm', 'runs', 'video_3');
-    assert.match(fs.readFileSync(path.join(dB, 'script_ru.txt'), 'utf8'), /Пятьдесят мужчин[\s\S]*Ставь лайк и подписывайся\.\n$/); assert.ok(fs.existsSync(path.join(dB, 'FACTS.md')), 'факты скопированы'); assert.ok(fs.existsSync(path.join(dB, 'ledger.json')));
+    assert.match(fs.readFileSync(path.join(dB, 'script_ru.txt'), 'utf8'), /Пятьдесят мужчин[\s\S]*Ставь лайк и подписывайся\.\n$/); assert.ok(fs.existsSync(path.join(dB, 'FACTS.md')), 'факты скопированы'); assert.ok(!fs.existsSync(path.join(dB, 'ledger.json')), 'реестра цитат нет');
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dC, 'panels.json'), 'utf8')).length, 4); assert.equal(fs.readFileSync(path.join(dC, 'reveal.txt'), 'utf8').trim(), 'Кофе воду не отнимает'); assert.equal(fs.existsSync(path.join(dB, 'panels.json')), false, 'панели только у C');
     assert.equal(calls.filter((c) => c.label.startsWith('variant_B')).length, 1, 'B принят с первого круга'); assert.equal(calls.filter((c) => c.label.startsWith('variant_C')).length, 1, 'C принят с первого круга');
     assert.doesNotMatch(notified[0]?.text || '', /Автопроверки не приняли до конца/);

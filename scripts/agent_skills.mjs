@@ -7,12 +7,11 @@ import os from 'node:os';
 
 const HOME = () => path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'hermes');
 const fwd = (p) => String(p).replaceAll('\\', '/');
-export const SOURCES_PY = (profile = process.env.WRITER_PROFILE || 'writer') => fwd(path.join(HOME(), 'profiles', profile, 'skills', 'research', 'grounded-citations', 'scripts', 'sources.py'));
 
 /** required: skill_view обязателен (проверяется по логу). hint: полезно, но условно (страница не открылась), по логу не проверяется. */
 export const AGENT_SKILLS = {
   scriptwriter: { required: ['short-video-script-craft', 'storytelling', 'storytelling-hooks', 'humanizer'], hint: ['blocked-page-recovery'] },   // storytelling* добавлены 2026-10-21: «сценарии как протокол фактов, нужна единая история»
-  factcheck: { required: ['grounded-citations'], hint: ['blocked-page-recovery'] },
+  factcheck: { required: [], hint: ['blocked-page-recovery'] },   // grounded-citations и реестр цитат убраны 2026-10-27 (решение Ника: прямые цитаты ломают логику сценария)
   research: { required: [], hint: ['blocked-page-recovery'] },
   virality: { required: [], hint: ['blocked-page-recovery'] },
   packager: { required: [], hint: [] },
@@ -21,9 +20,6 @@ export const requiredFor = (agentId) => (AGENT_SKILLS[agentId] && AGENT_SKILLS[a
 
 const BLOCKED = (n) => `${n}. Если нужная страница не открывается (403/429, платный доступ, защита от ботов), сделай skill_view('blocked-page-recovery') и действуй по нему, а не пропускай источник.`;
 const HEAD = '## СКИЛЛЫ ПРЕЖДЕ ВСЕГО (решение Ника 2026-10-20; открытие проверяется по логу твоей сессии)';
-
-/** Ledger Веры лежит рядом со сценарием: <dir>/ledger.json */
-export const ledgerPath = (dir) => fwd(path.join(dir, 'ledger.json'));
 
 export function skillsBlock(agentId, { dir = '.' } = {}) {
   if (agentId === 'scriptwriter') return `${HEAD}
@@ -42,42 +38,15 @@ export function skillsBlock(agentId, { dir = '.' } = {}) {
 7. Вердикт («миф» или «правда») только в конце, перед призывом. В двух первых абзацах и в on_screen первых кадров (headline, note, loupe) слов «миф», «ложь», «фейк», «правда» (кроме «правда ли это?») и штампа «МИФ?» нет.
 ${BLOCKED(8)}
 Скиллы английские, а текст русский: принципы переноси на русскую живую речь, не переводи штампы буквально. Из скиллов НЕ берёшь: выдуманные личные истории и цифры (всё из источников), призыв «подпишись» (его добавляет конвейер), время 2 слова в секунду (у нас диктор быстрее, бюджет слов выше).`;
-  if (agentId === 'factcheck') {
-    const S = SOURCES_PY(), L = ledgerPath(dir), D = fwd(dir);
-    return `${HEAD}
-1. Первым делом skill_view('grounded-citations'). Реестр источников этого сценария: ${L}. Команды: python "${S}" --ledger "${L}" reset (один раз в начале); python "${S}" --ledger "${L}" add <url> --title "<кратко>" (печатает id); python "${S}" --ledger "${L}" quote <id> --text "<дословная фраза со страницы, до 200 знаков>" --from <файл с текстом страницы>.
-2. Текст страницы бери в файл, а не из памяти. Для PubMed: curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=<PMID>&rettype=abstract&retmode=text" -o ${D}/src_<N>.txt (чистый текст аннотации). Для остальных страниц: web_extract, текст сохрани в ${D}/src_<N>.txt. Команда quote ОТКЛОНИТ пересказ: фразу копируй из файла. Цитата на языке источника, переводить её не нужно.
-3. В check.json у КАЖДОГО утверждения claims, которое ты признаёшь верным или упрощённым, заполни: "source" = url из реестра, "ledger_id" = id, "quote_found" = ровно ту цитату, которую принял quote. Утверждения со статусом «не подтверждено» или «отклонить» могут быть без цитаты. Код сверит quote_found с реестром; цитата, которой там нет, вернёт тебе проверку на доработку.
-4. В конце: python "${S}" --ledger "${L}" render --style evidence > ${D}/evidence.md.
+  if (agentId === 'factcheck') return `${HEAD.replace(' (решение Ника 2026-10-20; открытие проверяется по логу твоей сессии)', ' (решение Ника 2026-10-27: проверяем СМЫСЛ выжимки, а не дословные цитаты)')}
+1. Ксения пишет КРАТКУЮ ВЫЖИМКУ из источников своими словами, а не цитаты. Твоя задача: убедиться, что выжимка верно передаёт то, что сказано в первоисточнике. Сверяй смысл, а не слова: число, тип исследования (РКИ, метаанализ, наблюдательное), популяцию, направление результата и силу вывода. Пересказ другими словами это норма и не повод для замечания.
+2. Читай источник сама: PubMed через curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=<PMID>&rettype=abstract&retmode=text", остальные страницы через web_extract. Не из памяти и не по чужому пересказу.
+3. НЕ требуй дословных цитат, НЕ веди реестр источников и не запускай sources.py: этого больше нет. В quote_found кратко, своими словами, напиши, что именно в источнике подтверждает утверждение (можно по-русски), этого достаточно.
+4. Возвращай сценарий только за реальную ошибку смысла: выжимка говорит больше, чем источник (причина вместо связи, «доказано» вместо «в одном опыте на N людях»), потеряла оговорку авторов, исказила число или популяцию, дала совет по лечению, дозировку, бренд или обещание результата. Простота и живость пересказа, а также отсутствие дословной фразы из источника замечанием не являются.
 ${BLOCKED(5)}`;
-  }
   if (agentId === 'research' || agentId === 'virality') return `${HEAD}\n1. Если нужная страница не открывается (403/429, платный доступ, защита от ботов), сделай skill_view('blocked-page-recovery') и действуй по нему, а не пропускай источник.`;
   return '';
 }
 
 /** Замечание при повторном запуске, если нужные скиллы не открыты. */
 export const retryNote = (missing) => `ПОВТОР: в прошлой попытке ты не открыл обязательные скиллы: ${missing.join(', ')}. Начни с skill_view для каждого из них и работай по ним; без этого результат не принимается.`;
-
-const norm = (s) => String(s || '').toLowerCase().replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim();
-/** Цитаты реестра: ledger = JSON из sources.py ({sources:[{id,url,quotes:[{text}]}]}) или null. */
-export function ledgerQuotes(ledger) {
-  const out = [];
-  for (const s of (ledger && Array.isArray(ledger.sources) ? ledger.sources : [])) for (const q of s.quotes || []) out.push({ id: s.id, url: s.url, text: norm(q.text) });
-  return out;
-}
-const NEEDS_QUOTE = /^(верно|упрощено)/i;
-/** Проверка Веры: каждое признанное верным утверждение подкреплено цитатой, которую принял реестр. Возвращает { ok, issues[] }. */
-export function evidenceIssues(check, ledger) {
-  const issues = [], claims = (check && Array.isArray(check.claims)) ? check.claims : [];
-  if (!claims.length) return { ok: true, issues };
-  const qs = ledgerQuotes(ledger);
-  if (!ledger || !Array.isArray(ledger.sources) || !ledger.sources.length) return { ok: false, issues: ['реестр источников пуст или не создан (python sources.py --ledger … reset / add / quote), ни одна цитата не подкреплена'] };
-  for (const c of claims) {
-    if (!NEEDS_QUOTE.test(String(c.status || '').trim())) continue;
-    const q = norm(c.quote_found), label = String(c.text || '').slice(0, 70);
-    if (q.length < 12) { issues.push(`«${label}»: нет дословной цитаты в quote_found`); continue; }
-    if (!qs.some((x) => x.text.includes(q) || q.includes(x.text))) issues.push(`«${label}»: цитаты нет в реестре (её не принимала команда quote, это пересказ)`);
-  }
-  return { ok: issues.length === 0, issues };
-}
-export const evidenceFeedback = (issues) => `Проверка Веры не принята: утверждения без цитат из реестра grounded-citations. ${issues.join('; ')}. Для каждого признанного верным утверждения добавь в реестр дословную цитату командой quote (текст страницы бери из файла, не по памяти) и впиши ровно её в quote_found, затем перезапиши check.json. Реестр НЕ сбрасывай (reset не вызывай): дополни тот, что уже есть.`;

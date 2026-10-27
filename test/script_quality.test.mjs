@@ -5,7 +5,6 @@ import fs from 'node:fs';
 import { profileFor, PROFILE_OF } from '../scripts/smm_lib.mjs';
 import { lengthVerdict, cutAdvice, ESTIMATE_BIAS, ESTIMATE_MARGIN, SOFT_OVER, LAST_ROUND_OVER } from '../scripts/smm_tts.mjs';
 import { EXTRA_AGENTS, CRAFT_MARK, FORMAT_MARK, RULES_MARK, STORY_MARK, VERDICT_MARK, STYLE_MARK } from '../server/lib_extra_agents.mjs';
-import { SOURCES_PY } from '../scripts/agent_skills.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { ensureExtraAgents } from '../server/lib_extra_agents.mjs';
 
@@ -16,10 +15,10 @@ test('Ксения и Вера идут на профиль writer (Opus 5.5 med
   assert.deepEqual(Object.keys(PROFILE_OF).sort(), ['factcheck', 'scriptwriter']);
 });
 
-test('профиль writer настроен: модель claude-opus-5-5, усилие medium, скиллы и sources.py на месте', { skip: !fs.existsSync(SOURCES_PY('writer')) }, () => {
+test('профиль writer настроен: модель claude-opus-5-5, усилие medium, обязательные скиллы Ксении на месте', { skip: !process.env.LOCALAPPDATA || !fs.existsSync(process.env.LOCALAPPDATA + '/hermes/profiles/writer/config.yaml') }, () => {
   const dir = process.env.LOCALAPPDATA + '/hermes/profiles/writer', cfg = fs.readFileSync(dir + '/config.yaml', 'utf8');
-  assert.match(cfg, /^\s{2}default: "claude-opus-5-5"/m); assert.match(cfg, /^\s{2}reasoning_effort: "medium"/m);
-  assert.ok(fs.existsSync(SOURCES_PY('writer')), 'sources.py у Веры'); assert.equal(SOURCES_PY(), SOURCES_PY(process.env.WRITER_PROFILE || 'writer'));
+  assert.match(cfg, /^\s{2}default: \"claude-opus-5-5\"/m); assert.match(cfg, /^\s{2}reasoning_effort: \"medium\"/m);
+  for (const rel of ['creative/short-video-script-craft', 'creative/storytelling', 'creative/storytelling-hooks', 'creative/humanizer']) assert.ok(fs.existsSync(dir + '/skills/' + rel + '/SKILL.md'), 'нет у writer: ' + rel);
 });
 
 test('оценка длины честная: без запаса, поправка на реальный синтез; превышение по оценке до 15% не гонит на сокращение, по замеру любое превышение гонит', () => {

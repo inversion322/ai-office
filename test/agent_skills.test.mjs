@@ -5,22 +5,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { AGENT_SKILLS, requiredFor, skillsBlock, retryNote, ledgerQuotes, evidenceIssues, evidenceFeedback, SOURCES_PY } from '../scripts/agent_skills.mjs';
+import * as AS from '../scripts/agent_skills.mjs';
+const { AGENT_SKILLS, requiredFor, skillsBlock, retryNote } = AS;
 import { skillsOpenedByRun } from '../scripts/skill_usage.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FAKE = path.join(ROOT, 'test', 'fixtures', 'fake_agent.mjs');
 const LOCAL = path.join(process.env.LOCALAPPDATA || '', 'hermes');
 
-test('обязательные скиллы: Ксения (short-video-script-craft, storytelling, storytelling-hooks, humanizer), Вера (grounded-citations); остальным обязательных нет; youtube-content намеренно не подключён', () => {
-  assert.deepEqual(requiredFor('scriptwriter'), ['short-video-script-craft', 'storytelling', 'storytelling-hooks', 'humanizer']); assert.deepEqual(requiredFor('factcheck'), ['grounded-citations']);
+test('обязательные скиллы: Ксения (short-video-script-craft, storytelling, storytelling-hooks, humanizer); у Веры обязательных нет (grounded-citations и реестр цитат убраны 2026-10-27); остальным тоже нет; youtube-content намеренно не подключён', () => {
+  assert.deepEqual(requiredFor('scriptwriter'), ['short-video-script-craft', 'storytelling', 'storytelling-hooks', 'humanizer']); assert.deepEqual(requiredFor('factcheck'), []);
   for (const a of ['research', 'virality', 'packager', 'captain_smm', 'нет-такого']) assert.deepEqual(requiredFor(a), [], a);
   assert.ok(!JSON.stringify(AGENT_SKILLS).includes('youtube-content'), 'пакета youtube_transcript_api на ПК нет, ставить без согласия Ника нельзя');
 });
 
-test('скиллы лежат в профиле smm, из которого работают сотрудники (иначе skill_view упадёт), и ledger-скрипт на месте', { skip: !process.env.LOCALAPPDATA }, () => {
-  for (const [rel, f] of [['creative/short-video-script-craft', 'SKILL.md'], ['creative/humanizer', 'SKILL.md'], ['creative/storytelling', 'SKILL.md'], ['creative/storytelling-hooks', 'SKILL.md'], ['research/grounded-citations', 'SKILL.md'], ['web/blocked-page-recovery', 'SKILL.md']]) assert.ok(fs.existsSync(path.join(LOCAL, 'profiles', 'smm', 'skills', rel, f)), 'нет в профиле smm: ' + rel);
-  assert.ok(fs.existsSync(SOURCES_PY()), 'нет sources.py: ' + SOURCES_PY());
+test('скиллы лежат в профиле smm, из которого работают сотрудники (иначе skill_view упадёт)', { skip: !process.env.LOCALAPPDATA }, () => {
+  for (const [rel, f] of [['creative/short-video-script-craft', 'SKILL.md'], ['creative/humanizer', 'SKILL.md'], ['creative/storytelling', 'SKILL.md'], ['creative/storytelling-hooks', 'SKILL.md'], ['web/blocked-page-recovery', 'SKILL.md']]) assert.ok(fs.existsSync(path.join(LOCAL, 'profiles', 'smm', 'skills', rel, f)), 'нет в профиле smm: ' + rel);
 });
 
 test('блок Ксении: оба скилла, ограничение пунктов humanizer (31 и 32 запрещены), нельзя трогать числа, связки и строки Ника', () => {
@@ -28,11 +28,15 @@ test('блок Ксении: оба скилла, ограничение пун�
   assert.match(b, /skill_view\('short-video-script-craft'\)/); assert.match(b, /skill_view\('humanizer'\)/); assert.match(b, /storytelling/); assert.match(b, /storytelling-hooks/); assert.match(b, /ИСТОРИЯ \(решение Ника 2026-10-21/); assert.match(b, /Сначала в уме выбери главную сцену/); assert.match(b, /lens/); assert.match(b, /bookend/); assert.match(b, /НЕ берёшь: выдуманные личные истории/); assert.match(b, /НЕ применяй 31 и 32/); assert.match(b, /Не трогай числа.*связки «но\/поэтому».*дословно/s); assert.match(b, /blocked-page-recovery/);
 });
 
-test('блок Веры: реестр лежит в папке сценария, команды с --ledger, PubMed через efetch в файл, цитату принимает только quote, в check.json поля source/ledger_id/quote_found', () => {
+test('блок Веры: сверка СМЫСЛА выжимки, без реестра и без дословных цитат (решение Ника 2026-10-27); никаких команд sources.py', () => {
   const b = skillsBlock('factcheck', { dir: 'C:/x/video_9' });
-  assert.match(b, /skill_view\('grounded-citations'\)/); assert.match(b, /--ledger "C:\/x\/video_9\/ledger\.json" reset/); assert.match(b, /efetch\.fcgi\?db=pubmed.*retmode=text/); assert.match(b, /quote <id> --text/); assert.match(b, /ОТКЛОНИТ пересказ/);
-  assert.match(b, /"ledger_id"/); assert.match(b, /"quote_found"/); assert.match(b, /render --style evidence/);
-  assert.ok(b.includes(SOURCES_PY()), 'путь к sources.py');
+  assert.match(b, /КРАТКУЮ ВЫЖИМКУ/); assert.match(b, /Сверяй смысл, а не слова/); assert.match(b, /НЕ требуй дословных цитат, НЕ веди реестр/); assert.match(b, /efetch\.fcgi\?db=pubmed.*retmode=text/); assert.match(b, /Возвращай сценарий только за реальную ошибку смысла/); assert.match(b, /blocked-page-recovery/);
+  assert.ok(!/--ledger|ledger\.json|skill_view\('grounded-citations'\)|render --style evidence|quote <id>|python "/.test(b), 'команд реестра в задании нет (слова «не запускай sources.py» есть: это запрет)');
+});
+
+test('реестр цитат убран из кода: нет ни проверки доказательств, ни путей к ledger/sources.py', () => {
+  for (const name of ['ledgerQuotes', 'evidenceIssues', 'evidenceFeedback', 'ledgerPath', 'SOURCES_PY']) assert.equal(AS[name], undefined, name + ' больше не экспортируется');
+  assert.ok(!JSON.stringify(AGENT_SKILLS).includes('grounded-citations'));
 });
 
 test('блоки Виктора и Льва: только запасной путь при закрытых страницах; Тимофей и Капитан без блока', () => {
@@ -41,25 +45,6 @@ test('блоки Виктора и Льва: только запасной пу�
 });
 
 test('повторный запуск называет пропущенные скиллы', () => { assert.match(retryNote(['humanizer', 'x']), /не открыл обязательные скиллы: humanizer, x/); });
-
-const LEDGER = { version: 1, sources: [{ id: 1, url: 'https://pubmed.ncbi.nlm.nih.gov/35247352', quotes: [{ text: 'Taking 8000 steps per day was associated with a 51% lower risk' }] }, { id: 2, url: 'https://x', title: 't' }] };
-const claim = (over = {}) => ({ text: 'Утверждение про шаги', source_checked: true, status: 'верно', quote_found: 'Taking 8000 steps per day was associated with a 51% lower risk', ...over });
-
-test('доказательства: цитата из реестра принимается (регистр, пробелы и разметка не важны); пересказ и пустое поле нет', () => {
-  assert.equal(ledgerQuotes(LEDGER).length, 1);
-  assert.equal(evidenceIssues({ claims: [claim()] }, LEDGER).ok, true);
-  assert.equal(evidenceIssues({ claims: [claim({ quote_found: '  taking 8000 STEPS per day was **associated** with a 51% lower risk ' })] }, LEDGER).ok, true);
-  assert.equal(evidenceIssues({ claims: [claim({ quote_found: 'Taking 8000 steps per day' })] }, LEDGER).ok, true, 'часть цитаты реестра тоже цитата');
-  const para = evidenceIssues({ claims: [claim({ quote_found: 'риск ниже почти вдвое' })] }, LEDGER); assert.equal(para.ok, false); assert.match(para.issues[0], /цитаты нет в реестре/);
-  const none = evidenceIssues({ claims: [claim({ quote_found: '' })] }, LEDGER); assert.match(none.issues[0], /нет дословной цитаты/);
-});
-
-test('доказательства: «не подтверждено» и «отклонить» цитаты не требуют; пустой или отсутствующий реестр при наличии утверждений блокирует; без утверждений проверять нечего', () => {
-  assert.equal(evidenceIssues({ claims: [claim({ status: 'не подтверждено', quote_found: '' }), claim({ status: 'отклонить', quote_found: '' })] }, LEDGER).ok, true);
-  assert.match(evidenceIssues({ claims: [claim()] }, null).issues[0], /реестр источников пуст или не создан/); assert.equal(evidenceIssues({ claims: [claim()] }, { sources: [] }).ok, false);
-  assert.equal(evidenceIssues({ claims: [] }, null).ok, true); assert.equal(evidenceIssues({}, null).ok, true);
-  assert.match(evidenceFeedback(['«а»: нет цитаты']), /Реестр НЕ сбрасывай/);
-});
 
 // ---- проверка по метке запуска (в профиле smm работают несколько сотрудников, по времени их сессии не различить)
 function makeDb(sessions) {

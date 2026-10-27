@@ -1,4 +1,4 @@
-// Путь «правки сценария -> Ксения -> Вера с реестром цитат -> карточка»: настоящий API на КОПИИ данных, Telegram и озвучка по смете, модели имитированы.
+// Путь «правки сценария -> Ксения (выжимка, не цитаты) -> Вера (сверка смысла) -> карточка»: настоящий API на КОПИИ данных, Telegram и озвучка по смете, модели имитированы.
 // Тестовый ролик создаётся в копии БД новой записью (его номер выдаёт база), папка smm/runs/video_<id> удаляется после теста.
 import { test, after, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,31 +35,26 @@ async function run(checkMode, extra) {
 before(() => { if (!can) return; tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-test-')); copyLiveDb(REAL, tmp, 'agent_skills'); TOKEN = JSON.parse(fs.readFileSync(path.join(REAL, 'config.json'), 'utf8')).token; });
 after(async () => { try { server && server.kill(); } catch {} await sleep(600); for (const d of made) fs.rmSync(d, { recursive: true, force: true }); try { tmp && fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch {} });
 
-test('задания сотрудников несут блоки скиллов: Ксения (script-craft, humanizer), Вера (реестр в папке сценария, команды sources.py), у каждого запуска своя метка', { skip: !can }, async () => {
-  const { RUN } = await run('evidence_retry');
+test('задания сотрудников: Ксения получает скиллы и правило «ВЫЖИМКА, А НЕ ЦИТАТЫ» и поле gist вместо quote; Вера получает сверку СМЫСЛА без реестра; у каждого запуска своя метка', { skip: !can }, async () => {
+  const { RUN } = await run('ok');
   const q1 = fs.readFileSync(path.join(RUN, '_query_script1.txt'), 'utf8'), q2 = fs.readFileSync(path.join(RUN, '_query_check1.txt'), 'utf8');
-  assert.match(q1, /СКИЛЛЫ ПРЕЖДЕ ВСЕГО/); assert.match(q1, /short-video-script-craft/); assert.match(q1, /humanizer/); assert.match(q1, /storytelling-hooks/); assert.match(q1, /"lens"/); assert.match(q1, /НАЧНИ С ТЕКСТА, не с полей/); assert.match(q1, /Это история, не список/); assert.match(q1, /Ты Ксения Сюжетова/);   // персону сервер берёт из БД (в тестовой копии она старая), её содержание проверяет script_quality.test.mjs по сиду assert.match(q1, /\[метка запуска, служебная: RUN-script1-/);
-  assert.match(q2, /grounded-citations/); assert.match(q2, /ledger\.json/); assert.match(q2, /sources\.py/); assert.match(q2, /\[метка запуска, служебная: RUN-check1-/);
+  assert.match(q1, /СКИЛЛЫ ПРЕЖДЕ ВСЕГО/); assert.match(q1, /short-video-script-craft/); assert.match(q1, /humanizer/); assert.match(q1, /storytelling-hooks/); assert.match(q1, /\"lens\"/); assert.match(q1, /НАЧНИ С ТЕКСТА, не с полей/); assert.match(q1, /Это история, не список/); assert.match(q1, /Ты Ксения Сюжетова/);
+  const task1 = q1.split('=== ЗАДАЧА ===')[1] || ''; assert.ok(task1.length > 500, 'задание выделено отдельно от персоны'); assert.match(task1, /ВЫЖИМКА, А НЕ ЦИТАТЫ/, 'правило есть именно в ЗАДАНИИ, а не только в персоне'); assert.match(task1, /\"gist\"/); assert.ok(!/\"quote\":/.test(task1)); assert.match(q1.split('=== ЗАДАЧА ===')[0], /ВЫЖИМКА, А НЕ ЦИТАТЫ/, 'и в персоне, которую доставил promptRev 4'); assert.ok(!/точная цитата/.test(q1), 'поле «точная цитата» убрано из формата сценария');
+  assert.match(q1, /\[метка запуска, служебная: RUN-script1-/);
+  assert.match(q2, /КРАТКАЯ ВЫЖИМКА/); assert.match(q2, /дословных цитат в ней быть не должно/); assert.match(q2, /Сверяй смысл, а не слова/); assert.match(q2, /\[метка запуска, служебная: RUN-check1-/);
+  assert.ok(!/grounded-citations|ledger\.json|sources\.py|реестр/i.test(q2.replace(/НЕ веди реестр источников и не запускай sources\.py: этого больше нет/, '')), 'реестра в задании Веры нет');
 });
 
-test('Вера принесла пересказ вместо цитаты: код возвращает ей проверку один раз с названием фактов; после реестра карточка чистая, цитата дословная в FACTS.md', { skip: !can }, async () => {
-  const { card, RUN } = await run('evidence_retry');
-  assert.deepEqual(fs.readFileSync(path.join(RUN, 'check.json.checks'), 'utf8').trim().split('\n'), ['first', 'retry'], 'Вера вызвана дважды: пересказ, затем цитата из реестра');
-  assert.match(fs.readFileSync(path.join(RUN, '_query_check1ev.txt'), 'utf8'), /Проверка Веры не принята.*реестр источников пуст или не создан.*Реестр НЕ сбрасывай/s);
-  assert.ok(!/не у всех фактов цитата/.test(card.text), card.text); assert.match(card.text, /Вера проверила факты/);
-  const facts = fs.readFileSync(path.join(RUN, 'FACTS.md'), 'utf8'); assert.match(facts, /Taking 8000 steps per day was associated with a 51% lower risk/); assert.match(facts, /pubmed\.ncbi\.nlm\.nih\.gov\/35247352/);
+test('Вера проверяет один раз: без повтора из-за цитат; карточка «Вера сверила смысл с источниками», нет предупреждений про реестр и цитаты; FACTS.md со своими словами', { skip: !can }, async () => {
+  const { card, RUN } = await run('ok');
+  assert.ok(!fs.existsSync(path.join(RUN, '_query_check1ev.txt')), 'повторного запуска Веры из-за цитат больше нет'); assert.ok(!fs.existsSync(path.join(RUN, 'ledger.json')), 'реестр не создаётся');
+  assert.match(card.text, /Вера сверила смысл с источниками/); assert.ok(!/цитат|реестр|Вера проверила факты/.test(card.text), card.text);
+  const facts = fs.readFileSync(path.join(RUN, 'FACTS.md'), 'utf8'); assert.match(facts, /сверка выжимки с источниками/); assert.match(facts, /своими словами/);
 });
 
-test('Вера так и не принесла цитаты: после одного повтора карточка честно говорит об этом Нику, вердикт Веры не подменяется', { skip: !can }, async () => {
-  const { card, RUN } = await run('evidence_never');
-  assert.deepEqual(fs.readFileSync(path.join(RUN, 'check.json.checks'), 'utf8').trim().split('\n'), ['first', 'retry'], 'один повтор, не бесконечно');
-  assert.match(card.text, /⚠️ У Веры не у всех фактов цитата из реестра/); assert.match(card.text, /Вера проверила факты/);
-});
-
-test('потолок проверок Веры: повтор из-за цитат тоже считается; при потолке 1 повтора нет, Нику предупреждение на карточке (а не третий запуск)', { skip: !can }, async () => {
-  const { card, RUN } = await run('evidence_never', { MAX_FACT_CHECKS: '1' });
-  assert.deepEqual(fs.readFileSync(path.join(RUN, 'check.json.checks'), 'utf8').trim().split('\n'), ['first'], 'один запуск Веры, повтора из-за цитат нет');
-  assert.ok(!fs.existsSync(path.join(RUN, '_query_check1ev.txt'))); assert.match(card.text, /⚠️ У Веры не у всех фактов цитата из реестра/);
+test('если выжимка не пройдёт по смыслу, Вера возвращает сценарий Ксении с конкретной правкой; цитаты тут ни при чём', { skip: !can }, async () => {
+  const { card } = await run('fail');
+  assert.match(card.text, /Вера НЕ пропустила/); assert.match(card.text, /Сегмент 2: уточнить формулировку/); assert.ok(!/цитат|реестр/.test(card.text));
 });
 
 test('Ксении в задании назван бюджет слов по реальному синтезу (80-100 слов, призыв ≈ 8,4 с), без цифр, выведенных из оценки при выключенной озвучке', () => {
