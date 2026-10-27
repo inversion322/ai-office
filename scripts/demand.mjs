@@ -169,9 +169,9 @@ export async function collectRaw(cand, ctx = {}) {
 }
 
 /** Шкала охвата 0..25 по замерам. ВСЕ веса и шкалы — гипотеза (см. шапку файла). */
-export const WEIGHTS = { wiki: 0.25, suggest: 0.15, youtube: 0.6 };
+export const WEIGHTS = { wiki: 0.1, suggest: 0.1, youtube: 0.8 };      // решение Ника 2026-10-27: YouTube 80%, остальные по 10%
 export const TRENDS_BONUS = 0.1;
-/** Полный набор источников весит 1,0; охват масштабируется долей собранного веса, чтобы один слабый источник не давал полный балл (без YouTube потолок 10 из 25). */
+/** Полный набор источников весит 1,0; охват масштабируется долей собранного веса, чтобы один слабый источник не давал полный балл (без YouTube потолок 5 из 25). */
 export const FULL_COVERAGE = 1.0;
 export function scoreRaw(raw) {
   const parts = {};

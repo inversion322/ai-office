@@ -104,19 +104,26 @@ test('YouTube: сбой одной формулировки не мешает д
   assert.match((await D.youtubeStats('сон', { fetch: mkFetch([[/search/, () => ({ status: 400, body: '' })]]), keys: KEYS, now: NOW })).error, /400.*ключ не принят/);
 });
 
+test('веса: YouTube 80%, Википедия и подсказки по 10%; сильный YouTube без Википедии обгоняет слабый YouTube с огромной Википедией', () => {
+  assert.deepEqual(D.WEIGHTS, { wiki: 0.1, suggest: 0.1, youtube: 0.8 });
+  const strongYt = D.scoreRaw({ wiki: { last30: 100 }, suggest: { google: 0 }, youtube: { n: 40, median: 500000, max: 8000000 } });
+  const strongWiki = D.scoreRaw({ wiki: { last30: 200000 }, suggest: { google: 10, youtube: 10, yandex: 10 }, youtube: { n: 40, median: 1100, max: 12000 } });
+  assert.ok(strongYt.reach > strongWiki.reach + 10, `${strongYt.reach} против ${strongWiki.reach}`);
+});
 test('оценка: без замеров охват 0 и уровень none; один источник не даёт полный балл; рост просмотров повышает охват', () => {
   assert.deepEqual([D.scoreRaw({}).reach, D.scoreRaw({}).level], [0, 'none']);
   const only = D.scoreRaw({ suggest: { google: 10, youtube: 10, yandex: 10 } }); assert.equal(only.level, 'partial'); assert.ok(only.reach < 12, 'одни подсказки: ' + only.reach);
-  const lo = D.scoreRaw({ wiki: { last30: 127 }, suggest: { google: 8 } }), hi = D.scoreRaw({ wiki: { last30: 6808 }, suggest: { google: 8 } });
-  assert.equal(lo.level, 'measured'); assert.ok(hi.reach > lo.reach + 3, `${lo.reach} → ${hi.reach}`);      // без YouTube шкала сжата до 10 баллов
-  const noYt = D.scoreRaw({ wiki: { last30: 50000 }, suggest: { google: 10, youtube: 10, yandex: 10 } }); assert.equal(noYt.reach, 10, 'без YouTube потолок 10 из 25: главный источник отсутствует');
+  const Y = { n: 30, median: 5000, max: 100000 };      // при весе YouTube 80% сравнения Википедии и трендов осмысленны только рядом с замером YouTube
+  const lo = D.scoreRaw({ wiki: { last30: 127 }, suggest: { google: 8 }, youtube: Y }), hi = D.scoreRaw({ wiki: { last30: 6808 }, suggest: { google: 8 }, youtube: Y });
+  assert.equal(lo.level, 'measured'); assert.ok(hi.reach > lo.reach, `${lo.reach} → ${hi.reach}`);
+  const noYt = D.scoreRaw({ wiki: { last30: 50000 }, suggest: { google: 10, youtube: 10, yandex: 10 } }); assert.equal(noYt.reach, 5, 'без YouTube потолок 5 из 25: главный источник отсутствует (его вес 80%)');
   const top = D.scoreRaw({ wiki: { last30: 50000 }, suggest: { google: 10, youtube: 10, yandex: 10 }, youtube: { n: 40, median: 1000000, max: 10000000, hits: 30 } }); assert.equal(top.reach, 25);
   const keyed = D.scoreRaw({ wiki: { last30: 6808 }, suggest: { google: 8 }, youtube: { n: 30, median: 200000, max: 3000000, hits: 12 } }); assert.ok(keyed.reach > hi.reach);
   const yt = (o) => D.scoreRaw({ wiki: { last30: 6808 }, suggest: { google: 8 }, youtube: o }).reach;
   assert.ok(yt({ n: 30, median: 200000, max: 3000000 }) > yt({ n: 30, median: 2000, max: 40000 }), 'тема, где Shorts смотрят чаще, получает больше');
   assert.ok(yt({ n: 30, median: 1200, max: 10000000 }) > yt({ n: 30, median: 1200, max: 20000 }), 'один взрывной ролик тоже учитывается, но слабее медианы');
   assert.ok(yt({ n: 0, median: 0, max: 0 }) < yt({ n: 3, median: 5000, max: 9000 }), 'нет ни одного Shorts по теме = самый низкий балл YouTube');
-  const tr = D.scoreRaw({ wiki: { last30: 6808 }, suggest: { google: 8 }, trends: { matched: [{ title: 'x' }] } }); assert.ok(tr.reach > hi.reach, 'тренд даёт надбавку');
+  const tr = D.scoreRaw({ wiki: { last30: 6808 }, suggest: { google: 8 }, youtube: Y, trends: { matched: [{ title: 'x' }] } }); assert.ok(tr.reach > hi.reach, 'тренд даёт надбавку');
   assert.ok(D.scoreRaw({ trends: { matched: [{ title: 'x' }] } }).reach > 0 && D.scoreRaw({ trends: { matched: [{ title: 'x' }] } }).reach < 5, 'один тренд без других замеров = минимум');
 });
 test('строка карточки: числа, динамика, честное «не измерено»; фразы «спрос не проверялся» нет', async () => {
