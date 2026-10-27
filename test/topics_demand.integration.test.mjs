@@ -36,14 +36,14 @@ test('«Другие темы»: замер спроса кодом, Лев по
   const stub = path.join(tmp, 'demand_stub.json'), TOP = 'Правда ли, что хруст пальцев приводит к артриту?';
   fs.writeFileSync(stub, JSON.stringify({
     '*': { queries: ['а'], wiki: { article: 'Малая статья', how: 'поиск по Википедии', last30: 120, prev30: 100, change: 20 }, suggest: { google: 2, youtube: 1, yandex: 2 } },
-    [TOP]: { queries: ['хруст пальцев'], wiki: { article: 'Хруст суставов', how: 'подсказка Виктора', last30: 40000, prev30: 30000, change: 33 }, suggest: { google: 10, youtube: 10, yandex: 10 }, wordstat: { count: 1000000 } },
+    [TOP]: { queries: ['хруст пальцев'], wiki: { article: 'Хруст суставов', how: 'подсказка Виктора', last30: 40000, prev30: 30000, change: 33 }, suggest: { google: 10, youtube: 10, yandex: 10 }, youtube: { n: 40, median: 1000000, max: 10000000, hits: 30 } },
   }));
   const id0 = await maxId(), c0 = Math.max(0, ...(await chat()).map((m) => m.id));
   const r = await run({ OFFICE_NO_DEMAND: '', OFFICE_DEMAND_STUB: stub }); assert.equal(r.code, 0, r.out);
   const added = (await vids()).filter((v) => v.id > id0); assert.equal(added.length, 8);
   assert.ok(added.every((v) => v.stage === 'scored'), 'темы оценены и ждут выбора Ника');
   const note = (v) => JSON.parse(v.notes), top = added.find((v) => v.title === TOP);
-  assert.equal(note(top).demand.reach, 25); assert.equal(note(top).reach_lev, 8); assert.match(note(top).demand_line, /Яндекс: 1.000.000 запросов/);
+  assert.equal(note(top).demand.reach, 25); assert.equal(note(top).reach_lev, 8); assert.match(note(top).demand_line, /YouTube Shorts за год: 40 роликов[^;]*медиана 1.000.000/);
   const idx = 3;      // TOP четвёртая в списке имитации Виктора; у имитации Льва итог 80 − 2·позиция при охвате 8, то есть 74 − 8 + 25 = 91 против 80 у лучшей без замера
   assert.equal(added.slice().sort((a, b) => b.score - a.score)[0].title, TOP, 'выше всех тема с наибольшим измеренным спросом');
   assert.equal(top.score, 80 - idx * 2 - 8 + 25);

@@ -75,7 +75,7 @@ test('замер спроса: охват в баллах считает код 
   const stub = path.join(tmp, 'demand_stub.json');
   fs.writeFileSync(stub, JSON.stringify({
     '*': { queries: ['тема'], wiki: { article: 'Малая статья', how: 'поиск по Википедии', last30: 150, prev30: 140, change: 7 }, suggest: { google: 3, youtube: 2, yandex: 2 } },
-    'Можно ли выспаться впрок в выходные?': { queries: ['выспаться впрок'], wiki: { article: 'Сон', how: 'подсказка Виктора', last30: 50000, prev30: 40000, change: 25 }, suggest: { google: 10, youtube: 10, yandex: 10 }, wordstat: { count: 800000 } },
+    'Можно ли выспаться впрок в выходные?': { queries: ['выспаться впрок'], wiki: { article: 'Сон', how: 'подсказка Виктора', last30: 50000, prev30: 40000, change: 25 }, suggest: { google: 10, youtube: 10, yandex: 10 }, youtube: { n: 40, median: 1000000, max: 10000000, hits: 30 } },
   }));
   const before0 = await maxId(), c0 = await chatMaxId();
   const r = await run({ FAKE_DAILY_MODE: 'new3', OFFICE_NO_DEMAND: '', OFFICE_DEMAND_STUB: stub }); assert.equal(r.code, 0, r.out);
@@ -83,7 +83,7 @@ test('замер спроса: охват в баллах считает код 
   const notes = Object.fromEntries(added.map((v) => [v.title, JSON.parse(v.notes)]));
   const top = notes['Можно ли выспаться впрок в выходные?']; assert.ok(top, 'тема с высоким спросом в подборке');
   assert.equal(top.reach_lev, 8, 'прежняя оценка охвата Льва сохранена для сверки'); assert.equal(top.demand.level, 'measured'); assert.equal(top.demand.reach, 25);
-  assert.match(top.demand_line, /Википедия «Сон»: 50.000 просмотров за 30 дн/); assert.match(top.demand_line, /Яндекс: 800.000 запросов/);
+  assert.match(top.demand_line, /Википедия «Сон»: 50.000 просмотров за 30 дн/); assert.match(top.demand_line, /YouTube Shorts за год: 40 роликов[^;]*медиана 1.000.000/);
   const low = added.find((v) => v.title !== 'Можно ли выспаться впрок в выходные?'); assert.ok(notes[low.title].demand.reach < 12, 'малый спрос = малый охват: ' + notes[low.title].demand.reach);
   const best = added.slice().sort((a, b) => b.score - a.score)[0]; assert.equal(best.title, 'Можно ли выспаться впрок в выходные?', 'выше всех тема с наибольшим измеренным спросом');
   const runDir = fs.readdirSync(RUNS).filter((d) => isDaily(d) && !keep.has(d)).sort().pop();
