@@ -20,7 +20,7 @@ const api = async (p, body) => { const r = await fetch(API + p, { method: body ?
 const OLD = ['Ребёнок съел конфету и носится как угорелый. Виноват сахар? Открываем дело.', 'Шестнадцать работ показали, что сахар не влияет.', 'Мамам дали пустышку, а они видели бурю.', 'Вывод: миф. Источники на экране.'];
 async function boot(checkMode, extra = {}) {
   if (server) { server.kill(); await sleep(700); }
-  server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE, SMM_TTS_ESTIMATE_ONLY: '1', FAKE_CHECK_MODE: checkMode, FAKE_SCRIPT_MODE: 'short', CRAFT_GATE: 'off', SKILL_GATE: 'off', ...extra }, stdio: 'ignore', windowsHide: true });
+  server = spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE, SMM_TTS_ESTIMATE_ONLY: '1', FAKE_CHECK_MODE: checkMode, FAKE_SCRIPT_MODE: 'short', CRAFT_GATE: 'off', CODEWORD_GATE: 'off', SKILL_GATE: 'off', ...extra }, stdio: 'ignore', windowsHide: true });
   for (let i = 0; i < 40; i++) { try { if ((await fetch(API + '/health')).ok) return; } catch {} await sleep(300); }
 }
 async function run(checkMode, extra) {

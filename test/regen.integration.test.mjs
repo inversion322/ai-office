@@ -20,7 +20,7 @@ let tmp, server, TOKEN;
 const api = async (p, body) => { const r = await fetch(API + p, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); return r.json(); };
 const OLD = ['Ребёнок съел конфету и носится как угорелый. Виноват сахар? Открываем дело номер один.', 'Улика первая. Шестнадцать работ, двадцать три эксперимента: никто не знал, где сахар, а где замена. Итог в журнале JAMA: на поведение детей сахар не влияет.', 'Улика вторая. Одним мамам сказали: сын съел много сахара. Но всем детям дали пустышку. Те мамы назвали сыновей более гиперактивными.', 'Вероятно, всё дело в ожидании. От сладкого ждут бури, а сладкое подают на празднике, где и так шумно.', 'Приговор: миф. Но сахар вреден для зубов и веса. ВОЗ советует: добавленных сахаров меньше десяти процентов калорий.'];
 function startServer(mode) {
-  return spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE, SMM_TTS_ESTIMATE_ONLY: '1', FAKE_SCRIPT_MODE: mode, CRAFT_GATE: mode === 'craft' ? 'on' : 'off' }, stdio: 'ignore' });   // CRAFT_GATE=off: старые тесты проверяют новизну, длину и правки, а не драматургию
+  return spawn(process.execPath, ['server.mjs'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, OFFICE_DATA_DIR: tmp, PORT: String(PORT), OFFICE_NO_TG: '1', OFFICE_CHAT_STUB: '1', OFFICE_NO_WATCH: '1', HERMES_BIN: FAKE, SMM_TTS_ESTIMATE_ONLY: '1', FAKE_SCRIPT_MODE: mode, CRAFT_GATE: mode === 'craft' ? 'on' : 'off', CODEWORD_GATE: mode === 'codeword' ? 'on' : 'off' }, stdio: 'ignore' });   // CRAFT_GATE=off: старые тесты проверяют новизну, длину и правки, а не драматургию
 }
 async function boot(mode) {
   if (server) { server.kill(); await sleep(700); }
@@ -134,4 +134,15 @@ test('сессия Mini App может убрать карточку и сбро
   await api('/api/agent', { id: 'research', status: 'waiting', task: 'Ожидает' });
   const c = await call('/api/chat/clear-status', { agent: 'research' }); assert.equal(c.status, 200); assert.equal(c.j.status, 'idle');
   assert.equal((await call('/api/prompt', { agent_id: 'video', body: 'x' })).status, 403);
+});
+
+test('кодовое слово: сценарий без обещания слова возвращается Ксении с замечанием, исправленный (обещание в абзаце 1, одна напоминалка в середине) доходит до Ника, призыв со словом стоит последним абзацем', { skip: !can }, async () => {
+  const { card } = await regen('codeword');
+  const now = JSON.parse(fs.readFileSync(path.join(RUN, 'script.json'), 'utf8'));
+  assert.match(now.segments[0], /скажу в конце\. Там же слово/); assert.equal(now.segments.filter((x) => /Слово в конце/.test(x)).length, 1);
+  const qs = fs.readFileSync(path.join(RUN, 'script.json.queries'), 'utf8');
+  assert.match(qs, /Лид-магнит/); assert.match(qs, /«ДОСЬЕ»/); assert.match(qs, /напоминалк/);
+  assert.match(card.text, /Слово — «досье»/); assert.ok(card.buttons.flat().some((b) => b.d === 'approve:7'));
+  const sr = fs.readFileSync(path.join(ROOT, 'smm', 'runs', 'video_7', 'script_ru.txt'), 'utf8').trim().split(/\n\n/);
+  assert.match(sr[sr.length - 1], /^Слово — «досье»\./); assert.doesNotMatch(sr.slice(0, -1).join(' '), /досье|боту|подписк/i);
 });

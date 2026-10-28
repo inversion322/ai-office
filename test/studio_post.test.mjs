@@ -55,6 +55,16 @@ test('запрос обложки: без лиц и логотипов, текс
   assert.match(a, /Do not write any text/); assert.match(a, /No real people faces/); assert.match(b, /«Плацебо\?»/); assert.match(b, /navy and orange/); assert.doesNotMatch(b, /Do not write any text/);
 });
 
+test('стиль обложки (перенос из WorkFlow AI): по умолчанию фотореализм, названный стиль подставляет свою клаузу, неизвестный стиль и регистр не ломают; хвост качества стоит всегда', () => {
+  const d = P.coverPrompt({ scene: 'A glass of water and a vinegar bottle on a kitchen table, morning light', mood: 'calm' });
+  assert.match(d, /^A glass of water[^\n]*morning light\. Mood: calm\. Style: Professional photograph, photo-realistic rendering, sharp focus, editorial lighting, natural colors, high detail\./); assert.match(d, /Square 1:1 composition[^\n]*High quality, no artifacts\.$/);
+  assert.doesNotMatch(d, /Editorial cover illustration|cartoon/i, 'мультяшки и «иллюстрации» по умолчанию нет');
+  assert.match(P.coverPrompt({ scene: 's', style: 'Cartoon' }), /Style: Friendly cartoon illustration/); assert.match(P.coverPrompt({ scene: 's', style: 'minimalist' }), /Style: Minimalist geometric composition/);
+  assert.match(P.coverPrompt({ scene: 's', style: 'oil painting' }), /Style: Professional photograph/, 'неизвестный стиль = фото'); assert.equal(P.normalizeCoverStyle(undefined), 'photo'); assert.deepEqual(Object.keys(P.COVER_STYLES), ['photo', 'illustration', 'infographic', 'cartoon', 'minimalist', 'poster']);
+  assert.match(P.coverPrompt({ scene: 's' }, { styleClause: 'warm paper textures' }), /Match the channel's established cover identity: warm paper textures Keep visual consistency/);
+  assert.match(P.coverPrompt({}), /^A calm, concrete real-world still life/, 'пустой сценарий не даёт пустого запроса');
+});
+
 test('запрос картинки: правки владельца идут отдельным указанием и главнее сцены; пустые отбрасываются, берутся последние пять', () => {
   const base = P.coverPrompt({ scene: 'a cup', mood: 'calm', text_on_image: '' }); assert.doesNotMatch(base, /Art director/);
   const withEdits = P.coverPrompt({ scene: 'a cup', mood: 'calm', text_on_image: '' }, { edits: ['', 'без банки', '  светлее ', 'a', 'b', 'c', 'd'] });

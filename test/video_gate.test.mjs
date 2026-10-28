@@ -45,11 +45,11 @@ test('ворота: призыв не тем шрифтом и не по бук�
   const REF = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'video', 'med_detective', 'CTA_REFERENCE.html'), 'utf8');
   const file = path.join(proj, 'compositions', 's18.html');
   try {
-    fs.writeFileSync(file, '<div class="v18-mono" style="font-family:\'JetBrains Mono\'">Подписывайтесь</div>');
+    fs.writeFileSync(file, '<div class="v18-mono" style="font-family:\'JetBrains Mono\'">Кодовое слово</div>');
     const bad = gate(good, proj, { dynamics: true }); assert.equal(bad.ok, false); assert.ok(bad.problems.some((x) => /^призыв: .*моноширинный/.test(x)), bad.problems.join('; ')); assert.ok(bad.problems.some((x) => /^призыв: .*по буквам/.test(x)));
     fs.writeFileSync(file, REF);
     const ok = gate(good, proj, { dynamics: true }); assert.equal(ok.ok, true, ok.problems.join('; '));
-    fs.writeFileSync(file, '<div>Подписывайтесь</div>'); process.env.CTA_GATE = 'off';
+    fs.writeFileSync(file, '<div>Кодовое слово</div>'); process.env.CTA_GATE = 'off';
     assert.equal(gate(good, proj, { dynamics: true }).ok, true, 'обход CTA_GATE=off');
     delete process.env.CTA_GATE; assert.equal(gate(good, proj, { dynamics: false }).ok, true, 'без динамики и без формата A призыв старых роликов не проверяется');
   } finally { delete process.env.CTA_GATE; fs.rmSync(file, { force: true }); }

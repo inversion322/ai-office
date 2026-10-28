@@ -247,7 +247,12 @@ const AUTHOR_TASK = (ch, chKey, slot, dir, outFile, extra) => `Напиши по
 Материал и первоисточники (бери факты ТОЛЬКО отсюда и из страниц по этим ссылкам): ${JSON.stringify(slot.evidence || [])}
 Почему тема: ${slot.why || '—'}
 ${pLine(chKey, ch)}Формат канала: ${ch.postFormat === 'long' ? 'лонгрид' : 'короткий пост до 700 знаков (выйдет подписью к фото)'}. CTA-ПОДПИСКА: заверши пост мягким призывом с кликабельной ссылкой [текст призыва](https://t.me/${ch.tg}) ПОСЛЕ смыслового аккорда. Строка «🔬 Источники:» с 2-3 ссылками из РАЗНЫХ доменов вида [название](url), или без неё, если независимых первоисточников нет. Хук первой строкой жирным (**так**).${extra ? `\n${extra}` : ''}
-Формат файла ${outFile}: JSON {"text":"готовый пост (markdown: **жирный**, [текст](url))","cover_brief":{"scene":"что нарисовать, по-английски, 1-2 предложения","mood":"настроение","text_on_image":"короткий текст на обложке до 40 знаков или пустая строка"},"hook_type":"какой хук"}.`;
+${COVER_BRIEF_RULES}
+
+Формат файла ${outFile}: JSON {"text":"готовый пост (markdown: **жирный**, [текст](url))","cover_brief":{"scene":"...","style":"photo","mood":"...","text_on_image":""},"hook_type":"какой хук"}.`;
+// Бриф обложки: правила арт-директора (перенос из WorkFlow AI, services/images/brief.py: там обложки получались лучше). Общие для автора поста и художника.
+export const COVER_BRIEF_RULES = `БРИФ ОБЛОЖКИ (ты арт-директор; готовый промпт для text-to-image модели Nano Banana Pro). scene: живой английский промпт, 2-3 предложения: КОНКРЕТНЫЙ предмет или ситуация из темы поста (не абстракция и не значок), где он стоит, композиция (передний и задний план, ракурс), свет и цвета. Не проси рисовать буквы и надписи. Люди: без узнаваемых лиц реальных людей; руки, силуэты, спина, предметы можно. Не вставляй в каждую обложку «фирменную атрибутику» (детектив, лупа, плащ, шляпа, утка, улики): только если это естественно для темы. style: один из photo | illustration | infographic | cartoon | minimalist | poster. По умолчанию photo (реалистичный редакционный снимок: резкость, естественный свет, детали); illustration или minimalist для абстрактных тем (сон, стресс, мозг); infographic только если пост про числа и сравнение; cartoon не выбирай без просьбы владельца. mood: одно-два слова. text_on_image: по умолчанию пустая строка; надпись нужна, только если она явно усиливает обложку (до 40 знаков, русский).`;
+
 const EDITOR_TASK = (ch, chKey, slot, textFile, outFile) => `Проверь пост из файла ${textFile} (поле text) для канала «${ch.name}». Тема: «${slot.title}». Первоисточники: ${JSON.stringify(slot.evidence || [])}.
 Прочитай ${rules()} и ${VOICE_FILE(chKey)}. Проверь: 1) СМЫСЛ каждого утверждения против первоисточников (не приписывай источнику больше, чем в нём сказано; открой страницы источников), 2) правила поста и голос канала, 3) приметы ИИ-текста (штампы, пустые вводные, перебор эмодзи), 4) пост не повторяет прежние темы канала, 5) тема и подача подходят профилю канала (широкая аудитория 18-45, быт, лёгкий тон, не про тяжёлые болезни и лечение): если нет, verdict "rework" и в issues «тема не подходит каналу».
 ${pLine(chKey, ch)}Исправь мелочи сам и верни исправленный текст; если нужно переписывание (неверный факт, нет хука, не та мысль), верни verdict "rework" с конкретными правками для автора.
@@ -321,7 +326,8 @@ const COVER_TASK = (ch, slot, post, edits, outFile, again = false) => `Ты Ди
 Прежний сценарий картинки (JSON): ${JSON.stringify(post.brief || {})}
 Правки владельца к картинке, от старых к новым (последняя главнее; всё, что он не просил менять, оставь как было в прежнем сценарии): ${edits.length ? edits.map((e, i) => `${i + 1}) ${e}`).join(' ') : '(правок нет)'}${again || !edits.length ? `\nВладелец просит ДРУГОЙ вариант картинки: предложи заметно другое решение той же мысли (другой ракурс, композиция и предмет, но тот же стиль канала)${edits.length ? ', сохранив все его правки выше' : ''}.` : ''}
 Правила обложки: без лиц реальных людей, без логотипов и водяных знаков, без «до/после», без шокирующих образов. Текст на картинке только если владелец сам просит: тогда короткий (до 40 знаков), русский. Если он просит убрать текст или не просит его, поле text_on_image пустое.
-Формат файла ${outFile}: JSON {"scene":"что нарисовать, по-английски, 2-3 предложения с учётом ВСЕХ правок","mood":"настроение","text_on_image":"текст на картинке или пустая строка"}.`;
+${COVER_BRIEF_RULES}
+Формат файла ${outFile}: JSON {"scene":"английский промпт с учётом ВСЕХ правок","style":"photo","mood":"настроение","text_on_image":"текст на картинке или пустая строка"}. Стиль меняй, только если владелец просит другой; иначе оставь прежний из сценария выше.`;
 
 /** Только картинка: текст поста остаётся прежним, сценарий картинки пересобирается с правками Ника (накопительно), старые версии сохраняются в covers/. */
 export async function studioCover(chKey, date, slotName, { comment = '', deps = makeDeps() } = {}) {
@@ -337,7 +343,7 @@ export async function studioCover(chKey, date, slotName, { comment = '', deps = 
   let brief = post.brief || {}, note = '';
   const outB = path.join(dir, 'cover_brief.json'); try { fs.rmSync(outB, { force: true }); } catch {}
   try { await deps.runAgent({ label: 'cover_brief', agentId: 'tg_artist', profile: 'studio_text', outFile: outB, persona: await deps.promptOf('tg_artist'), task: COVER_TASK(ch, slot, post, edits, outB, !(comment && comment.trim())), maxTurns: 20, budgetSec: 300 }); } catch (e) { note = 'художник не ответил'; }
-  const nb = readJson(outB); if (nb && nb.scene) brief = { scene: String(nb.scene), mood: String(nb.mood || brief.mood || ''), text_on_image: String(nb.text_on_image || '').slice(0, 40) }; else note = note || 'сценарий картинки не получен';
+  const nb = readJson(outB); if (nb && nb.scene) brief = { scene: String(nb.scene), style: P.normalizeCoverStyle(nb.style || brief.style), mood: String(nb.mood || brief.mood || ''), text_on_image: String(nb.text_on_image || '').slice(0, 40) }; else note = note || 'сценарий картинки не получен';
   const budget = imageBudget({ file: path.join(S.studioDir(), 'image_count.json'), day: S.mskDate(deps.now()) });
   if (!budget.left) { await deps.agent('tg_artist', 'idle', 'Лимит картинок', 0); await deps.notify(`Суточный лимит картинок (${budget.max}) исчерпан: прежняя обложка поста ${hm} остаётся, текст не менялся.`); return { ok: false, limit: true }; }
   let cover = null, coverNote = '';

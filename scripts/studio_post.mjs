@@ -54,18 +54,37 @@ export function publishShape(text, hasCover) {
   return html.length <= MAX_CAPTION ? { mode: 'photo', html } : { mode: 'photo_then_text', html };
 }
 
-/** Запрос обложки для fal.ai (Nano Banana Pro читает кириллицу). Без людей с лицами, без текста, если он не нужен. */
+/**
+ * Стили обложки и их английские клаузы. Перенесены из WorkFlow AI (src/workflow_ai/services/images/prompts.py), где обложки получались лучше:
+ * там стиль выбирает арт-директор по теме, по умолчанию фотореализм, а клауза стиля и «хвост качества» всегда стоят в запросе.
+ * (До 2026-10-28 здесь стояло «Editorial cover illustration»: любая обложка шла как иллюстрация, а детективный мотив канала рисовался мультяшкой.)
+ */
+export const COVER_STYLES = {
+  photo: 'Professional photograph, photo-realistic rendering, sharp focus, editorial lighting, natural colors, high detail',
+  illustration: 'Modern digital illustration, clean linework, vibrant palette, editorial style, flat shapes with subtle shading',
+  infographic: 'Clean infographic design, data-visualization aesthetic, minimal layout, soft pastel gradients, balanced negative space, legible labels',
+  cartoon: 'Friendly cartoon illustration, soft cel-shading, rounded forms, warm colors, playful and approachable',
+  minimalist: 'Minimalist geometric composition, flat colors, generous negative space, muted pastel palette, simple shapes, calm and refined',
+  poster: 'Dramatic cinematic poster, bold composition, atmospheric lighting, strong color grading, magazine-cover style, sense of scale',
+};
+export const COVER_STYLE_DEFAULT = 'photo';
+export const normalizeCoverStyle = (s) => { const k = String(s || '').toLowerCase().trim(); return Object.prototype.hasOwnProperty.call(COVER_STYLES, k) ? k : COVER_STYLE_DEFAULT; };
+
+/** Запрос обложки для fal.ai (Nano Banana Pro читает кириллицу). Без лиц реальных людей, без текста, если он не нужен. */
 export function coverPrompt(brief = {}, { palette = '', styleClause = '', edits = [] } = {}) {
-  const scene = String(brief.scene || '').trim(), mood = String(brief.mood || 'спокойное, внимательное').trim();
+  const style = normalizeCoverStyle(brief.style);
+  const scene = String(brief.scene || '').trim(), mood = String(brief.mood || '').trim();
   const text = String(brief.text_on_image || '').trim().slice(0, 40);
   const wishes = (Array.isArray(edits) ? edits : []).map((e) => String(e || '').trim()).filter(Boolean).slice(-5);
   const parts = [
-    `Editorial cover illustration for a Telegram channel post. Square composition with safe margins; the key subject is centered.`,
-    `Scene: ${scene || 'a calm abstract composition about the topic'}.`, `Mood: ${mood}.`,
-    palette ? `Palette: ${palette}.` : '', styleClause ? `Channel visual identity: ${styleClause}.` : '',
+    scene ? (/[.!?]$/.test(scene) ? scene : scene + '.') : 'A calm, concrete real-world still life that illustrates the post topic.',
+    mood ? `Mood: ${mood}.` : '', `Style: ${COVER_STYLES[style]}.`,
+    palette ? `Palette: ${palette}.` : '',
+    styleClause ? `Match the channel's established cover identity: ${styleClause} Keep visual consistency with this identity.` : '',
     text ? `Render exactly this short Russian text, large and perfectly legible, nothing else written: «${text}».` : 'Do not write any text, letters or numbers on the image.',
     wishes.length ? `Art director's corrections from the channel owner, apply them strictly (they override the scene above where they conflict): ${wishes.join(' | ')}.` : '',
     'No real people faces, no logos, no watermarks, no medical before/after, no shocking imagery.',
+    'Square 1:1 composition, the key subject centered with safe margins. High quality, no artifacts.',
   ];
   return parts.filter(Boolean).join(' ');
 }

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { copyLiveDb } from './fixtures/copy_db.mjs';
 process.env.VARIANTS = 'off';          // эти тесты проверяют одиночный сценарий; варианты B и C покрыты в variants*.test.mjs
 
-process.env.CRAFT_GATE = 'off';   // эти тесты проверяют довод до конца и длину, драматургия проверяется в regen.integration и script_craft.test
+process.env.CODEWORD_GATE = 'off'; process.env.CRAFT_GATE = 'off';   // эти тесты проверяют довод до конца и длину, драматургия проверяется в regen.integration и script_craft.test
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REAL = path.join(ROOT, 'server', 'data');
 const can = fs.existsSync(path.join(REAL, 'office.db')) && fs.existsSync(path.join(REAL, 'config.json')) && fs.existsSync('C:/hf_tts/venv/Scripts/python.exe');

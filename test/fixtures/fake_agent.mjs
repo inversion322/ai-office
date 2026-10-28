@@ -24,6 +24,12 @@ const OLD_SEGMENTS = ['Ребёнок съел конфету и носится 
   'А вот что нашли в другом опыте. Одним мамам сказали: сын съел много сахара. Но всем детям дали пустышку. Те мамы назвали сыновей более гиперактивными.',
   'Вероятно, всё дело в ожидании. От сладкого ждут бури, а сладкое подают на празднике, где и так шумно.',
   'Вывод: миф. Но сахар вреден для зубов и веса. ВОЗ советует: добавленных сахаров меньше десяти процентов калорий.'];
+// режим codeword: первый ответ без обещания слова, второй с обещанием во 2-м предложении и одной напоминалкой в середине (лид-магнит, решение Ника 2026-10-28)
+const CW_SEGS = ['Сорок процентов родителей не верят данным. Почему, скажу в конце. Там же слово для файла с разборами.',
+  'Мамы клялись, что малыш неуправляем. Конфеты не было, было только мнение, что она была.',
+  'Журнал JAMA, шестнадцать работ. Слово в конце, не пропусти. Сахар детям тайком подменяли пустышкой.',
+  'Откуда же буря? Праздник, друзья, музыка. Сладкое просто приходит туда, где и так шумно.',
+  'Зубам и весу сахар вреден: ВОЗ советует меньше десяти процентов калорий. Но гиперактивность тут ни при чём.'];
 const NEW_SEGMENTS = ['Сорок процентов родителей не верят данным. А данные такие: детям тайком подменяли сахар пустышкой.',
   'Мамы клялись, что малыш неуправляем. Конфеты не было, было только мнение, что она была.',
   'Журнал JAMA, шестнадцать работ. Вывод простой: на поведение детей сахар не влияет.',
@@ -55,7 +61,7 @@ if (/Напиши сценарий ролика/.test(q) && !isVariant) {
   const CRAFT_SEGS = ['Говорят, что сахар делает детей гиперактивными. Правда ли это? Откуда вообще такая уверенность?', 'Но учёные проверили: двадцать три эксперимента, сахар тайно подменяли заменой.', 'Поэтому вывод простой: на поведение детей сахар не влияет.', 'Но почему родители так уверены? Мамам сказали, что сын съел сахар, хотя все дети получили пустышку. Мамы всё равно нашли сыновей гиперактивнее.', 'Значит, дело в ожидании. Так что буря на празднике это не сахар, а сам праздник.'];
   const CRAFT_FIELDS = { idea: 'Бурю у детей после сладкого создаёт ожидание взрослых, а не сахар.', emotion_arc: ['любопытство', 'удивление', 'недоверие', 'ясность'], payoff: 'буря на празднике это не сахар, а сам праздник', lens: { candidates: ['Подозреваемый с алиби: сахар в опыте тайно подменяли пустышкой (инверсия злодея)', 'Бурю создаёт праздник, а не конфета (эффект второго порядка)', 'Взгляд мамы, которая уверена, что сын после сладкого неуправляем (смена точки зрения)'], chosen: 2, why: 'опыт с пустышкой в JAMA' }, stake: 'Вы после каждой конфеты ждёте от ребёнка бурю и заранее ругаете сахар', gaps: ['Сахар ли делает детей гиперактивными на самом деле?', 'Почему же тогда мы каждый раз видим бурю?'], bookend: 'сахар', chain: [{ to: 2, link: 'но', why: 'вопрос → проверка' }, { to: 3, link: 'поэтому', why: 'проверка → вывод' }, { to: 4, link: 'но', why: 'вывод → почему верят' }, { to: 5, link: 'поэтому', why: 'опыт → развязка' }], self_check: 'пересказ через но/поэтому складывается' };
   const craftOk = mode === 'craft' && n >= 2;
-  const segments = mode === 'craft' ? (craftOk ? CRAFT_SEGS : NEW_SEGMENTS) : mode === 'stage_words' && !fs.existsSync(out + '.second') ? (fs.writeFileSync(out + '.second', '1'), STAGE_WORDS) : mode === 'stage_words' ? NEW_SEGMENTS : mode === 'long' ? LONG : mode === 'short' ? NEW_SEGMENTS : !regen ? OLD_SEGMENTS : copy ? OLD_SEGMENTS.map((s, i) => (i === 0 ? s.replace('носится как угорелый', 'носится по дому') : s)) : NEW_SEGMENTS;
+  const segments = mode === 'codeword' ? (n >= 2 ? CW_SEGS : NEW_SEGMENTS) : mode === 'craft' ? (craftOk ? CRAFT_SEGS : NEW_SEGMENTS) : mode === 'stage_words' && !fs.existsSync(out + '.second') ? (fs.writeFileSync(out + '.second', '1'), STAGE_WORDS) : mode === 'stage_words' ? NEW_SEGMENTS : mode === 'long' ? LONG : mode === 'short' ? NEW_SEGMENTS : !regen ? OLD_SEGMENTS : copy ? OLD_SEGMENTS.map((s, i) => (i === 0 ? s.replace('носится как угорелый', 'носится по дому') : s)) : NEW_SEGMENTS;
   fs.writeFileSync(out, JSON.stringify({ title: 'Сахар делает детей гиперактивными?', rubric: 'myth', hook_type: copy || !regen ? 'сцена' : 'цифра',
     hook_options: [{ type: 'цифра', line: segments[0], score: 9 }, { type: 'сцена', line: 'x', score: 6 }, { type: 'парадокс', line: 'y', score: 7 }],
     segments, ...(craftOk ? CRAFT_FIELDS : {}), on_screen: [], claims: [], sources_card: ['Wolraich. JAMA. 1995.'], disclaimer: 'Не заменяет консультацию врача.' }));
@@ -82,7 +88,7 @@ if (/Создай проект \S+:/.test(q) && /_v1\.mp4/.test(q)) {
   // сцена призыва: эталон из репозитория (как копирует настоящий Кирилл); режим bad_cta кладёт прежнюю: обычный регистр, моноширинная ссылка, текст целиком
   const { fileURLToPath } = await import('node:url');
   const refCta = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'video', 'med_detective', 'CTA_REFERENCE.html'), 'utf8');
-  fs.writeFileSync(proj + '/compositions/d_cta.html', mode === 'bad_cta' ? '<style>.v-mono { font-family: "JetBrains Mono", monospace; }</style><div>Подписывайтесь</div><div class="v-mono">@med_detective_ru</div>' : refCta);
+  fs.writeFileSync(proj + '/compositions/d_cta.html', mode === 'bad_cta' ? '<style>.v-mono { font-family: "JetBrains Mono", monospace; }</style><div>Кодовое слово</div><div class="v-mono">@med_detective_bot</div>' : refCta);
   // библиотека: эталонный план и раздел отчёта; режим no_plan имитирует Кирилла, который всё сделал с нуля
   const refPlan = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'video', 'med_detective', 'LIBRARY_PLAN_REFERENCE.json'), 'utf8');
   if (mode !== 'no_plan') fs.writeFileSync(proj + '/LIBRARY_PLAN.json', refPlan);
