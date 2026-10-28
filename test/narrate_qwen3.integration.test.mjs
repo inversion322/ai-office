@@ -37,6 +37,10 @@ before(() => {
   fs.writeFileSync(path.join(VOICES, 'qvoice', 'voice.json'), JSON.stringify({ title: 'тест', engine: 'qwen3', model: '1.7B-Base', device: 'cpu', language: 'Russian',
     ref_audio: 'ref.wav', ref_text: 'Опорная фраза.', wps: 3.0, min_wps: 1.5 }));
   fs.writeFileSync(path.join(VOICES, 'qvoice', 'ref.wav'), wav(2));
+  fs.mkdirSync(path.join(VOICES, 'esvoice'), { recursive: true });
+  fs.writeFileSync(path.join(VOICES, 'esvoice', 'voice.json'), JSON.stringify({ title: 'espeech', engine: 'espeech', model: 'ESpeech/ESpeech-TTS-1_RL-V2', checkpoint: 'espeech_tts_rlv2.pt', language: 'Russian',
+    accent: 'plus', speed: 0.85, ref_audio: 'ref.wav', ref_text: 'Опор+ная фр+аза.', wps: 3.0 }));
+  fs.writeFileSync(path.join(VOICES, 'esvoice', 'ref.wav'), wav(2));
   fs.mkdirSync(path.join(VOICES, 'qen'), { recursive: true });
   fs.writeFileSync(path.join(VOICES, 'qen', 'voice.json'), JSON.stringify({ title: 'en', engine: 'qwen3', model: '0.6B-Base', device: 'cuda:0', language: 'English', ref_audio: 'ref.wav', ref_text: 'Reference line.', wps: 3.0 }));
   fs.writeFileSync(path.join(VOICES, 'qen', 'ref.wav'), wav(2));
@@ -169,4 +173,34 @@ T('замок убитой озвучки (хозяина уже нет) сни�
     r = await narrate(f2, ['--provider', 'voicestudio', '--voice', 'qvoice', '--no-fallback', '--patience', '3']);
     assert.equal(r.code, 4, 'замок живого хозяина уважаем'); assert.match(r.se, /очередь на озвучку VoiceStudio занята/);
   } finally { fs.rmSync(lock, { force: true }); }
+});
+
+T('ESpeech: свой воркер и окружение, модель/темп/опорный текст с ударениями доходят до воркера; метки «+» ставит RUAccent по требованию голоса', async () => {
+  fs.rmSync(LOG, { force: true });
+  const acc = path.join(ROOT, 'test', 'fixtures', 'fake_ruaccent_cli.py');
+  const f = script('es1.txt', [`Горстка клеток слово${run_id}es. Да.`]);
+  const r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'esvoice'], { F5_PYTHON: PY, F5_WORKER: FAKE, RUACCENT_PYTHON: PY, RUACCENT_CLI: acc, ACCENT_CACHE: path.join(WORK, 'acc.json'), STRESS_DICT_FILE: path.join(WORK, 'none.json') });
+  assert.equal(r.code, 0, r.se + r.so);
+  const init = events().find((e) => e.init).init;
+  assert.equal(init.model, 'ESpeech/ESpeech-TTS-1_RL-V2'); assert.equal(init.checkpoint, 'espeech_tts_rlv2.pt'); assert.equal(init.speed, 0.85); assert.equal(init.ref_text, 'Опор+ная фр+аза.');
+  const sp = speaks().map((x) => x.text);
+  assert.ok(sp.length >= 1 && sp.every((x) => x.includes('+')), 'текст ушёл воркеру с метками ударения: ' + JSON.stringify(sp));
+  assert.match(r.se, /accent: RUAccent turbo3\.1, знак «plus»/);
+});
+
+T('ESpeech: ключ кэша зависит от темпа; Qwen-голос без требования ударений метки не получает; ESpeech не установлен — понятное сообщение', async () => {
+  const acc = path.join(ROOT, 'test', 'fixtures', 'fake_ruaccent_cli.py'), env = { F5_PYTHON: PY, F5_WORKER: FAKE, RUACCENT_PYTHON: PY, RUACCENT_CLI: acc, ACCENT_CACHE: path.join(WORK, 'acc.json'), STRESS_DICT_FILE: path.join(WORK, 'none.json') };
+  const f = script('es2.txt', [`Горстка клеток слово${run_id}sp.`]);
+  let r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'esvoice'], env); assert.equal(r.code, 0, r.se);
+  const vj = path.join(VOICES, 'esvoice', 'voice.json'), keep = fs.readFileSync(vj, 'utf8');
+  fs.writeFileSync(vj, JSON.stringify({ ...JSON.parse(keep), speed: 0.7 }));
+  try {
+    fs.rmSync(LOG, { force: true }); r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'esvoice'], env); assert.equal(r.code, 0, r.se);
+    assert.equal(events().find((e) => e.init).init.speed, 0.7); assert.ok(speaks().length >= 1, 'темп другой: готовый звук прежнего темпа не берём');
+  } finally { fs.writeFileSync(vj, keep); }
+  fs.rmSync(LOG, { force: true });
+  r = await narrate(script('es3.txt', [`Горстка клеток слово${run_id}q.`]), ['--provider', 'voicestudio', '--voice', 'qvoice'], env); assert.equal(r.code, 0, r.se);
+  assert.ok(!speaks().some((x) => x.text.includes('+')), 'обычному голосу метки не нужны');
+  r = await narrate(script('es4.txt', [`Горстка клеток слово${run_id}ni.`]), ['--provider', 'voicestudio', '--voice', 'esvoice', '--no-fallback'], { ...env, F5_PYTHON: path.join(WORK, 'no', 'python.exe') });
+  assert.equal(r.code, 4); assert.match(r.se, /ESpeech не установлен/);
 });

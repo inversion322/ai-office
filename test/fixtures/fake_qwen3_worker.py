@@ -12,7 +12,7 @@ for line in sys.stdin:
     r = json.loads(line)
     if r["cmd"] == "quit": L({"quit": True}); break
     if r["cmd"] == "init":
-        L({"init": {k: r.get(k) for k in ("model", "device", "ref", "ref_text", "language")}})
+        L({"init": {k: r.get(k) for k in ("model", "device", "ref", "ref_text", "language", "checkpoint", "speed")}})
         if os.environ.get("FAKE_INIT_FAIL"): send({"ok": False, "error": "нет весов"}); continue
         send({"ok": True, "load_s": 0.1, "device": r.get("device")})
     elif r["cmd"] == "speak":
@@ -20,7 +20,7 @@ for line in sys.stdin:
         if "ТРУНК" in text:
             left.setdefault(text, 2)
             if left[text] > 0: left[text] -= 1; sec *= 0.5
-        L({"speak": {"words": words, "max_sec": r["max_sec"]}})
+        L({"speak": {"words": words, "max_sec": r["max_sec"], "text": text}})
         if os.environ.get("FAKE_SPEAK_FAIL"): send({"id": r["id"], "ok": False, "error": "RuntimeError: out of memory"}); continue
         sr = 24000; n = max(1, round(sec * sr))
         with wave.open(r["out"], "wb") as w:
