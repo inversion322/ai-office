@@ -365,3 +365,22 @@ T('английская озвучка локальным голосом: про
   assert.match(speech()[0].body.input, /^Hello /);
   assert.match(r.so, /voice_provider: voicestudio/);
 });
+
+T('видеопамяти мало до запуска приложения: отказ сразу, VoiceStudio не запускается (минута на старт не тратится)', async () => {
+  const smi = path.join(WORK, 'smi.cmd'), app = path.join(WORK, 'app.cmd'), ran = path.join(WORK, 'app_ran.txt');
+  fs.writeFileSync(smi, '@echo 2958\r\n'); fs.writeFileSync(app, `@echo x> "${ran}"\r\n`);
+  const f = script('vram.txt', [words(8, run_id + 'v')]);
+  const t0 = Date.now();
+  const r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice', '--no-fallback', '--patience', '5'],
+    { VOICESTUDIO_URL: 'http://127.0.0.1:9', VOICESTUDIO_NO_SPAWN: '', VOICESTUDIO_EXE: app, VOICESTUDIO_NVIDIA_SMI: smi });
+  assert.equal(r.code, 4, r.se + r.so);
+  assert.match(r.se, /на видеокарте свободно 2\.9 ГБ.*Приложение не запускаю/s);
+  await new Promise((res) => setTimeout(res, 1500));
+  assert.ok(!fs.existsSync(ran), 'приложение не должно было запускаться');
+  assert.ok(Date.now() - t0 < 20000, 'отказ быстрый');
+  // а при достаточной памяти приложение запускается (здесь это заглушка, которая сервер не поднимает: ждём отказа по времени, но запуск был)
+  fs.writeFileSync(smi, '@echo 7000\r\n');
+  const r2 = await narrate(script('vram2.txt', [words(8, run_id + 'w')]), ['--provider', 'voicestudio', '--voice', 'testvoice', '--no-fallback', '--patience', '5'],
+    { VOICESTUDIO_URL: 'http://127.0.0.1:9', VOICESTUDIO_NO_SPAWN: '', VOICESTUDIO_EXE: app, VOICESTUDIO_NVIDIA_SMI: smi, VOICESTUDIO_START_TIMEOUT: '3' });
+  assert.ok(fs.existsSync(ran), 'при свободных 6.8 ГБ приложение запускается: ' + r2.se.slice(-300));
+});
