@@ -21,7 +21,9 @@ export function ctaRulesFor(proj, cta = null) {
   if (lang === 'en') return { lang, R: CTA_RULES_EN, spoken: null };
   let c = cta; try { c = c || loadCta(); } catch { c = null; }
   if (!c || !c.on_screen || !c.on_screen.headline || !c.codeword) return { lang, R: CTA_RULES, spoken: null };
-  const last = lastParagraph(proj), legacy = !!last && last !== norm(c.voice_ru) && (c.previous_voice_ru || []).map(norm).includes(last);
+  const last = lastParagraph(proj), word = String(c.codeword).toLowerCase().replace(/ё/g, 'е');
+  // прежние призывы «Подписывайтесь» (без кодового слова) проверяются по старому эталону; прежняя редакция призыва С кодовым словом проверяется той же сценой, что и новая (ДОСЬЕ на экране)
+  const legacy = !!last && last !== norm(c.voice_ru) && (c.previous_voice_ru || []).filter((x) => !String(x).toLowerCase().replace(/ё/g, 'е').includes(word)).map(norm).includes(last);
   if (legacy) return { lang, R: CTA_RULES, spoken: null };
   return { lang, R: { ...CTA_RULES, headline: c.on_screen.headline, must: [c.codeword, c.bot].filter(Boolean) }, spoken: c.codeword };
 }

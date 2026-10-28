@@ -109,3 +109,16 @@ test('старый ролик (последний абзац script_ru.txt эт�
     assert.equal(checkCta(dir).ok, true);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('сценарий с прежней редакцией призыва С кодовым словом («Слово — «досье»… Нужна подписка…») проверяется новой сценой (КОДОВОЕ СЛОВО), а не старым эталоном «Подписывайтесь»', () => {
+  const cta = JSON.parse(fs.readFileSync(path.join(ROOT, 'video', 'cta.json'), 'utf8'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cta_v2_')); fs.mkdirSync(path.join(dir, 'compositions'));
+  try {
+    fs.writeFileSync(path.join(dir, 'script_ru.txt'), `Хук.\n\n${cta.previous_voice_ru.at(-1)}\n`);
+    fs.writeFileSync(path.join(dir, 'compositions', 's20.html'), REF);
+    const ok = checkCta(dir); assert.equal(ok.ok, true, ok.problems.join('; '));
+    fs.writeFileSync(path.join(dir, 'compositions', 's20.html'), REF_V1);
+    const bad = checkCta(dir); assert.equal(bad.ok, false); assert.match(bad.problems.join(' '), /КОДОВОЕ СЛОВО/);
+    assert.equal(ctaRulesFor(dir).spoken, 'ДОСЬЕ', 'слово обязано звучать и в прежней редакции призыва');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

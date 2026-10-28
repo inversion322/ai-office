@@ -236,6 +236,17 @@ T('оценка длины для голоса VoiceStudio идёт по его 
   assert.equal(speech().length, 0);
 });
 
+T('est_wps в voice.json: оценка длины целого сценария идёт по нему, а wps остаётся для проверки темпа кусков (замер ESpeech 2026-10-28: 133 слова = 46,6 с)', async () => {
+  fs.mkdirSync(path.join(VOICES, 'testvoice_est'), { recursive: true });
+  fs.writeFileSync(path.join(VOICES, 'testvoice_est', 'voice.json'), JSON.stringify({ title: 'est', ref_audio: 'ref.wav', ref_text: 'Опорная фраза.', wps: 3.0, est_wps: 6.0 }));
+  fs.writeFileSync(path.join(VOICES, 'testvoice_est', 'ref.wav'), wav(2));
+  const f = script('est2.txt', [words(30, run_id + 'g'), words(30, run_id + 'h')]);
+  const r = await narrate(f, ['--estimate-only', '--provider', 'voicestudio', '--voice', 'testvoice_est']);
+  assert.equal(r.code, 0, r.se);
+  const sec = Number(/duration:\s*([\d.]+)\s*s/.exec(r.so)[1]);
+  assert.ok(Math.abs(sec - (60 / 6 + 0.30)) < 0.5, `оценка ${sec} (по est_wps 6,0 ждали ≈10,3 с, по wps 3,0 было бы ≈20,3 с)`);
+});
+
 T('лента вывода narrate.py при озвучке Edge прежняя: ничего не сломано для обычного пути', async () => {
   const f = script('old.txt', ['Обычный текст ' + run_id + ' для оценки.']);
   const r = await narrate(f, ['--estimate-only']);

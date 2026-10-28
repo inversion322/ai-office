@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { VERDICT_RE } from './script_style.mjs';
+import { VERDICT_RE, stripLeadMagnet } from './script_style.mjs';
 import { projectLang } from './project_lang.mjs';
 
 export const VERDICT_LABEL = { after: 0.6 };
@@ -24,7 +24,7 @@ export function sceneList(html) {
   }
   return out;
 }
-const word = (text, re = VERDICT_RE) => { const m = re.exec(text); return m ? text.slice(Math.max(0, m.index - 12), m.index + 28).trim() : null; };
+const word = (raw, re = VERDICT_RE) => { const text = re === VERDICT_RE ? stripLeadMagnet(raw) : raw, m = re.exec(text); return m ? text.slice(Math.max(0, m.index - 12), m.index + 28).trim() : null; };
 
 /** Возвращает { ok, problems[], checked }. Проект без index.html или без сцен не проверяется (старые ролики, тесты). */
 export function checkVerdictLabels(proj, { after = VERDICT_LABEL.after } = {}) {

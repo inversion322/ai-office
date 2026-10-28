@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { styleIssues, styleFeedback, bridgeIssues, verdictIssues, stripFillerOpeners, fillerOpeners, cleanFillerOpeners, fillerFeedback } from '../scripts/script_style.mjs';
+import { styleIssues, styleFeedback, bridgeIssues, verdictIssues, stripFillerOpeners, fillerOpeners, cleanFillerOpeners, fillerFeedback, stripLeadMagnet } from '../scripts/script_style.mjs';
 
 const rules = (a) => styleIssues(a).map((x) => x.rule);
 
@@ -90,4 +90,16 @@ test('cleanFillerOpeners правит абзацы и payoff на месте и 
   assert.equal(sc.segments[1], 'Британцы пометили воду. Три дня те пили кофе.'); assert.equal(sc.segments[3], 'Чашку кофе зря обвиняли.'); assert.equal(sc.payoff, 'Чашку кофе зря обвиняли');
   assert.equal(cleanFillerOpeners(sc).length, 0); assert.deepEqual(fillerOpeners(sc.segments), []);
   assert.match(fillerFeedback([{ seg: 2, quote: 'Так что британцы' }]), /абзац 2: «Так что британцы»/);
+});
+
+test('обещание файла с мифами (формула Ника 2026-10-28) не вердикт: «мифами» в абзаце 1 в составе «файла с … мифами» пропускается, а настоящий ярлык рядом по-прежнему ловится', () => {
+  const promise = 'Почему? Досмотри до конца. Там же будет слово для бесплатного файла с тридцатью самыми популярными мифами.';
+  assert.deepEqual(verdictIssues({ segments: ['Похудеть от уксуса? Журнал разнёс это по миру. ' + promise, 'Их было сто двадцать.'] }), []);
+  assert.deepEqual(verdictIssues({ segments: ['Хук. ' + promise, 'Файл с разбором тридцати мифов ждёт.'] }), []);
+  const bad = verdictIssues({ segments: ['Хук. ' + promise + ' Это миф.', 'Факт.'] }); assert.equal(bad.length, 1); assert.match(bad[0].quote, /миф/i);
+  assert.equal(verdictIssues({ segments: ['Это миф про файл.', 'Факт.'] }).length, 1, 'просто «миф» без файла ловится');
+  assert.equal(verdictIssues({ segments: ['Хук.', 'Факт.'], on_screen: [{ segment: 1, headline: 'МИФ?' }] }).length, 1, 'штамп на экране ловится');
+  assert.doesNotMatch(stripLeadMagnet('файла с тридцатью самыми популярными мифами'), /миф/);
+  assert.match(stripLeadMagnet('там файла МИФ? штамп'), /МИФ/, 'без предлога «с» это не обещание файла');
+  assert.equal(verdictIssues({ segments: ['Хук. Тут файл. МИФ.', 'Факт.'] }).length, 1);
 });

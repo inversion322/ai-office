@@ -14,7 +14,7 @@ const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 const safeNotify = async (text, buttons) => { try { return await notify(text, buttons); } catch (e) { console.error('УВЕДОМЛЕНИЕ НЕ ДОСТАВЛЕНО:', e.message); fs.appendFileSync(path.join(ROOT, 'smm', 'undelivered.txt'), `\n--- ${new Date().toISOString()}\n${text}\n`); } };
 const CTA = loadCta();   // призыв подписаться: один текст для всех роликов (video/cta.json), логика в cta_text.mjs
 const CTA_WORDS = CTA.voice_ru.split(/\s+/).filter((w) => /[\p{L}\d]/u.test(w)).length, CTA_SEC = CTA.voice_sec || 8;      // тире в счёт слов не идут
-const MAX_SPEECH = 53, MAX_TOTAL_WORDS = 117, MAX_WORDS = MAX_TOTAL_WORDS - CTA_WORDS;      // озвучка до 53 с ВМЕСТЕ с призывом: 117 слов всего (раньше 100 + призыв 17); сценарий без призыва = 117 минус слова призыва (кодовое слово: 19 слов, тело до 98 вместе с обещанием слова), итоговый ролик строго до 59 с
+const MAX_SPEECH = 53, MAX_TOTAL_WORDS = 135, MAX_WORDS = MAX_TOTAL_WORDS - CTA_WORDS;      // озвучка до 53 с ВМЕСТЕ с призывом: 135 слов всего (замер ESpeech 2026-10-28: 133 слова = 46,6 с); сценарий без призыва = 135 минус слова призыва (призыв Ника 28 слов, тело до 107; его сценарий #153 имеет 102), итоговый ролик строго до 59 с
 // Призыв добавляется последним абзацем (идемпотентно): и в сценарий, и перед монтажом, чтобы старые сценарии без него тоже получили его
 const withCta = (segments) => withCtaText(segments, CTA);
 const ensureCtaFile = (file) => ensureCtaFileText(file, CTA);

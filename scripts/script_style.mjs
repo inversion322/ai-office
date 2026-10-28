@@ -54,10 +54,14 @@ export const VERDICT_RE = new RegExp([
   'миф[а-яё]*', 'ложь', 'ложн[а-яё]*', 'неправд[а-яё]*', 'фейк[а-яё]*', 'развенчива[а-яё]*', 'разоблача[а-яё]*',
   'правд[аыуе](?![а-яё])(?!\\s+ли(?![а-яё]))(?!\\s*[?]|\\s*,?\\s+что(?![а-яё]))',
 ].map((x) => LB + x).join('|'), 'i');
+// Обещание файла с мифами («слово для бесплатного файла с тридцатью самыми популярными мифами», призыв «файл с разбором тридцати мифов») называет СОДЕРЖАНИЕ файла,
+// а не вердикт ролика (решение Ника 2026-10-28, правка последнего сценария: «мифами» в обещании остаётся). Такие слова из проверки вердикта вырезаются.
+export const LEADMAGNET_RE = /файл[а-яё]*\s+со?\s+(?:[а-яё«»"-]+\s+){0,5}?миф[а-яё]*/gi;      // только «файл(а) с … миф…»: «файл МИФ?» рядом со штампом сюда не попадает
+export const stripLeadMagnet = (text) => String(text == null ? '' : text).replace(LEADMAGNET_RE, ' ');
 const flat = (v) => (Array.isArray(v) ? v.map(flat).join(' ') : v && typeof v === 'object' ? Object.values(v).map(flat).join(' ') : String(v == null ? '' : v));
 export function verdictIssues(script, early = VERDICT_EARLY) {
   const out = [], seg = (script && script.segments) || [], scr = (script && Array.isArray(script.on_screen)) ? script.on_screen : [];
-  const add = (n, where, text) => { const m = VERDICT_RE.exec(text); if (m) out.push({ seg: n, rule: 'hook-verdict', where, say: 'вердикт «миф/правда» назван в начале ролика', quote: text.slice(Math.max(0, m.index - 25), m.index + 40).replace(/\s+/g, ' ').trim() }); };
+  const add = (n, where, raw) => { const text = stripLeadMagnet(raw), m = VERDICT_RE.exec(text); if (m) out.push({ seg: n, rule: 'hook-verdict', where, say: 'вердикт «миф/правда» назван в начале ролика', quote: text.slice(Math.max(0, m.index - 25), m.index + 40).replace(/\s+/g, ' ').trim() }); };
   for (let i = 0; i < Math.min(early, seg.length); i++) add(i + 1, 'озвучка', String(seg[i] || ''));
   scr.forEach((e, i) => { const n = Number(e && e.segment) || i + 1; if (n <= early) add(n, 'экран', flat([e.headline, e.note, e.loupe, e.numbers, e.text])); });
   return out;

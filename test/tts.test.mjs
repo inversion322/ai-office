@@ -15,13 +15,15 @@ const work = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-test-'));
 test('сервис недоступен: этап не падает, длина оценивается по тексту с запасом, есть длина по абзацам', { skip: !segs }, () => {
   process.env.NARRATE_FAKE_FAILS = '99';
   const fresh = segs.map((s, i) => s + ' ' + 'проба'.repeat(0) + (i === 0 ? 'Совершенно новая добавка для текста без кэша.' : ''));   // новый текст: в кэше его нет
+  const EDGE_SET = path.join(work, 'edge_settings.json');      // боевой voice_settings.json ведёт ESpeech (с 2026-10-28): путь «Edge недоступен» проверяем на настройках с голосом Edge
+  fs.writeFileSync(EDGE_SET, JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(ROOT, 'video', 'voice_settings.json'), 'utf8')), provider: 'edge', fallback: 'none' })); process.env.VOICE_SETTINGS_FILE = EDGE_SET;
   try {
     const r = speechSeconds(fresh, { root: ROOT, patience: 5, workDir: work });
     assert.equal(r.estimated, true);
     assert.ok(r.sec > 40 && r.sec < 70, `оценка ${r.sec}`);
     assert.equal(r.perSeg.length, segs.length);
     assert.ok(/TTS_UNAVAILABLE|RuntimeError|Error/.test(r.reason), r.reason);
-  } finally { delete process.env.NARRATE_FAKE_FAILS; }
+  } finally { delete process.env.NARRATE_FAKE_FAILS; delete process.env.VOICE_SETTINGS_FILE; }
 });
 
 test('текст в кэше: точный замер без сети даже при отказах сервиса', { skip: !segs }, (t) => {
@@ -39,7 +41,7 @@ test('текст в кэше: точный замер без сети даже �
 const SET = path.join(work, 'vs_settings.json');
 function withSettings(extra, f) {
   const base = JSON.parse(fs.readFileSync(path.join(ROOT, 'video', 'voice_settings.json'), 'utf8'));
-  fs.writeFileSync(SET, JSON.stringify({ ...base, provider: 'voicestudio', fallback: 'edge', voicestudio: { voice: 'md_friendly_a' }, ...extra }));
+  fs.writeFileSync(SET, JSON.stringify({ ...base, provider: 'voicestudio', fallback: 'edge', length_basis: 'slowest', voicestudio: { voice: 'md_friendly_a' }, ...extra }));      // боевой voice_settings.json с 2026-10-28 ведёт length_basis=primary: ветку slowest проверяем явно
   process.env.VOICE_SETTINGS_FILE = SET; process.env.NARRATE_FAKE_FAILS = '99';
   try { return f(); } finally { delete process.env.VOICE_SETTINGS_FILE; delete process.env.NARRATE_FAKE_FAILS; }
 }

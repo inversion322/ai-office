@@ -71,3 +71,11 @@ test('английская версия (lang.json = en): MYTH в конце м�
     assert.equal(checkVerdictLabels(dir).ok, true);
   } finally { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); }
 });
+
+test('субтитры обещания файла («…слово для бесплатного файла с тридцатью самыми популярными мифами») в первых сценах не вердикт; штамп «МИФ» там же по-прежнему ловится', () => {
+  const ok = project([{ name: 's01', start: 0, dur: 6, html: '<div class="cap">Там же будет слово для бесплатного файла с тридцатью самыми популярными мифами</div>' }, { name: 's17', start: 33, dur: 4, html: '<div class="stamp"><span>МИФ</span></div>' }]);
+  const bad = project([{ name: 's01', start: 0, dur: 6, html: '<div class="cap">Там же будет слово для файла</div><div class="stamp">МИФ?</div>' }, { name: 's17', start: 33, dur: 4, html: '<div>ФАКТ</div>' }]);
+  try {
+    assert.equal(checkVerdictLabels(ok).ok, true, checkVerdictLabels(ok).problems.join('; ')); assert.equal(checkVerdictLabels(bad).ok, false);
+  } finally { fs.rmSync(ok, { recursive: true, force: true }); fs.rmSync(bad, { recursive: true, force: true }); }
+});
