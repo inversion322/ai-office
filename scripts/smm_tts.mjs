@@ -27,8 +27,14 @@ function measure(segments, { root, patience, dir, stem, script }) {
 
   // Замер длины сценария идёт только по Edge и никогда не будит VoiceStudio (видеокарта, ~1 мин на запуск): запасной голос здесь не нужен.
   // Если основной голос ролика VoiceStudio, настоящий синтез Edge дал бы не ту длину (VoxCPM2 читает на ~40% быстрее): тогда оценка по темпу голоса.
+  // Исключение: основной голос VoiceStudio, но запасной Edge, и в voice_settings.json length_basis = slowest (по умолчанию). Пока VoxCPM2 может не
+  // запуститься (видеопамять занята Whisper шлюза), озвучку вправе взять Dmitry, который на ~25% медленнее: сценарий, принятый по быстрому голосу,
+  // тогда не влез бы в лимит. Меряем по самому медленному из двух; length_basis = primary включают, когда основной голос запускается стабильно.
   let vsPrimary = false;
-  try { vsPrimary = JSON.parse((run(['--show-config']).stdout || '{}').trim().split('\n').pop()).provider === 'voicestudio'; } catch {}
+  try {
+    const plan = JSON.parse((run(['--show-config']).stdout || '{}').trim().split('\n').pop());
+    vsPrimary = plan.provider === 'voicestudio' && !(plan.fallback === 'edge' && (plan.length_basis || 'slowest') === 'slowest');
+  } catch {}
   const est = run(['--estimate-only']);                              // мгновенно, без сети: нужна и для подсказок по абзацам
   const em = DURATION.exec(est.stdout || ''), sm = /segments_sec:\s*(.+)/.exec(est.stdout || '');
   const estSec = em ? Number(em[1]) : null;
