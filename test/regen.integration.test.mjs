@@ -136,12 +136,12 @@ test('сессия Mini App может убрать карточку и сбро
   assert.equal((await call('/api/prompt', { agent_id: 'video', body: 'x' })).status, 403);
 });
 
-test('кодовое слово: сценарий без обещания слова возвращается Ксении с замечанием, исправленный (обещание в абзаце 1, одна напоминалка в середине) доходит до Ника, призыв со словом стоит последним абзацем', { skip: !can }, async () => {
+test('кодовое слово: сценарий без обещания слова возвращается Ксении с замечанием, исправленный (одно обещание в абзаце 1, без напоминалок в середине) доходит до Ника, призыв со словом стоит последним абзацем', { skip: !can }, async () => {
   const { card } = await regen('codeword');
   const now = JSON.parse(fs.readFileSync(path.join(RUN, 'script.json'), 'utf8'));
-  assert.match(now.segments[0], /скажу в конце\. Там же слово/); assert.equal(now.segments.filter((x) => /Слово в конце/.test(x)).length, 1);
+  assert.match(now.segments[0], /скажу в конце\. Там же слово/); assert.equal(now.segments.filter((x) => /слово/i.test(x)).length, 1, 'слово упомянуто один раз, в начале; напоминалок в середине нет');
   const qs = fs.readFileSync(path.join(RUN, 'script.json.queries'), 'utf8');
-  assert.match(qs, /Лид-магнит/); assert.match(qs, /«ДОСЬЕ»/); assert.match(qs, /напоминалк/);
+  assert.match(qs, /Лид-магнит/); assert.match(qs, /«ДОСЬЕ»/); assert.match(qs, /ОДНА короткая фраза-обещание/);
   assert.match(card.text, /Слово — «досье»/); assert.ok(card.buttons.flat().some((b) => b.d === 'approve:7'));
   const sr = fs.readFileSync(path.join(ROOT, 'smm', 'runs', 'video_7', 'script_ru.txt'), 'utf8').trim().split(/\n\n/);
   assert.match(sr[sr.length - 1], /^Слово — «досье»\./); assert.doesNotMatch(sr.slice(0, -1).join(' '), /досье|боту|подписк/i);
