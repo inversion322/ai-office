@@ -81,3 +81,15 @@ T('list показывает пометку «утверждён Ником» у
     assert.ok(!by.v1, 'у v1 пометки нет'); assert.match(by.v2, /Ник/);
   } finally { fs.rmSync(path.join(VOICES, 'v2'), { recursive: true, force: true }); fs.writeFileSync(f, orig); }
 });
+
+T('английский голос по умолчанию: раздел en, русский не трогается; kokoro/voicestudio допустимы, edge — нет', () => {
+  const before_ru = { provider: settings().provider, fallback: settings().fallback, voice: settings().voicestudio.voice };
+  let r = run('default', 'voicestudio', '--lang', 'en'); assert.notEqual(r.status, 0, 'голос не выбран'); assert.match(r.stderr, /нужно имя голоса/);
+  r = run('default', 'edge', '--lang', 'en'); assert.notEqual(r.status, 0); assert.match(r.stderr, /kokoro или voicestudio/);
+  r = run('default', 'voicestudio', '--lang', 'en', '--voice', 'v1', '--fallback', 'kokoro'); assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(settings().en, { provider: 'voicestudio', fallback: 'kokoro', voicestudio: { voice: 'v1' } });
+  assert.deepEqual({ provider: settings().provider, fallback: settings().fallback, voice: settings().voicestudio.voice }, before_ru, 'русские настройки не изменились');
+  r = run('default', 'voicestudio', '--lang', 'en', '--voice', 'v1', '--fallback', 'edge'); assert.notEqual(r.status, 0); assert.match(r.stderr, /не подходит/);
+  r = run('default', 'kokoro', '--lang', 'ru'); assert.notEqual(r.status, 0); assert.match(r.stderr, /edge или voicestudio/);
+  const l = JSON.parse(run('list').stdout); assert.deepEqual(l.en, { provider: 'voicestudio', fallback: 'kokoro', voice: 'v1' });
+});

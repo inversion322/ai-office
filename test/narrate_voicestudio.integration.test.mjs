@@ -20,7 +20,8 @@ const after = (f) => HAVE && _after(f);
 const PORT = 10500 + (process.pid % 80), URL = `http://127.0.0.1:${PORT}`;
 const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-test-'));
 const VOICES = path.join(WORK, 'voices');
-const SETTINGS = path.join(WORK, 'voice_settings.json');          // свои настройки: боевой voice_settings.json тестам не указ
+const SETTINGS = path.join(WORK, 'voice_settings.json');
+const SETTINGS_EN = path.join(WORK, 'voice_settings_en.json');          // свои настройки: боевой voice_settings.json тестам не указ
 const run_id = Math.random().toString(36).slice(2, 8);               // уникальные тексты: кэш Edge не должен подменять отказ
 
 let server, log = [], truncLeft = {}, profiles = [], loaded = false, vramFree = 7.0;
@@ -40,6 +41,11 @@ before(async () => {
   fs.mkdirSync(path.join(VOICES, 'testvoice'), { recursive: true });
   fs.writeFileSync(path.join(VOICES, 'testvoice', 'voice.json'), JSON.stringify({ title: 'тест', ref_audio: 'ref.wav', ref_text: 'Опорная фраза.', wps: 3.0 }));
   fs.writeFileSync(path.join(VOICES, 'testvoice', 'ref.wav'), wav(2));
+  fs.mkdirSync(path.join(VOICES, 'testvoice_en'), { recursive: true });
+  fs.writeFileSync(path.join(VOICES, 'testvoice_en', 'voice.json'), JSON.stringify({ title: 'en', language: 'English', ref_audio: 'ref.wav', ref_text: 'Reference line.', wps: 3.0 }));
+  fs.writeFileSync(path.join(VOICES, 'testvoice_en', 'ref.wav'), wav(2));
+  fs.writeFileSync(SETTINGS_EN, JSON.stringify({ ru: base.ru, estimator: base.estimator, max_total_sec: 59, max_speech_sec: 53, provider: 'edge', fallback: 'none', voicestudio: { voice: '' },
+    en: { provider: 'voicestudio', fallback: 'kokoro', voicestudio: { voice: 'testvoice_en' } } }));
   server = http.createServer((req, res) => {
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
@@ -51,7 +57,8 @@ before(async () => {
       if (req.url === '/v1/audio/voices') return send(200, { voices: profiles.map((p) => ({ voice_id: p.id, name: p.name, type: 'profile' })) });
       if (req.url === '/profiles' && req.method === 'POST') {
         const name = /name="name"\r\n\r\n([^\r]+)/.exec(body.toString('latin1'))?.[1] ?? 'x';
-        const p = { id: 'p' + profiles.length, name }; profiles.push(p); return send(200, p);
+        const lang = /name="language"\r\n\r\n([^\r]+)/.exec(body.toString('latin1'))?.[1] ?? '';
+        const p = { id: 'p' + profiles.length, name, lang }; profiles.push(p); return send(200, p);
       }
       if (req.url === '/model/loaded') return send(200, { models: loaded ? [{ id: 'sidecar:voxcpm2', unloadable: true }] : [], system: { vram_free_gb: vramFree } });
       if (req.url.startsWith('/model/unload/')) { loaded = false; return send(200, { success: true }); }
@@ -71,10 +78,10 @@ before(async () => {
 after(() => { server.close(); fs.rmSync(WORK, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); });
 
 const speech = () => log.filter((x) => x.u === '/v1/audio/speech');
-function narrate(textFile, args = [], env = {}) {
+function narrate(textFile, args = [], env = {}, lang = 'ru') {
   return new Promise((resolve) => {
     const out = path.join(WORK, `out_${Math.random().toString(36).slice(2, 7)}.mp3`);
-    const p = spawn(PY, [NARRATE, '--lang', 'ru', '--text', textFile, '--out', out, '--max-sec', '999', '--patience', '20', ...args], {
+    const p = spawn(PY, [NARRATE, '--lang', lang, '--text', textFile, '--out', out, '--max-sec', '999', '--patience', '20', ...args], {
       env: { ...process.env, VOICESTUDIO_URL: URL, VOICESTUDIO_NO_SPAWN: '1', VOICESTUDIO_CACHE: path.join(WORK, 'cache'), VOICESTUDIO_LOCK: path.join(WORK, 'vs.lock'),
              VOICESTUDIO_VOICES: VOICES, VOICE_SETTINGS_FILE: SETTINGS, PYTHONIOENCODING: 'utf-8', NARRATE_ASR_FAKE: 'echo', ...env },
     });
@@ -208,7 +215,7 @@ T('сервер недоступен и автозапуск выключен: �
 
 T('замок на видеокарту: пока занят, вторая озвучка ждёт и уходит с отказом, а не лезет в модель', async () => {
   log = [];
-  fs.writeFileSync(path.join(WORK, 'vs.lock'), `999 ${Date.now()}`);
+  fs.writeFileSync(path.join(WORK, 'vs.lock'), `${process.pid} ${Date.now()}`);          // хозяин замка жив: это сам тест
   try {
     const f = script('k.txt', [words(8, run_id + 'k')]);
     const r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice', '--no-fallback', '--patience', '3']);
@@ -331,4 +338,30 @@ T('наша собственная модель в памяти не счита�
     assert.equal(r.code, 0, r.se);
     assert.equal(speech().length, 1);
   } finally { vramFree = 7.0; loaded = false; }
+});
+
+T('английский: по умолчанию Kokoro; раздел en в настройках включает локальный голос с запасным Kokoro; русские слои не мешают', async () => {
+  const show = (settings, args = []) => new Promise((resolve) => {
+    const f = script('en_show.txt', ['Hello there.']);
+    const p = spawn(PY, [NARRATE, '--lang', 'en', '--text', f, '--show-config', ...args], { env: { ...process.env, VOICE_SETTINGS_FILE: settings, VOICESTUDIO_VOICES: VOICES, PYTHONIOENCODING: 'utf-8' } });
+    let so = '', se = ''; p.stdout.on('data', (d) => so += d); p.stderr.on('data', (d) => se += d);
+    p.on('close', (code) => resolve({ code, plan: so.trim() ? JSON.parse(so) : null, se }));
+  });
+  let r = await show(SETTINGS);                                  // в боевых настройках раздела en ещё нет в копии теста: берётся умолчание
+  assert.equal(r.code, 0, r.se); assert.equal(r.plan.provider, 'kokoro'); assert.equal(r.plan.fallback, 'none');
+  r = await show(SETTINGS_EN);
+  assert.deepEqual([r.plan.provider, r.plan.fallback, r.plan.voice], ['voicestudio', 'kokoro', 'testvoice_en']);
+  r = await show(SETTINGS_EN, ['--provider', 'edge']);           // Edge — русский движок
+  assert.notEqual(r.code, 0); assert.match(r.se, /kokoro или voicestudio/);
+});
+
+T('английская озвучка локальным голосом: профиль создан с языком English, текст без русских подмен, провайдер назван', async () => {
+  log = []; const n0 = profiles.length;
+  const f = script('en.txt', [`Hello ${run_id} one two three four five six.`, `Second paragraph ${run_id} has seven words here.`]);
+  const r = await narrate(f, [], { VOICE_SETTINGS_FILE: SETTINGS_EN }, 'en');
+  assert.equal(r.code, 0, r.se + r.so);
+  assert.equal(profiles.length, n0 + 1); assert.equal(profiles[n0].lang, 'English', 'язык профиля берётся из voice.json');
+  assert.equal(speech().length, 2);
+  assert.match(speech()[0].body.input, /^Hello /);
+  assert.match(r.so, /voice_provider: voicestudio/);
 });
