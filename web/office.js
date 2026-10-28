@@ -26,9 +26,9 @@ const OFFICE_LAYOUTS = {
              research: [6.5, 47], virality: [15.2, 47], scriptwriter: [23.8, 47], factcheck: [32.5, 47],
              video: [6.5, 80.6], video_b: [15.2, 80.6], video_c: [23.8, 80.6],
              studio_chief: [59.6, 47], tg_scout: [68.3, 47], tg_author: [76.9, 47], tg_editor: [85.6, 47], tg_artist: [94.2, 47],
-             tg_publisher: [68.3, 80.6], tg_analyst: [76.9, 80.6], packager: [85.6, 80.6], publisher: [94.2, 80.6] },
+             translator: [59.6, 80.6], tg_publisher: [68.3, 80.6], tg_analyst: [76.9, 80.6], packager: [85.6, 80.6], publisher: [94.2, 80.6] },
     agentRoom: { captain_smm: 'cap', research: 'jobs', virality: 'jobs', scriptwriter: 'jobs', factcheck: 'jobs', video: 'jobs', video_b: 'jobs', video_c: 'jobs',
-                 studio_chief: 'right', tg_scout: 'right', tg_author: 'right', tg_editor: 'right', tg_artist: 'right', tg_publisher: 'right', tg_analyst: 'right', packager: 'right', publisher: 'right' } },
+                 studio_chief: 'right', tg_scout: 'right', tg_author: 'right', tg_editor: 'right', tg_artist: 'right', tg_publisher: 'right', tg_analyst: 'right', packager: 'right', publisher: 'right', translator: 'right' } },
 };
 let OFFICE_DESKS, AGENT_ROOM, PLANTS, WALL, VISIT_BESIDE = false;
 const WALL_DEFAULT = { win: [150, 240], poster: [200], shelf: 281 };

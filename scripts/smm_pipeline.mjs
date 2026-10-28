@@ -38,6 +38,7 @@ import { fireReminders } from './reminders.mjs';
 import { measureAll, applyDemand, demandLookup, demandForPrompt, VIKTOR_DEMAND_RULES, LEV_DEMAND_RULES } from './demand.mjs';
 import { publishYouTube, publishCard, loadPublishMeta, queueInfo, queueText } from './publisher.mjs';
 import { ytStatus } from './youtube.mjs';
+import { localize as localizeEn } from './smm_localize.mjs';
 import { runStudio } from './studio_pipeline.mjs';
 const speechSeconds = async (segments) => { await yieldToPriority('scriptwriter'); return measureSpeech(segments, { root: ROOT }); };   // { sec, estimated, perSeg }
 // Поток «варианты одной темы» (variants_flow.mjs): три сценария разных форматов, одна карточка, три монтажёра параллельно
@@ -524,7 +525,7 @@ async function rework(id, comment) {
 // Сценарий для названия: у ролика №1 собран вручную, у остальных лежит в smm/runs/video_N
 const scriptFileOf = (id) => (Number(id) === 1 ? path.join(projectDir(1), 'script_ru.txt') : path.join(ROOT, 'smm', 'runs', `video_${id}`, 'script_ru.txt'));
 // Кнопки карточки названия. «Перейти к публикации» только когда YouTube подключён.
-const titleButtons = (id) => [[['🔄 Перегенерировать название', `package:${id}`], ['✏️ Своё название', `title:${id}`]], ...(ytStatus().ready ? [[['🚀 Перейти к публикации', `publish_go:${id}`]]] : [])];
+const titleButtons = (id) => [[['🔄 Перегенерировать название', `package:${id}`], ['✏️ Своё название', `title:${id}`]], [['🇬🇧 Английская версия', `en:${id}`]], ...(ytStatus().ready ? [[['🚀 Перейти к публикации', `publish_go:${id}`]]] : [])];
 // Своё название, введённое Ником: сохраняется для Публикатора, хэштеги прежние. Автопроверка только предупреждает: решение за Ником.
 async function setTitle(id, title) {
   const v = await getVideo(id); if (!v) throw new Error('нет ролика #' + id);
@@ -605,6 +606,7 @@ const runOnce = () => cmd === 'topics' ? topics(opt('--hint', all))
   : cmd === 'produce' ? produce(a1, opt('--comment', rest), { finishOnly: all.includes('--finish'), sendAnyway: all.includes('--finish') && all.includes('--send-anyway') })
   : cmd === 'rework' ? rework(a1, opt('--comment', rest))
   : cmd === 'package' ? packageClip(a1, opt('--comment', rest))
+  : cmd === 'localize' ? localizeEn(a1)
   : cmd === 'publish' ? publishYouTube(a1, opt('--target', rest) || 'ytp', { when: opt('--at', rest) || undefined }).then((r) => { if (!r.ok) process.exitCode = 1; })
   : cmd === 'publish-card' ? publishCard(a1, { only: opt('--only', rest) || undefined })
   : cmd === 'set-title' ? setTitle(a1, opt('--title', rest))
@@ -628,15 +630,15 @@ run.catch(async (e) => {
   const msg = String((e && e.message) || e).split('\n')[0].slice(0, 220);
   console.error('ОШИБКА:', msg);
   try {   // статусы не должны зависать «в работе», а Ник должен узнать о сбое и получить кнопку «Повторить»
-    const who = (cmd === 'script' || cmd === 'variants' || cmd === 'variant-revise') ? 'scriptwriter' : (cmd === 'produce' || cmd === 'rework') ? await editorIdOf(a1) : cmd === 'group-card' ? 'captain_smm' : cmd === 'package' ? 'packager' : cmd === 'publish' ? 'publisher' : cmd === 'studio' ? (a1 === 'plan' ? 'tg_scout' : a1 === 'publish-due' ? 'tg_publisher' : 'tg_author') : 'research';
-    const stage = { script: 'сценария', variants: 'вариантов сценария', 'variant-revise': 'правки варианта', 'group-card': 'карточки вариантов', produce: 'монтажа', rework: 'правок ролика', package: 'названия и хэштегов', publish: 'публикации', studio: a1 === 'plan' ? 'плана дня' : a1 === 'publish-due' ? 'публикации поста' : 'поста', topics: 'поиска тем' }[cmd] || cmd;
+    const who = (cmd === 'script' || cmd === 'variants' || cmd === 'variant-revise') ? 'scriptwriter' : (cmd === 'produce' || cmd === 'rework') ? await editorIdOf(a1) : cmd === 'group-card' ? 'captain_smm' : cmd === 'package' ? 'packager' : cmd === 'localize' ? 'translator' : cmd === 'publish' ? 'publisher' : cmd === 'studio' ? (a1 === 'plan' ? 'tg_scout' : a1 === 'publish-due' ? 'tg_publisher' : 'tg_author') : 'research';
+    const stage = { script: 'сценария', variants: 'вариантов сценария', 'variant-revise': 'правки варианта', 'group-card': 'карточки вариантов', produce: 'монтажа', rework: 'правок ролика', package: 'названия и хэштегов', localize: 'английской версии', publish: 'публикации', studio: a1 === 'plan' ? 'плана дня' : a1 === 'publish-due' ? 'публикации поста' : 'поста', topics: 'поиска тем' }[cmd] || cmd;
     if (cmd === 'rework') await setPriority(false);
     await agent(who, 'error', 'Сбой: ' + msg, 0, `Сбой этапа ${stage}: ${msg}`, 'error');
     if (cmd === 'script') { await agent('factcheck', 'idle', 'Ждёт сценарий на проверку', 0); }
     if (cmd === 'topics') { await agent('virality', 'idle', 'Ждёт темы для оценки', 0); }
     if (cmd === 'studio') { await safeNotify(`⚠️ Студия: этап ${stage} остановился с ошибкой: ${msg}\n\nЭто сбой на нашей стороне. Напишите «план дня», чтобы собрать план заново, или «Править» на карточке поста.`); process.exit(1); }
     await agent('captain_smm', 'waiting', `Сбой этапа ${stage}, ждёт вашего решения`, 0, `Этап ${stage} остановился с ошибкой`, 'error');
-    await safeNotify(`⚠️ Этап ${stage} остановился с ошибкой (после автоповтора): ${msg}\n\nЭто сбой на нашей стороне, не ваш. Нажмите «Повторить», когда удобно, и я запущу этап заново.`, [[[cmd === 'rework' ? 'Внести правки ещё раз' : 'Повторить', cmd === 'topics' ? 'more:0' : cmd === 'rework' ? `rework:${a1}` : cmd === 'package' ? `package:${a1}` : `retry:${a1}`]]]);
+    await safeNotify(`⚠️ Этап ${stage} остановился с ошибкой (после автоповтора): ${msg}\n\nЭто сбой на нашей стороне, не ваш. Нажмите «Повторить», когда удобно, и я запущу этап заново.`, [[[cmd === 'rework' ? 'Внести правки ещё раз' : 'Повторить', cmd === 'topics' ? 'more:0' : cmd === 'rework' ? `rework:${a1}` : cmd === 'package' ? `package:${a1}` : cmd === 'localize' ? `en:${a1}` : `retry:${a1}`]]]);
   } catch (e2) { console.error('не удалось отметить сбой:', e2.message); }
   process.exit(1);
 });

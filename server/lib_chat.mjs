@@ -12,7 +12,7 @@ import { variantOf, groupMembers, isGroup, anchorOf, parseVariantComment, enable
 import { parseWhen, isCancelWhen, fmtMsk } from '../scripts/publish_when.mjs';
 
 const OWNER = 323028999;
-const NAMES = { капитан: 'captain_smm', кряк: 'captain_smm', виктор: 'research', ксения: 'scriptwriter', лев: 'virality', вера: 'factcheck', кирилл: 'video', матвей: 'video_b', роман: 'video_c', тимофей: 'packager' };
+const NAMES = { капитан: 'captain_smm', кряк: 'captain_smm', виктор: 'research', ксения: 'scriptwriter', лев: 'virality', вера: 'factcheck', кирилл: 'video', матвей: 'video_b', роман: 'video_c', тимофей: 'packager', лина: 'translator' };
 const REPLY_PROFILE = { video: 'video', video_b: 'video_b', video_c: 'video_c' };     // Кирилл отвечает на Opus 5.5, остальные SMM на профиле smm
 const STAGE_LABEL = { idea: 'идея', scored: 'оценена, ждёт выбора', script: 'сценарий пишется/проверяется', checked: 'сценарий проверен, ждёт утверждения', editing: 'монтаж', produced: 'ролик готов, ждёт приёма', approved: 'принят', rejected: 'отклонена', published: 'опубликован' };
 
@@ -355,6 +355,10 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     } else if (act === 'package' && v) {
       supersede(`publish_go:${id}"`); supersede(`publish:${id}:`);          // карточки публикации с прежним названием устарели
       cap(`Запускаю Тимофея заново: название и хэштеги для «${v.title}».`); spawnPipeline(['package', String(id), ...(comment && comment.trim() ? ['--comment', comment.trim()] : [])]);
+    } else if (act === 'en' && v) {
+      // Английская версия по кнопке Ника (решение 2026-10-28): только для принятых роликов; Лина переводит, Вера сверяет, потом озвучка и монтаж. Публикации здесь нет.
+      if (!['approved', 'published'].includes(v.stage)) { cap(`Английскую версию делаю только для принятых роликов: «${v.title}» сейчас «${STAGE_LABEL[v.stage] || v.stage}».`); return {}; }
+      spawnPipeline(['localize', String(id)]);
     } else if (act === 'retry' && v) {
       if (v.stage === 'editing') { cap(`Запускаю монтаж заново: «${v.title}».`); spawnPipeline(['produce', String(id)]); }
       else { setStage(id, 'script'); cap(`Запускаю сценарий заново: «${v.title}».`); spawnPipeline(['script', String(id)]); }
@@ -449,6 +453,10 @@ CREATE INDEX IF NOT EXISTS idx_messages_office ON messages(office, id);
     // Выбор в плане дня (видео/посты/«другие варианты») и «Утвердить» при неполном выборе не закрывают карточку: пайплайн правит её на месте.
     const planOk = /^splan:([^:]+):(\d{4}-\d{2}-\d{2}):ok$/.exec(String(choice)), planDoc = planOk ? STUDIO.loadPlan(planOk[2], planOk[1]) : null;
     if (/^splan:[^:]+:\d{4}-\d{2}-\d{2}:([vp]\d{1,2}|morev|morep)$/.test(String(choice)) || (planDoc && planDoc.options && planDoc.status === 'proposed' && !STUDIO.selectionComplete(planDoc))) {
+      try { await execAction(choice, undefined, via, m); } catch (e) { return { ok: false, error: e.message }; }
+      return { ok: true, kept: true };
+    }
+    if (/^en:\d+$/.test(String(choice))) {          // «Английская версия» не закрывает карточку названия: на ней остаются кнопки перегенерации и публикации
       try { await execAction(choice, undefined, via, m); } catch (e) { return { ok: false, error: e.message }; }
       return { ok: true, kept: true };
     }

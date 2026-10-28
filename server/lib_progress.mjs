@@ -12,7 +12,7 @@ export const DEFAULT_SEC = {
   'video:produce': 50 * MIN, 'video:rework': 20 * MIN, 'video_b:produce': 45 * MIN, 'video_b:rework': 20 * MIN, 'video_c:produce': 45 * MIN, 'video_c:rework': 20 * MIN, 'captain_smm:produce': 50 * MIN, 'captain_smm:rework': 20 * MIN,
   'captain_smm:script': 20 * MIN, 'captain_smm:topics': 12 * MIN,
   'scriptwriter:run': 5 * MIN, 'factcheck:run': 3 * MIN, 'research:run': 6 * MIN, 'virality:run': 4 * MIN,
-  'packager:run': 3 * MIN, 'publisher:run': 2 * MIN,
+  'packager:run': 3 * MIN, 'publisher:run': 2 * MIN, 'translator:run': 4 * MIN,
 };
 export const MIN_HISTORY_MS = 45000;        // запуски короче не считаем (дребезг статуса)
 const HISTORY_N = 8;

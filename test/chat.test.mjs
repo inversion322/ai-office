@@ -549,3 +549,19 @@ test('этап конвейера получает путь к той же на�
   try { sendCap(m.chat, 'подбери темы про сон'); await tick(900); assert.ok(fs.existsSync(log), 'этап запущен'); assert.equal(path.resolve(fs.readFileSync(log, 'utf8').trim()), path.resolve(path.join(m.dir, 'settings.json'))); }
   finally { delete process.env.HERMES_BIN; if (keep !== undefined) process.env.OFFICE_SETTINGS_FILE = keep; }
 });
+
+test('кнопка «Английская версия» (en:N): для принятого ролика запускает этап localize и НЕ закрывает карточку названия; для непринятого отказывает', async () => {
+  const { chat, db } = make();
+  const a = chat.post({ thread: 'captain_smm', sender: 'captain_smm', kind: 'action', text: 'Название', buttons: [[['Другое название', 'package:3']], [['🇬🇧 Английская версия', 'en:3']], [['Перейти к публикации', 'publish_go:3']]] });
+  const msgs = () => db.prepare("SELECT text FROM messages WHERE sender='captain_smm' ORDER BY id").all().map((m) => m.text).join('\n');
+  db.prepare("UPDATE videos SET stage='scored' WHERE id=3").run();
+  let r = await chat.answer({ id: a, choice: 'en:3', via: 'dashboard' });
+  assert.equal(r.ok, true); assert.equal(r.kept, true);
+  assert.match(msgs(), /только для принятых роликов/, 'ролик не принят: отказ с причиной');
+  assert.equal(row(db, a).status, 'open', 'карточка остаётся открытой: на ней кнопки публикации');
+  db.prepare("UPDATE videos SET stage='approved' WHERE id=3").run();
+  r = await chat.answer({ id: a, choice: 'en:3', via: 'telegram' });
+  assert.equal(r.ok, true); assert.equal(row(db, a).status, 'open');
+  assert.match(msgs(), /этап localize|localize/, 'принятый ролик: запущен этап localize (в тесте без модели это заглушка)');
+  assert.deepEqual(ds(db, a).filter((d) => /^en:/.test(d)), ['en:3']);
+});

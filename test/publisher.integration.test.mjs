@@ -105,7 +105,7 @@ test('после пакета Тимофея: карточка названия 
     const from = await lastId(); await run1(v.id); const pk = await waitFor(/Пакет публикации/, from);
     const meta = JSON.parse(fs.readFileSync(path.join(ROOT, 'smm', 'runs', `package_${v.id}`, 'publish_meta.json'), 'utf8')); assert.ok(meta.title && meta.tags.length >= 1, 'выбранное название и хэштеги записаны для Публикатора');
     const ds = JSON.parse(JSON.stringify(pk.buttons)).flat().map((b) => b.d).filter((d) => d !== 'dismiss:0');
-    assert.deepEqual(ds, connected ? [`package:${v.id}`, `title:${v.id}`, `publish_go:${v.id}`] : [`package:${v.id}`, `title:${v.id}`]);
+    assert.deepEqual(ds, connected ? [`package:${v.id}`, `title:${v.id}`, `en:${v.id}`, `publish_go:${v.id}`] : [`package:${v.id}`, `title:${v.id}`, `en:${v.id}`]);
     await sleep(1200); assert.ok(!(await msgs()).some((x) => x.id > from && /Публикация ролика №/.test(x.text)), 'публикационная карточка без нажатия «Перейти к публикации» не приходит');
   }
   connect();
@@ -128,7 +128,7 @@ test('своё название: кнопка без текста просит �
   const f2 = await lastId(); await api('/api/chat/send', { office: 'smm', thread: 'captain_smm', text: 'я'.repeat(101), source: 'dashboard' }); await waitFor(/длиннее 100 знаков \(101\)/, f2);
   const f3 = await lastId(); await api('/api/chat/send', { office: 'smm', thread: 'captain_smm', text: 'Шаги: откуда взялись десять тысяч?', source: 'dashboard' });
   const card = await waitFor(/Ваше название для «Тест: шаги»/, f3); assert.match(card.text, /«Шаги: откуда взялись десять тысяч\?»/); assert.match(card.text, /#МедицинскийДетектив #10000шагов #Ходьба/);
-  const ds = JSON.parse(JSON.stringify(card.buttons)).flat().map((b) => b.d).filter((d) => d !== 'dismiss:0'); assert.deepEqual(ds, [`package:${v.id}`, `title:${v.id}`, `publish_go:${v.id}`]);
+  const ds = JSON.parse(JSON.stringify(card.buttons)).flat().map((b) => b.d).filter((d) => d !== 'dismiss:0'); assert.deepEqual(ds, [`package:${v.id}`, `title:${v.id}`, `en:${v.id}`, `publish_go:${v.id}`]);
   const meta = JSON.parse(fs.readFileSync(path.join(ROOT, 'smm', 'runs', `package_${v.id}`, 'publish_meta.json'), 'utf8')); assert.equal(meta.title, 'Шаги: откуда взялись десять тысяч?'); assert.equal(meta.manual, true); assert.deepEqual(meta.tags, ['#МедицинскийДетектив', '#10000шагов', '#Ходьба']);
   // и в YouTube уйдёт именно оно
   const f4 = await lastId(); await press(v.id, 'ytp'); await waitFor(/ПРИВАТНЫЙ/, f4); assert.equal(g.st.inits[g.st.inits.length - 1].meta.snippet.title, 'Шаги: откуда взялись десять тысяч?');
