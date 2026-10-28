@@ -384,3 +384,53 @@ T('видеопамяти мало до запуска приложения: о�
     { VOICESTUDIO_URL: 'http://127.0.0.1:9', VOICESTUDIO_NO_SPAWN: '', VOICESTUDIO_EXE: app, VOICESTUDIO_NVIDIA_SMI: smi, VOICESTUDIO_START_TIMEOUT: '3' });
   assert.ok(fs.existsSync(ran), 'при свободных 6.8 ГБ приложение запускается: ' + r2.se.slice(-300));
 });
+
+// ---- ударения RUAccent для локального голоса (заглушка вместо настоящей модели) ----
+const FAKE_ACCENT = path.join(ROOT, 'test', 'fixtures', 'fake_ruaccent_cli.py');
+const ACC_LOG = path.join(WORK, 'accent_calls.log'), ACC_CACHE = path.join(WORK, 'accent_cache.json'), STRESS = path.join(WORK, 'stress_ru.json');
+function accentSettings(name, accent) {
+  const f = path.join(WORK, name), base = JSON.parse(fs.readFileSync(SETTINGS, 'utf8'));
+  fs.writeFileSync(f, JSON.stringify({ ...base, accent })); return f;
+}
+const accEnv = (settings, extra = {}) => ({ VOICE_SETTINGS_FILE: settings, RUACCENT_PYTHON: PY, RUACCENT_CLI: FAKE_ACCENT, ACCENT_CACHE: ACC_CACHE, STRESS_DICT_FILE: STRESS, FAKE_ACCENT_LOG: ACC_LOG, ...extra });
+const calls = () => (fs.existsSync(ACC_LOG) ? fs.readFileSync(ACC_LOG, 'utf8').trim().split('\n').filter(Boolean).length : 0);
+
+T('ударения: знак «+» доходит до голоса, словарь Ника сильнее RUAccent, у «не» ударение снято; второй запуск берёт кэш', async () => {
+  fs.rmSync(ACC_LOG, { force: true }); fs.rmSync(ACC_CACHE, { force: true });
+  fs.writeFileSync(STRESS, JSON.stringify({ overrides: { 'горстка': 'г+орстка' }, unstressed: ['не'] }));
+  const set = accentSettings('s_acc.json', { enabled: true, model: 'turbo3.1', mark: 'plus' });
+  log = []; const f = script('acc1.txt', [`Горстка клеток. Не убивает слово${run_id}.`]);
+  let r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice'], accEnv(set));
+  assert.equal(r.code, 0, r.se + r.so);
+  const inp = speech().map((x) => x.body.input).join(' | ');
+  assert.match(inp, /Г\+орстка/, 'слово из словаря: ' + inp);
+  assert.ok(inp.includes('. Не '), 'частица «Не» осталась словом без знака: ' + inp); assert.ok(!inp.includes('Н+е'), 'знак с «не» снят: ' + inp);
+  assert.match(inp, /кл\+еток/); assert.match(r.se, /accent: RUAccent turbo3\.1, знак «plus», ударений/);
+  assert.equal(calls(), 1);
+  log = []; r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice'], accEnv(set));
+  assert.equal(r.code, 0, r.se); assert.equal(calls(), 1, 'второй раз RUAccent не вызывали: ответ взят из кэша');
+});
+
+T('ударения: сбой RUAccent не роняет озвучку, текст идёт без знаков, предупреждение видно', async () => {
+  fs.rmSync(ACC_CACHE, { force: true });
+  const set = accentSettings('s_acc2.json', { enabled: true, model: 'turbo3.1', mark: 'plus' });
+  log = []; const f = script('acc2.txt', [`Горстка клеток слово${run_id}x.`]);
+  const r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice'], accEnv(set, { FAKE_ACCENT_FAIL: '1' }));
+  assert.equal(r.code, 0, r.se);
+  assert.ok(!speech().some((x) => x.body.input.includes('+')), 'знаков нет');
+  assert.match(r.se, /accent: ВНИМАНИЕ ударения не расставлены.*модель ударений не загрузилась/);
+});
+
+T('ударения: знак acute = гласная + U+0301, «+» не остаётся; выключено в настройках — текст не тронут', async () => {
+  fs.rmSync(ACC_CACHE, { force: true });
+  let set = accentSettings('s_acc3.json', { enabled: true, model: 'turbo3.1', mark: 'acute' });
+  log = []; let r = await narrate(script('acc3.txt', [`Горстка клеток слово${run_id}y.`]), ['--provider', 'voicestudio', '--voice', 'testvoice'], accEnv(set));
+  assert.equal(r.code, 0, r.se);
+  let inp = speech().map((x) => x.body.input).join(' ');
+  assert.ok(inp.includes('о\u0301рстка') || inp.includes('о\u0301'), 'акут после гласной: ' + inp); assert.ok(!inp.includes('+'));
+  set = accentSettings('s_acc4.json', { enabled: false });
+  fs.rmSync(ACC_LOG, { force: true }); log = [];
+  r = await narrate(script('acc4.txt', [`Горстка клеток слово${run_id}z.`]), ['--provider', 'voicestudio', '--voice', 'testvoice'], accEnv(set));
+  assert.equal(r.code, 0, r.se); inp = speech().map((x) => x.body.input).join(' ');
+  assert.ok(!inp.includes('+') && !inp.includes('\u0301'), 'выключено: ' + inp); assert.equal(calls(), 0);
+});
