@@ -4,8 +4,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { projectLang } from './project_lang.mjs';
 
 export const CTA_RULES = { minLetters: 14, maxStep: 0.06, headline: 'ПОДПИСЫВАЙТЕСЬ' };
+export const CTA_RULES_EN = { ...CTA_RULES, headline: 'SUBSCRIBE' };                // английская версия ролика (lang.json): тот же набор по буквам, заголовок SUBSCRIBE
+const CTA_WORD = { ru: /подписывайтесь/i, en: /subscribe/i };
 const stripFontFace = (s) => s.replace(/@font-face\s*{[^}]*}/gi, '');
 const plainText = (s) => s.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, '');
 
@@ -20,7 +23,7 @@ export function checkCtaHtml(html, R = CTA_RULES) {
   if (other.length) problems.push(`в сцене призыва чужой шрифт (${[...new Set(other)].join(' | ').slice(0, 60)}), нужен Manrope 800 как у заголовков`);
   if (/\.(?:[\w-]*mono[\w-]*)\s*{/i.test(css) && !mono.length) problems.push('в сцене призыва остался класс «mono»: ссылка на канал не должна выделяться шрифтом');
   const text = plainText(html);
-  if (!text.includes(R.headline)) problems.push(`призыв набран не как заголовки: ожидается «${R.headline}» заглавными, не «Подписывайтесь»`);
+  if (!text.includes(R.headline)) problems.push(`призыв набран не как заголовки: ожидается «${R.headline}» заглавными, не строчными`);
   const letters = (html.match(/class\s*=\s*["'][^"']*\bcta-ch\b/gi) || []).length;
   if (letters < R.minLetters) problems.push(`призыв не набирается по буквам: найдено ${letters} элементов .cta-ch, нужно не меньше ${R.minLetters} (по одному на букву, быстро)`);
   const steps = [...html.matchAll(/stagger\s*:\s*([0-9]*\.?[0-9]+)/g)].map((m) => +m[1]).concat([...html.matchAll(/data-cta-step\s*=\s*["']([0-9]*\.?[0-9]+)["']/g)].map((m) => +m[1]));
@@ -37,10 +40,11 @@ export function checkCta(proj) {
   try { for (const f of fs.readdirSync(comp)) if (/\.html$/i.test(f)) files.push(path.join(comp, f)); } catch {}
   for (const f of ['index.html']) if (fs.existsSync(path.join(proj, f))) files.push(path.join(proj, f));
   if (!files.length) return { ok: true, problems: [], file: null, skipped: 'нет композиций (проект без исходников: проверять нечего)' };
-  const hit = files.filter((f) => { try { return /подписывайтесь/i.test(plainText(fs.readFileSync(f, 'utf8'))); } catch { return false; } });
-  if (!hit.length) return { ok: false, problems: ['не найдена сцена призыва подписаться (в композициях нет слова «ПОДПИСЫВАЙТЕСЬ»)'], file: null };
+  const lang = projectLang(proj), R = lang === 'en' ? CTA_RULES_EN : CTA_RULES;
+  const hit = files.filter((f) => { try { return CTA_WORD[lang].test(plainText(fs.readFileSync(f, 'utf8'))); } catch { return false; } });
+  if (!hit.length) return { ok: false, problems: [`не найдена сцена призыва подписаться (в композициях нет слова «${R.headline}»)`], file: null };
   const sceneFile = hit.find((f) => /compositions/.test(f.replace(/\\/g, '/'))) || hit[0];
-  const r = checkCtaHtml(fs.readFileSync(sceneFile, 'utf8'));
+  const r = checkCtaHtml(fs.readFileSync(sceneFile, 'utf8'), R);
   return { ok: r.problems.length === 0, problems: r.problems, file: path.basename(sceneFile) };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

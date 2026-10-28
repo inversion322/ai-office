@@ -49,3 +49,25 @@ test('VERDICT_GATE=off обходит проверку; порог 60% наст�
     assert.equal(checkVerdictLabels(dir, { after: 0.02 }).ok, true, 'сцена с 1,5 с уже после 2% ролика'); assert.equal(checkVerdictLabels(dir).ok, false);
   } finally { delete process.env.VERDICT_GATE; fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('английская версия (lang.json = en): MYTH в конце можно, в начале нельзя; «Is that true?» в хуке можно; в русском проекте английские слова не судятся', () => {
+  const en = [
+    { name: 's01', start: 0, dur: 2, html: '<div><span>SKIP THE TREADMILL?</span></div>' },
+    { name: 's02', start: 1.5, dur: 3, html: '<div><span>IS THAT TRUE ?</span></div>' },
+    { name: 's17', start: 33, dur: 4, html: '<div class="stamp"><span>MYTH</span></div>' },
+    { name: 's20', start: 37, dur: 3, html: '<div>SUBSCRIBE</div>' },
+  ];
+  const dir = project(en); fs.writeFileSync(path.join(dir, 'lang.json'), JSON.stringify({ lang: 'en' }));
+  try {
+    const r = checkVerdictLabels(dir); assert.equal(r.ok, true, r.problems.join('; '));
+    for (const bad of ['MYTH BUSTED', 'FAKE', 'Debunked!', 'TRUE', 'It is false', 'a lie']) {
+      fs.writeFileSync(path.join(dir, 'compositions', 's01.html'), `<div><span>${bad}</span></div>`);
+      const b = checkVerdictLabels(dir); assert.equal(b.ok, false, bad); assert.match(b.problems.join(' '), /s01/);
+    }
+    fs.writeFileSync(path.join(dir, 'compositions', 's01.html'), '<div><span>TRUE STORY OF 10 000</span></div><script>const label = "MYTH";</script>');
+    assert.equal(checkVerdictLabels(dir).ok, false, 'штамп MYTH, набираемый скриптом в начале, ловится');
+    fs.rmSync(path.join(dir, 'lang.json'));                       // без lang.json проект русский: английские слова не ярлыки
+    fs.writeFileSync(path.join(dir, 'compositions', 's01.html'), '<div><span>MYTH</span></div>');
+    assert.equal(checkVerdictLabels(dir).ok, true);
+  } finally { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); }
+});

@@ -55,3 +55,20 @@ test('проект: нет композиций — пропуск; есть к�
     assert.equal(checkCta(dir).ok, false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('английская версия (lang.json = en): сцена SUBSCRIBE проходит, русский призыв в английском ролике не засчитывается', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cta_en_')); fs.mkdirSync(path.join(dir, 'compositions'));
+  try {
+    fs.writeFileSync(path.join(dir, 'lang.json'), JSON.stringify({ lang: 'en' }));
+    // английская копия эталона: заголовок и остальные буквы по-английски, класс .cta-ch у каждой буквы сохранён
+    const en = REF.replace(/ПОДПИСЫВАЙТЕСЬ/g, 'SUBSCRIBE');
+    const letters = (w) => w.split('').map((ch) => `<span class="cta-ch">${ch}</span>`).join('');
+    const sceneEn = `<html><body><div>${letters('SUBSCRIBE')}${letters('TELEGRAMCHANNEL')}${letters('LINKINBIO')}</div><style>.cta-ch{font-family:Manrope}</style><script>gsap.from('.cta-ch',{stagger:0.04})</script></body></html>`;
+    fs.writeFileSync(path.join(dir, 'compositions', 'cta.html'), sceneEn);
+    const ok = checkCta(dir); assert.equal(ok.ok, true, ok.problems.join('; '));
+    fs.writeFileSync(path.join(dir, 'compositions', 'cta.html'), en.replace(/SUBSCRIBE/g, 'Subscribe').replace(/<span class="cta-ch[^"]*">[^<]*<\/span>/g, ''));
+    const bad = checkCta(dir); assert.equal(bad.ok, false);
+    fs.writeFileSync(path.join(dir, 'compositions', 'cta.html'), REF);            // русский призыв в английском проекте: сцены SUBSCRIBE нет
+    const ru = checkCta(dir); assert.equal(ru.ok, false); assert.match(ru.problems.join(' '), /SUBSCRIBE/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); }
+});
