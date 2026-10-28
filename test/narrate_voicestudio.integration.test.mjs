@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -68,6 +68,8 @@ before(async () => {
         let sec = words / 3.0;
         if (text.includes('ТРУНК') && (truncLeft[text] = (truncLeft[text] ?? 2)) > 0) { truncLeft[text]--; sec = sec * 0.5; }   // «потеряла вторую половину»
         if (text.includes('ВСЕГДАКОРОТКО')) sec = sec * 0.5;
+        if (text.includes('ЗАЦИКЛ')) sec = 12;                      // «зациклилась» на коротком предложении
+        if (text.includes('МЕДЛЕННО')) sec = sec * 2.2;             // короткое слово тянется дольше среднего темпа (так читает настоящая модель)
         return send(200, wav(sec), 'audio/wav');
       }
       send(404, { detail: 'нет' });
@@ -433,4 +435,48 @@ T('ударения: знак acute = гласная + U+0301, «+» не ост
   r = await narrate(script('acc4.txt', [`Горстка клеток слово${run_id}z.`]), ['--provider', 'voicestudio', '--voice', 'testvoice'], accEnv(set));
   assert.equal(r.code, 0, r.se); inp = speech().map((x) => x.body.input).join(' ');
   assert.ok(!inp.includes('+') && !inp.includes('\u0301'), 'выключено: ' + inp); assert.equal(calls(), 0);
+});
+
+// ---- по предложениям: паузы между предложениями и абзацами ----
+const SENT_SETTINGS = path.join(WORK, 'voice_settings_sent.json');
+function sentSettings() {
+  const base = JSON.parse(fs.readFileSync(SETTINGS, 'utf8'));
+  fs.writeFileSync(SENT_SETTINGS, JSON.stringify({ ...base, voicestudio: { voice: '', chunk_by_sentence: true, gap_sentence: 0.5, gap_paragraph: 1.0 } })); return SENT_SETTINGS;
+}
+const sent = (n, tag) => `Это ${words(n, tag)}`;                  // предложение из n+1 слов, начинается с заглавной
+
+T('по предложениям: каждое предложение отдельным запросом, между ними gap_sentence, после абзаца gap_paragraph; короткое предложение не перегенерируется', async () => {
+  log = [];
+  const f = script('sn1.txt', [`${sent(8, run_id + 'a')} ${sent(9, run_id + 'b')} Да ${run_id}.`, sent(6, run_id + 'c')]);
+  const r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice'], { VOICE_SETTINGS_FILE: sentSettings() });
+  assert.equal(r.code, 0, r.se + r.so);
+  assert.deepEqual(speech().map((x) => x.body.input.split(' ').length), [9, 10, 2, 7], 'по запросу на предложение');
+  const d = await dur(r.out);
+  assert.ok(Math.abs(d - (28 / 3 + 0.5 + 0.5 + 1.0)) < 0.35, `длина ${d}: речь + две паузы между предложениями + пауза после абзаца`);
+  assert.ok(!/не прошла проверку темпа/.test(r.se), 'короткое предложение «Да …» прошло проверку: ' + r.se.slice(-300));
+});
+
+T('по предложениям: короткое предложение, на котором модель зациклилась, ловится и громко отмечается', async () => {
+  log = [];
+  const f = script('sn2.txt', [`${sent(7, run_id + 'd')} Тоже ЗАЦИКЛ${run_id}.`]);
+  const r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice'], { VOICE_SETTINGS_FILE: sentSettings() });
+  assert.equal(r.code, 0, r.se);
+  assert.match(r.se, /не прошла проверку темпа \(2 слов за 12\.0 с/); assert.match(r.se, /ВНИМАНИЕ кусок 2 не прошёл проверку темпа/);
+});
+
+T('деление на предложения: инициалы, сокращения, кавычки и вопросительные знаки', () => {
+  const r = spawnSync(PY, ['-c', "import sys, json; sys.path.insert(0, r'" + path.join(ROOT, 'video') + "'); import voicestudio as v; print(json.dumps([v.sentences('Это сделал А. С. Пушкин. Он жил давно. Давление 120 мм рт. ст. было нормой! «Правда?» Да. Конец…'), v.split_chunks(['Один. Два три.', 'Три.'], 26, True)], ensure_ascii=False))"], { encoding: 'utf8', env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+  assert.equal(r.status, 0, r.stderr);
+  const [sn, ch] = JSON.parse(r.stdout);
+  assert.deepEqual(sn, ['Это сделал А. С. Пушкин.', 'Он жил давно.', 'Давление 120 мм рт. ст. было нормой!', '«Правда?»', 'Да.', 'Конец…']);
+  assert.deepEqual(ch, [['Один.', false], ['Два три.', true], ['Три.', true]], 'пометка конца абзаца только у последнего предложения');
+});
+
+T('по предложениям: короткое предложение, читаемое медленнее среднего темпа, не считается браком (темп по слову ему не мерило)', async () => {
+  log = [];
+  const f = script('sn3.txt', [`${sent(7, run_id + 'e')} Навсегда МЕДЛЕННО${run_id}.`]);
+  const r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice'], { VOICE_SETTINGS_FILE: sentSettings() });
+  assert.equal(r.code, 0, r.se);
+  assert.ok(!/не прошла проверку темпа/.test(r.se), r.se.slice(-300));
+  assert.equal(speech().filter((x) => x.body.input.includes('МЕДЛЕННО')).length, 1, 'запрошено один раз, без перегенераций');
 });
