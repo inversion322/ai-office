@@ -8,7 +8,7 @@
 // Публикует всегда только Ник. Состояние видно на дашборде (вкладка Nick G SMM).
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, api, agent, scene, promptOf, videos, getVideo, setVideo, runAgent, readJson, notify, sendVideoFile, topicsMessage, say, yieldToPriority, setPriority, hermesSpawn } from './smm_lib.mjs';
+import { ROOT, api, agent, scene, promptOf, videos, getVideo, setVideo, runAgent, readJson, notify, sendVideoFile, sendAudioFile, topicsMessage, say, yieldToPriority, setPriority, hermesSpawn } from './smm_lib.mjs';
 
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 const safeNotify = async (text, buttons) => { try { return await notify(text, buttons); } catch (e) { console.error('УВЕДОМЛЕНИЕ НЕ ДОСТАВЛЕНО:', e.message); fs.appendFileSync(path.join(ROOT, 'smm', 'undelivered.txt'), `\n--- ${new Date().toISOString()}\n${text}\n`); } };
@@ -33,6 +33,7 @@ import { roundsInfo, roundsNote } from './render_slot.mjs';
 import { resumeBlock, classifyGate, canContinueShort, shortContinueBrief } from './produce_resume.mjs';
 import { styleIssues, styleFeedback, bridgeIssues, verdictIssues, cleanFillerOpeners } from './script_style.mjs';
 import { codewordIssues, codewordFeedback, codewordTaskBlock } from './script_codeword.mjs';
+import { watchVoiceQa, checkVoiceQa, readVoiceQa, voiceQaSummary } from './voice_qa.mjs';
 import { getExperiment, setExperiment, takeNextExperiment, experimentTaskBlock, experimentCheckNote, applyExperimentToBrief } from './experiment.mjs';
 import { craftIssues, craftFeedback, craftSummary } from './script_craft.mjs';
 import { skillUsageNote } from './skill_usage.mjs';
@@ -355,6 +356,8 @@ async function produce(id, comment, { finishOnly = false, sendAnyway = false } =
   const bf = path.join(abs, 'BRIEF.md'); fs.writeFileSync(bf, applyExperimentToBrief(resume ? brief.replace('## Шаги\n', resume + '## Шаги\n') : brief, expName), 'utf8');
 
   await agent('captain_smm', 'working', `Монтаж: «${v.title}»${tag}`, 60, `Сценарий утверждён, передал ${ed.name}${tag}`);
+  const voiceNotify = async (text, audio = []) => { await safeNotify(text); for (const f of audio) { try { await sendAudioFile(f, 'Кусок озвучки, который не удалось починить'); } catch (e) { console.error('аудио куска не отправлено:', e.message); } } };
+  const qaOpts = { id, title: v.title, tag, notify: voiceNotify, log: (m) => console.log(m) };
   let videoStartedAt = Date.now() - 4 * 3600e3, code = 'finish', stopWatch = () => {};          // finishOnly: смотрим логи скиллов за последние 4 часа (когда монтажёр работал)
   if (finishOnly) { await agent('captain_smm', 'working', `Проверяю готовый ролик: «${v.title}»${tag}`, 80, 'Монтажёр файл собрал, проверяю ворота и отправляю'); }
   else {
@@ -364,6 +367,8 @@ async function produce(id, comment, { finishOnly = false, sendAnyway = false } =
     videoStartedAt = Date.now();
     // настоящий процент по файлам проекта: дашборд показывает «N% · ещё ~M мин» (video_progress.mjs)
     stopWatch = watchVideoProgress(proj, n, videoStartedAt, (pct, step) => agent(ed.id, 'working', undefined, pct, `Монтаж: ${step} (${pct}%)`, undefined, { real: true }));
+    const stopQa = watchVoiceQa(proj, qaOpts);        // карточка по непочиненной озвучке уходит сразу, не после двух часов монтажа
+    const prevStop = stopWatch; stopWatch = () => { prevStop(); stopQa(); };
     const { spawn } = await import('node:child_process');
     code = await new Promise((resolve) => {
       const p = hermesSpawn(['-p', ed.profile, 'chat', '--query-file', bf, '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: ROOT, windowsHide: true, stdio: ['ignore', fs.openSync(path.join(abs, '_video_log.txt'), 'w'), 'ignore'] });
@@ -371,6 +376,7 @@ async function produce(id, comment, { finishOnly = false, sendAnyway = false } =
     });
   }
   stopWatch();
+  try { await checkVoiceQa(proj, qaOpts); const qa = readVoiceQa(proj); if (qa) console.log(voiceQaSummary(qa)); } catch (e) { console.error('озвучка: итоговая проверка отчёта не удалась:', e.message); }
   const mp4 = path.join(proj, 'final', `dosie${n}_v1.mp4`);
   if (!fs.existsSync(mp4)) {
     await agent(ed.id, 'error', 'Ролик не собран', 0, `Нет ${mp4} (код ${code})`, 'error');

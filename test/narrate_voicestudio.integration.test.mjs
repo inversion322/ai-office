@@ -286,12 +286,74 @@ T('искажённый кусок перегенерируется один р�
   assert.match(r.se, /сверка с текстом: чисто после 1 перегенераций/);
 });
 
-T('кусок, который остаётся искажённым после всех кругов: ролик не блокируется, но громко предупреждает', async () => {
-  log = []; const f = script('g2.txt', [words(10, run_id + 'h1'), words(9, run_id + 'h2') + ' МАРКЕРД']);
-  const r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice'], { NARRATE_ASR_FAKE: 'garble:МАРКЕРД:99' });
+// абзац с искажаемым словом посередине: у починки есть куда ставить запятую и где резать пополам
+const para = (tag, marker) => `слово${tag}0 слово${tag}1 слово${tag}2 ${marker} слово${tag}3 слово${tag}4 слово${tag}5.`;
+const qaOf = (r) => JSON.parse(fs.readFileSync(path.join(path.dirname(r.out), 'voice_qa.json'), 'utf8'));
+const inputs = (k) => speech().filter((x) => x.body.input.includes(k)).map((x) => x.body.input);
+
+T('перегенерации не помогли, а вариант с запятой помог: кусок исправлен без смены слов, отчёт repaired, ролик не блокируется', async () => {
+  log = []; const f = script('g2.txt', [words(10, run_id + 'h1'), para(run_id + 'h2', 'МАРКЕРЕ')]);
+  const r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice'], { NARRATE_ASR_FAKE: 'garble:МАРКЕРЕ:3' });     // 3 вызова сверки искажены: исходник и два круга перегенерации
   assert.equal(r.code, 0, r.se);
-  assert.equal(speech().filter((x) => x.body.input.includes('МАРКЕРД')).length, 3, 'первая озвучка и два круга перегенерации');
   assert.match(r.se, /ВНИМАНИЕ после 2 перегенераций всё ещё искажены куски \[2\]/);
+  assert.match(r.se, /кусок 2 исправлен вариантом «запятая перед «МАРКЕРЕ»» \(слова те же\)/);
+  assert.equal(inputs('МАРКЕРЕ').length, 4, 'исходная озвучка, два круга перегенерации и один вариант'); assert.ok(inputs('МАРКЕРЕ')[3].includes(`слово${run_id}h22, МАРКЕРЕ`), 'запятая встала перед проблемным словом: ' + inputs('МАРКЕРЕ')[3]);
+  assert.equal(inputs(run_id + 'h10').length, 1, 'чистый кусок не перезапрашивался');
+  const qa = qaOf(r); assert.equal(qa.status, 'repaired'); assert.equal(qa.repaired.length, 1); assert.equal(qa.repaired[0].chunk, 2); assert.deepEqual(qa.repaired[0].words, ['МАРКЕРЕ']); assert.deepEqual(qa.failed, []);
+  assert.match(r.se, /сверка с текстом: чисто после починки/); assert.ok(fs.existsSync(r.out));
+  // чинёный звук лежит под ключом исходного текста: повторная озвучка того же текста сразу чистая и сеть не нужна
+  log = []; const r2 = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice'], { NARRATE_ASR_FAKE: 'garble:МАРКЕРЕ:99' });
+  assert.equal(r2.code, 0, r2.se); assert.equal(speech().length, 0); assert.match(r2.se, /все куски уже проверены/);
+});
+
+T('ничего не помогло: все варианты опробованы, отчёт failed с фразой, словами и аудио куска для карточки; ролик не блокируется, чистые куски целы', async () => {
+  log = []; const f = script('g3.txt', [words(10, run_id + 'i1'), para(run_id + 'i2', 'МАРКЕРД')]);
+  const r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice'], { NARRATE_ASR_FAKE: 'garble:МАРКЕРД:99' });
+  assert.equal(r.code, 0, r.se); assert.ok(fs.existsSync(r.out), 'озвучка выдана и в провале');
+  assert.equal(inputs('МАРКЕРД').length, 3 + 5, 'исходная, два круга и пять вариантов: запятая перед, запятая после, тире, половины (разрез перед и после слова)');
+  assert.equal(inputs(run_id + 'i10').length, 1);
+  const qa = qaOf(r); assert.equal(qa.status, 'failed'); assert.equal(qa.failed.length, 1);
+  const f0 = qa.failed[0]; assert.equal(f0.chunk, 2); assert.deepEqual(f0.words, ['МАРКЕРД']);
+  assert.deepEqual(f0.tried, ['запятая перед «МАРКЕРД»', 'запятая после «МАРКЕРД»', 'тире перед «МАРКЕРД»', 'половинами: разрез перед «МАРКЕРД»', 'половинами: разрез после «МАРКЕРД»']);
+  assert.equal(f0.audio, 'voice_qa_chunk2.mp3'); assert.ok(fs.existsSync(path.join(path.dirname(r.out), f0.audio)) && fs.statSync(path.join(path.dirname(r.out), f0.audio)).size > 500, 'аудио куска записано');
+  assert.match(r.se, /ВНИМАНИЕ после починки всё ещё искажены куски \[2\]: карточка Нику/);
+  assert.ok(!fs.existsSync(path.join(path.dirname(r.out), 'narration.trial.mp3')) && fs.readdirSync(path.dirname(r.out)).every((x) => !/\.trial\./.test(x)), 'временные пробные файлы убраны');
+});
+
+T('починка выключена настройкой (repair: false) или временем вышло: прежнее поведение, отчёт failed без попыток', async () => {
+  fs.writeFileSync(SETTINGS, JSON.stringify({ ...JSON.parse(fs.readFileSync(SETTINGS, 'utf8')), voicestudio: { ...(JSON.parse(fs.readFileSync(SETTINGS, 'utf8')).voicestudio || {}), repair: false } }));
+  try {
+    log = []; const f = script('g4.txt', [words(10, run_id + 'j1'), para(run_id + 'j2', 'МАРКЕРЖ')]);
+    const r = await narrate(f, ['--provider', 'voicestudio', '--voice', 'testvoice'], { NARRATE_ASR_FAKE: 'garble:МАРКЕРЖ:99' });
+    assert.equal(r.code, 0, r.se); assert.equal(inputs('МАРКЕРЖ').length, 3, 'только исходная и два круга'); assert.deepEqual(qaOf(r).failed[0].tried, []);
+  } finally { /* настройки пересоздаются в before каждого файла; ниже восстанавливаем явно */ const s = JSON.parse(fs.readFileSync(SETTINGS, 'utf8')); if (s.voicestudio) delete s.voicestudio.repair; fs.writeFileSync(SETTINGS, JSON.stringify(s)); }
+});
+
+const detail = (chunks, hyp) => new Promise((resolve) => {
+  const code = `import json,sys; sys.path.insert(0,${JSON.stringify(path.join(ROOT, 'video').replace(/\\/g, '/'))}); import voicestudio as v; d=json.loads(sys.stdin.read()); print(json.dumps({'detail': {str(k): x for k, x in v.garbled_detail([(c,True) for c in d['chunks']], d['hyp'].split()).items()}, 'variants': [o['label'] + ' => ' + ' | '.join(o['texts']) for o in v._variants(d['chunks'][0], d['pos'])] if d.get('pos') else []}, ensure_ascii=False))`;
+  const p = spawn(PY, ['-c', code], { env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+  let o = ''; p.stdout.on('data', (d) => o += d); p.on('close', () => resolve(JSON.parse(o.trim())));
+  p.stdin.end(JSON.stringify({ chunks, hyp: hyp.hyp ?? hyp, pos: hyp.pos }));
+});
+
+T('сверка: слитые на слух слова («пока миф» -> «покамив») — искажение с номерами слов; чистое слитное написание и верная расшифровка — нет', async () => {
+  const ch = ['Восемь килограммов от утренней ложки уксуса пока миф'];
+  const a = await detail(ch, 'восемь килограммов от утренней ложки уксуса покамив'); assert.deepEqual(a.detail, { 0: [6, 7] }, 'склеились два слова, схожесть ниже порога слияния');
+  const b = await detail(ch, 'восемь килограммов от утренней ложки уксуса пока миф'); assert.deepEqual(b.detail, {});
+  const c = await detail(['Мы придём потому что поздно'], 'мы придем потомучто поздно'); assert.deepEqual(c.detail, {}, 'слитное написание тех же букв не вина звука');
+  const d = await detail(['Альфа бета гамма дельта'], 'альфа бета гамма дельта'); assert.deepEqual(d.detail, {});
+  const e = await detail(['Альфа бета полуправда дельта'], 'альфа бета булдауда дельта'); assert.deepEqual(e.detail, { 0: [2] }, 'прежнее правило подмены слова сохранилось, теперь с номером слова');
+});
+
+T('варианты починки: запятая перед словом, запятая после/между, тире, разрез; слово со знаком препинания не трогается; слов не добавляется и не пропадает', async () => {
+  const text = 'Восемь килограммов от утренней ложки уксуса пока миф.';
+  const v = (await detail([text], { hyp: 'x', pos: [6, 7] })).variants;
+  assert.deepEqual(v, ['запятая перед «пока» => Восемь килограммов от утренней ложки уксуса, пока миф.', 'запятая между «пока» и «миф» => Восемь килограммов от утренней ложки уксуса пока, миф.',
+    'тире перед «пока» => Восемь килограммов от утренней ложки уксуса — пока миф.', 'запятые вокруг «пока» => Восемь килограммов от утренней ложки уксуса, пока, миф.',
+    'половинами: разрез перед «пока» => Восемь килограммов от утренней ложки уксуса, | пока миф.', 'половинами: разрез между «пока» и «миф» => Восемь килограммов от утренней ложки уксуса пока, | миф.']);
+  const stripWords = (s) => s.replace(/[,—|]/g, ' ').split(/\s+/).filter(Boolean);
+  for (const x of v) assert.deepEqual(stripWords(x.split(' => ')[1]), stripWords(text), 'слова те же: ' + x);
+  const w = (await detail(['Один два, три четыре пять.'], { hyp: 'x', pos: [2] })).variants; assert.ok(w.every((x) => !/два,,/.test(x)), 'запятая не удваивается: ' + w.join(' ; '));
 });
 
 T('проверенные куски помечены: повторный запуск не просит ни модель, ни повторной сверки', async () => {

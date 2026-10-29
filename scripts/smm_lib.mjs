@@ -108,6 +108,17 @@ export async function sendVideoFile(file, caption, buttons) {
   await api('/api/chat/post', { office: 'smm', thread: 'captain_smm', sender: 'captain_smm', text: `🎬 ${caption}\n\n(Файл отправлен в Telegram и лежит на ПК: ${file})`, buttons: buttons || undefined, tg_msg: r.result.message_id, mirror: false });
 }
 
+/** Короткое аудио в Telegram (карточка по провалам озвучки: Ник слышит кусок, а не читает описание). Тот же тестовый запрет, что у sendVideoFile. */
+export async function sendAudioFile(file, caption = '') {
+  if (process.env.OFFICE_NO_TG && !(process.env.TELEGRAM_API_BASE && process.env.OFFICE_NO_TG_BASE_OK === '1')) throw new Error('Telegram выключен (OFFICE_NO_TG)');
+  const fd = new FormData();
+  fd.append('chat_id', String(chatId())); if (caption) fd.append('caption', String(caption).slice(0, 1000));
+  fd.append('audio', new Blob([fs.readFileSync(file)], { type: 'audio/mpeg' }), path.basename(file));
+  const r = await (await fetch(`${tgBase()}/bot${cfg().smmBotToken}/sendAudio`, { method: 'POST', body: fd })).json();
+  if (!r.ok) throw new Error('Telegram sendAudio: ' + r.description);
+  return r.result && r.result.message_id;
+}
+
 /* ---------- запуск агента Hermes: персона из БД + задача; результат агент пишет в JSON ---------- */
 // Проверка «какие скиллы открыл запуск»: вынесена в объект, чтобы тест мог подменить базу сессий.
 export const skillCheck = { fn: skillsOpenedByRun };

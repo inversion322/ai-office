@@ -11,7 +11,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { ROOT, hermesSpawn, sendVideoFile, notify, readJson, agent, scene, say, runAgent, promptOf, profileFor, getVideo } from './smm_lib.mjs';
+import { ROOT, hermesSpawn, sendVideoFile, sendAudioFile, notify, readJson, agent, scene, say, runAgent, promptOf, profileFor, getVideo } from './smm_lib.mjs';
+import { watchVoiceQa, checkVoiceQa } from './voice_qa.mjs';
 import { stripCta } from './cta_text.mjs';
 import { VERDICT_RE_EN } from './check_verdict_label.mjs';
 import { TRANSLATOR_PROMPT } from '../server/lib_extra_agents.mjs';
@@ -120,10 +121,13 @@ export async function produce(id, title) {
   const dst = enDir(id), n = norm(id);
   const bf = path.join(runDir(id), 'BRIEF_en.md'); fs.writeFileSync(bf, briefFor(id, title), 'utf8');
   const log = fs.openSync(path.join(runDir(id), '_localize_log.txt'), 'w');
+  const qaOpts = { id, title, tag: ' (английская версия)', notify: async (text, audio = []) => { await notify(text); for (const f of audio) { try { await sendAudioFile(f, 'Кусок английской озвучки, который не удалось починить'); } catch (e) { console.error('аудио куска не отправлено:', e.message); } } }, log: (m) => console.log(m) };
+  const stopQa = watchVoiceQa(dst, qaOpts);          // тот же порядок, что у русской версии: карточка по непочиненной озвучке сразу (решение Ника 2026-10-29)
   const code = await new Promise((resolve) => {
     const p = hermesSpawn(['-p', 'video', 'chat', '--query-file', bf, '-Q', '--oneshot', '--max-turns', '400', '--run-budget', '5400'], { cwd: ROOT, windowsHide: true, stdio: ['ignore', log, 'ignore'] });
     p.on('exit', resolve);
   });
+  stopQa(); try { await checkVoiceQa(dst, qaOpts); } catch (e) { console.error('озвучка: итоговая проверка отчёта не удалась:', e.message); }
   const mp4 = path.join(dst, 'final', `dosie${n}_en_v1.mp4`);
   if (!fs.existsSync(mp4)) { await notify(`⚠️ Английская версия «${title}» не собрана: нет ${mp4} (код ${code}). Смотрите ${dst}/PROGRESS.md`).catch(() => {}); throw new Error('нет mp4'); }
   return finish(id, title);
