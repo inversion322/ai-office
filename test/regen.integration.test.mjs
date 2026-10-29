@@ -29,8 +29,9 @@ async function boot(mode) {
 }
 const reset = () => { fs.rmSync(RUN, { recursive: true, force: true }); fs.mkdirSync(RUN, { recursive: true }); fs.writeFileSync(path.join(RUN, 'script.json'), JSON.stringify({ title: 'Сахар', segments: OLD, hook_type: 'сцена' })); };
 // Ищем только карточки новее своей (id > cid): в копии боевого чата лежит настоящая открытая карточка сценария.
-async function regen(mode) {
+async function regen(mode, { experiment = null } = {}) {
   await boot(mode); reset();
+  if (experiment) fs.writeFileSync(path.join(RUN, 'experiment.json'), JSON.stringify({ name: experiment, ts: Date.now() }));
   await api('/api/video', { id: 7, title: 'Сахар делает детей гиперактивными?', stage: 'checked', rubric: 'myth' });
   const cid = (await api('/api/chat/post', { office: 'smm', thread: 'captain_smm', sender: 'captain_smm', text: 'Сценарий', buttons: [[['Утвердить сценарий', 'approve:7'], ['Нужны правки', 'revise:7']], [['🔄 Перегенерировать', 'regen:7'], ['Отклонить тему', 'reject:7']]], mirror: false })).id;
   const r = await api('/api/chat/answer', { id: cid, choice: 'regen:7', via: 'dashboard' }); assert.equal(r.ok, true);
@@ -145,4 +146,27 @@ test('кодовое слово: сценарий без обещания сло
   assert.match(card.text, /Кодовое слово — «досье»/); assert.ok(card.buttons.flat().some((b) => b.d === 'approve:7'));
   const sr = fs.readFileSync(path.join(ROOT, 'smm', 'runs', 'video_7', 'script_ru.txt'), 'utf8').trim().split(/\n\n/);
   assert.match(sr[sr.length - 1], /^Кодовое слово — «досье»\./); assert.doesNotMatch(sr.slice(0, -1).join(' '), /досье|боту|подписк/i);
+});
+
+test('эксперимент «ответ вперёд»: сценарий с ответом («миф») в абзаце 1 проходит проверку стиля, задания Ксении и Веры несут исключение, на карточке пометка; без эксперимента такой текст не принимался бы', { skip: !can }, async () => {
+  const { card } = await regen('verdict_first', { experiment: 'verdict_first' });
+  const now = JSON.parse(fs.readFileSync(path.join(RUN, 'script.json'), 'utf8'));
+  assert.match(now.segments[0], /Это миф: сахар не делает детей буйными\. Почему\? Досмотри до конца\./, 'текст Ксении принят как есть, ответ в начале не вырезан');
+  const qs = fs.readFileSync(path.join(RUN, '_query_script1.txt'), 'utf8');
+  assert.match(qs, /ЭКСПЕРИМЕНТ «ОТВЕТ ВПЕРЁД»/); assert.match(qs, /НЕ действует/);
+  const qc = fs.readFileSync(path.join(RUN, '_query_check1.txt'), 'utf8'); assert.match(qc, /ЭКСПЕРИМЕНТ «ОТВЕТ ВПЕРЁД»/); assert.match(qc, /не возвращай сценарий за это/);
+  assert.match(card.text, /🧪 Эксперимент «ответ вперёд»/); assert.ok(card.buttons.flat().some((b) => b.d === 'approve:7'));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(RUN, 'experiment.json'), 'utf8')).name, 'verdict_first');
+});
+
+test('без эксперимента тот же текст (ответ «миф» в абзаце 1) стилем отклоняется: правило «вердикт только в конце» для обычных роликов живо', { skip: !can }, async () => {
+  await boot('verdict_first'); reset();
+  await api('/api/video', { id: 7, title: 'Сахар делает детей гиперактивными?', stage: 'checked', rubric: 'myth' });
+  const cid = (await api('/api/chat/post', { office: 'smm', thread: 'captain_smm', sender: 'captain_smm', text: 'Сценарий', buttons: [[['Утвердить сценарий', 'approve:7'], ['Нужны правки', 'revise:7'], ['Перегенерировать', 'regen:7']]] })).id;
+  await api('/api/chat/answer', { id: cid, choice: 'regen:7', via: 'dashboard' });
+  const qf = path.join(RUN, 'script.json.queries'), calls = () => (fs.existsSync(qf) ? fs.readFileSync(qf, 'utf8').split('\n---\n').filter((x) => x.trim()) : []);
+  for (let i = 0; i < 120 && calls().length < 2; i++) await sleep(1000);
+  assert.ok(calls().length >= 2, 'Ксения получила второй круг');
+  assert.match(calls()[1], /Вердикт \(миф это или правда\) нельзя называть в начале ролика/, 'второй круг Ксении начался с замечания о вердикте в начале');
+  assert.ok(!fs.existsSync(path.join(RUN, 'experiment.json')));
 });

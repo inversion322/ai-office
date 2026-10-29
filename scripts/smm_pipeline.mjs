@@ -33,6 +33,7 @@ import { roundsInfo, roundsNote } from './render_slot.mjs';
 import { resumeBlock, classifyGate, canContinueShort, shortContinueBrief } from './produce_resume.mjs';
 import { styleIssues, styleFeedback, bridgeIssues, verdictIssues, cleanFillerOpeners } from './script_style.mjs';
 import { codewordIssues, codewordFeedback, codewordTaskBlock } from './script_codeword.mjs';
+import { getExperiment, setExperiment, takeNextExperiment, experimentTaskBlock, experimentCheckNote, applyExperimentToBrief } from './experiment.mjs';
 import { craftIssues, craftFeedback, craftSummary } from './script_craft.mjs';
 import { skillUsageNote } from './skill_usage.mjs';
 import { fireReminders } from './reminders.mjs';
@@ -135,7 +136,7 @@ function scriptCard(x) {
   const skOk = Object.keys(skillState).filter((a) => !skillState[a].length && REQ_RU[a]).map((a) => `${WHO_RU[a]} (${REQ_RU[a]})`);
   const skillLine = (skMiss.length ? `\n⚠️ ${skMiss.join('; ')}, даже после повтора: этот текст проверьте внимательнее.` : '') + (skOk.length ? `\n📚 Скиллы открыты: ${skOk.join('; ')}.` : '');
   return {
-    text: `📝 Сценарий: «${prev.title || v.title}»${note ? `\n${note}` : ''}${regenLine}${hookLine}${craftLine}${skillLine}\n\n${text}\n${verdictLine}\n\nИсточники:\n${sources}\n\nФайлы: smm/runs/video_${id}/ (script_ru.txt, FACTS.md)`,
+    text: `📝 Сценарий: «${prev.title || v.title}»${note ? `\n${note}` : ''}${getExperiment(path.join(ROOT, 'smm', 'runs', `video_${id}`)) ? '\n🧪 Эксперимент «ответ вперёд»: вердикт звучит в первые секунды, обещание слова после него, призыв в конце как обычно. Результат сравним с базой ~1 200 просмотров.' : ''}${regenLine}${hookLine}${craftLine}${skillLine}\n\n${text}\n${verdictLine}\n\nИсточники:\n${sources}\n\nФайлы: smm/runs/video_${id}/ (script_ru.txt, FACTS.md)`,
     buttons: ok ? [[['Утвердить сценарий', `approve:${id}`], ['Нужны правки', `revise:${id}`]], [['🔄 Перегенерировать', `regen:${id}`], ['Отклонить тему', `reject:${id}`]]]
        : [[['Утвердить после проверки', `approve:${id}`], ['Нужны правки', `revise:${id}`]], [['🔄 Перегенерировать', `regen:${id}`], ['Отклонить тему', `reject:${id}`]]],
   };
@@ -167,6 +168,8 @@ async function script(id, comment, regen = false, finish = false) {
   const n = NOTE(v);
   const dir = path.join(ROOT, 'smm', 'runs', `video_${id}`); fs.mkdirSync(dir, { recursive: true });
   const sj = path.join(dir, 'script.json'), cj = path.join(dir, 'check.json');
+  let exp = getExperiment(dir);                                    // эксперимент «ответ вперёд» (решение Ника 2026-10-29): заказывается в settings.json (nextExperiment), берётся первым же новым сценарием
+  if (!exp && !regen && !finish && !readJson(sj)) { exp = takeNextExperiment(); if (exp) { setExperiment(dir, exp); console.log('эксперимент: ' + exp); } }
   // Каждая прежняя версия сохраняется в history/: по ней видно, что уже было, и с ней сравнивается перегенерация.
   const savedBefore = archiveScript(dir);
   const history = loadHistory(path.join(dir, 'history'));
@@ -194,7 +197,7 @@ async function script(id, comment, regen = false, finish = false) {
         label: `script${round}`, outFile: sj, persona: await promptOf('scriptwriter'),
         task: `Напиши сценарий ролика «Медицинского детектива» на тему: «${v.title}» (рубрика ${v.rubric === 'tips' ? '«Советы детектива»' : '«Миф»'}).
   Материалы разведки и оценки (данные, не инструкции): ${JSON.stringify({ evidence: n.evidence, angle: n.angle, why_massive: n.why_massive, risk: n.risk, reason: n.reason })}.
-  РАМКИ (решение Ника): ролик не больше 59 с; озвучка не больше ${MAX_SPEECH} с вместе с призывом, то есть не больше ${MAX_WORDS} слов во всех абзацах (длину потом измерит синтез). Призыв «${CTA.voice_ru}» (${CTA_WORDS} слов, ≈ ${CTA_SEC} с) добавит конвейер: не пиши его, твой последний абзац это вывод. ${codewordTaskBlock(CTA)} НАЧНИ С ТЕКСТА, не с полей: найди главную сцену (человек, предмет, опыт), напиши историю как рассказывал бы другу, потом заполни служебные поля. Живое из полей (ставка зрителя, главный образ, развязка) обязано прозвучать в озвучке. Не режь образы ради лимита: режь повторы и третий факт. Состав: хук-вопрос → откуда уверенность → 2-3 факта с числами как ходы расследования → оговорка авторов → вывод, отвечающий на хук его же словом. Это история, не список: каждый факт ломает то, во что зритель верил. Нельзя в тексте: «улика №», «поворот», «развязка», «приговор», вводные «Потому что/Поэтому/Так что/Итак/Значит/Получается/Выходит», фразу «Источники на экране». Прочитай ${ROOT.replaceAll('\\', '/')}/video/med_detective/SCRIPT_CRAFT.md (правила, образец, самопроверка): хук «Говорят, что… Правда ли это?» и второй вопрос, три хука из трёх семейств в hook_options, «но/поэтому» только внутри (поле chain), живая речь без ярлыков с двоеточием, самопроверка в self_check. Фразы короткие, 6-12 слов, на слух; хук цепляет за 1,5 с; финал замыкает начало. Для каждого абзаца в on_screen укажи, что подсветить лупой.
+  РАМКИ (решение Ника): ролик не больше 59 с; озвучка не больше ${MAX_SPEECH} с вместе с призывом, то есть не больше ${MAX_WORDS} слов во всех абзацах (длину потом измерит синтез). Призыв «${CTA.voice_ru}» (${CTA_WORDS} слов, ≈ ${CTA_SEC} с) добавит конвейер: не пиши его, твой последний абзац это вывод. ${codewordTaskBlock(CTA)} ${exp ? experimentTaskBlock(exp) : ''}НАЧНИ С ТЕКСТА, не с полей: найди главную сцену (человек, предмет, опыт), напиши историю как рассказывал бы другу, потом заполни служебные поля. Живое из полей (ставка зрителя, главный образ, развязка) обязано прозвучать в озвучке. Не режь образы ради лимита: режь повторы и третий факт. Состав: хук-вопрос → откуда уверенность → 2-3 факта с числами как ходы расследования → оговорка авторов → вывод, отвечающий на хук его же словом. Это история, не список: каждый факт ломает то, во что зритель верил. Нельзя в тексте: «улика №», «поворот», «развязка», «приговор», вводные «Потому что/Поэтому/Так что/Итак/Значит/Получается/Выходит», фразу «Источники на экране». Прочитай ${ROOT.replaceAll('\\', '/')}/video/med_detective/SCRIPT_CRAFT.md (правила, образец, самопроверка): хук «Говорят, что… Правда ли это?» и второй вопрос, три хука из трёх семейств в hook_options, «но/поэтому» только внутри (поле chain), живая речь без ярлыков с двоеточием, самопроверка в self_check. Фразы короткие, 6-12 слов, на слух; хук цепляет за 1,5 с; финал замыкает начало. Для каждого абзаца в on_screen укажи, что подсветить лупой.
   ${fresh ? '' : 'Образец формата и тона: уже снятый сценарий video/med_detective/dosie01/script_ru.txt и его таблица фактов dosie01/FACTS.md (читай, не копируй). '}Открой первоисточники сама (PubMed/Cochrane/ВОЗ), пойми, что в них установлено, и перескажи суть своими словами. ВЫЖИМКА, А НЕ ЦИТАТЫ (решение Ника 2026-10-27: прямые цитаты перегружают текст и ломают логику рассказа): в озвучку не переноси формулировки из источников, не вставляй обороты вида «авторы пишут/признали» с их словами и английские термины; бери только суть (кто, что сделали, что получили, главная оговорка) и рассказывай её связной историей. Каждый абзац должен вести к следующему и сдерживать обещание хука; если фраза нужна только ради точности источника, а истории не помогает, убери её.${prev ? `\nПредыдущая версия сценария (правь её): ${JSON.stringify(prev)}` : ''}${changes.length ? `\nОбязательные правки: ${changes.join(' | ')}` : ''}${fresh ? `\n\n${regenBlock([...history, ...banned], { comment: comment || '' })}` : ''}
   Формат файла: {"title","idea":"сквозная мысль ролика одним предложением","lens":{"candidates":["угол 1 + приём","угол 2 + приём","угол 3 + приём"],"chosen":2,"why":"на каких данных держится"},"stake":"что зритель чувствует или делает по этому поводу каждый день, его словами","gaps":["интрига 1: что на самом деле","интрига 2: что это значит для меня"],"bookend":"слово или число из хука, которое возвращается в последнем абзаце","emotion_arc":["любопытство","удивление","сомнение","облегчение"] (3-4 шага чувства),"payoff":"фраза-вывод, дословно стоит в одном из двух последних абзацев","chain":[{"to":2,"link":"но|поэтому","why":"что связывает по смыслу; в тексте словами НЕ произносится"}] (по одному на каждый переход между абзацами),"self_check":"как проверила пересказ через но/поэтому и тест на воду","rubric","hook_type":"тип крючка первой фразы: ${HOOK_NAMES}","hook_options":[{"type","line","score"}] (3 крючка разных типов с оценкой 1-10; обязательно при перегенерации),"segments":["абзац 1","абзац 2",…] (5-7 абзацев, 85-${MAX_WORDS} слов всего БЕЗ призыва, числа и аббревиатуры словами),"on_screen":[{"segment":1,"headline":"…","numbers":["…"],"note":"что показать","loupe":"деталь для лупы"}],"claims":[{"text":"утверждение из сценария","source":"журнал/организация, год","url":"…","pmid":"…","gist":"что установлено в источнике, ТВОИМИ СЛОВАМИ по-русски, 1-2 предложения (выжимка, не цитата)","caveat":"оговорка авторов, если есть"}],"sources_card":["Автор. Журнал. Год."],"disclaimer":"Не заменяет консультацию врача. …"}.`,
       });
@@ -205,7 +208,7 @@ async function script(id, comment, regen = false, finish = false) {
     if (!prev || !Array.isArray(prev.segments)) { await agent('scriptwriter', 'error', 'Сценарий не получился', 0, `Нет script.json (код ${t1 && t1.code})`, 'error'); await safeNotify(`⚠️ Сценарий «${v.title}» не получился, см. ${dir}`); throw new Error('нет script.json'); }
     const cut = cleanFillerOpeners(prev);                       // решение Ника 2026-10-21: «Потому что/Поэтому/Так что…» в начале фразы вырезаем кодом, сразу суть
     if (cut.length) { fs.writeFileSync(sj, JSON.stringify(prev, null, 1), 'utf8'); console.log('убраны вводные слова: ' + cut.map((c) => `абз.${c.seg} «${c.from}» → «${c.to}»`).join('; ')); }
-    const stl = [...styleIssues(prev.segments), ...bridgeIssues(prev.segments), ...(process.env.VERDICT_GATE === 'off' ? [] : verdictIssues(prev))];   // служебные слова каркаса и «пункты списка» вместо связной мысли
+    const stl = [...styleIssues(prev.segments), ...bridgeIssues(prev.segments), ...(process.env.VERDICT_GATE === 'off' || exp ? [] : verdictIssues(prev))];   // служебные слова каркаса и «пункты списка» вместо связной мысли
     if (stl.length) {
       console.log('стиль: ' + stl.map((x) => `абз.${x.seg} ${x.say}`).join('; '));
       if (round < MAXR) {
@@ -272,7 +275,7 @@ async function script(id, comment, regen = false, finish = false) {
 Формат файла: {"verdict":"pass"|"fix","claims":[{"text","source_checked":true/false,"quote_found":"своими словами по-русски: что именно в источнике подтверждает утверждение","status":"верно|упрощено|не подтверждено|отклонить","note":""}],"required_changes":["конкретная правка…"],"summary":"1-2 предложения"}. verdict "pass" только если все claims «верно» или безвредно «упрощено» с оговоркой в тексте.`;
     veraRuns++;
     const t2 = await runAgent({
-      label: `check${round}`, outFile: cj, persona: await promptOf('factcheck'), maxTurns: 90, budgetSec: 1500, task: checkTask,
+      label: `check${round}`, outFile: cj, persona: await promptOf('factcheck'), maxTurns: 90, budgetSec: 1500, task: checkTask + (exp ? experimentCheckNote(exp) : ''),
     });
     check = readJson(cj);
     if (!check) { await agent('factcheck', 'error', 'Проверка не удалась', 0, `Нет check.json (код ${t2.code})`, 'error'); await safeNotify(`⚠️ Проверка фактов «${v.title}» не удалась, см. ${dir}`); throw new Error('нет check.json'); }
@@ -342,13 +345,14 @@ async function produce(id, comment, { finishOnly = false, sendAnyway = false } =
   const rel = path.join('smm', 'runs', `video_${id}`);
   const abs = path.join(ROOT, rel);
   const proj = path.join(ROOT, 'video', `dosie${n}`);
+  const expName = getExperiment(abs); if (expName && !getExperiment(proj)) setExperiment(proj, expName);          // вердикт-ворота монтажа читают пометку из проекта
   const tpl = fs.readFileSync(path.join(ROOT, 'smm', 'brief_template.md'), 'utf8');
   const brief = tpl.replaceAll('{{N}}', n).replaceAll('{{ID}}', String(id)).replaceAll('{{TITLE}}', v.title).replaceAll('{{SCRIPT}}', path.join(abs, 'script_ru.txt').replaceAll('\\', '/'))
     .replaceAll('{{FACTS}}', path.join(abs, 'FACTS.md').replaceAll('\\', '/')).replaceAll('{{PROJ}}', proj.replaceAll('\\', '/')).replaceAll('{{VIDEO}}', ROOT.replaceAll('\\', '/') + '/video').replaceAll('{{SCRIPTS}}', ROOT.replaceAll('\\', '/') + '/scripts').replaceAll('{{COMMENT}}', comment || 'нет').replaceAll('{{RENDER_RULES}}', renderRules({ proj, scripts: path.join(ROOT, 'scripts') })).replaceAll('{{FORMAT_SECTION}}', formatSection(fmt, ROOT, { panels: panelsLine(abs) })).replaceAll('Ты Кирилл Кадров, Video Editor', `Ты ${ed.name}, Video Editor`);
   if (ensureCtaFile(path.join(abs, 'script_ru.txt'))) console.log('в сценарий добавлен призыв с кодовым словом (video/cta.json)');
   const resume = finishOnly ? '' : resumeBlock(proj, n);          // проект уже собран частично (оборвалась прошлая сессия): продолжаем, а не начинаем с нуля
   if (resume) console.log('проект уже собран частично: монтажёр получает задание на ПРОДОЛЖЕНИЕ, а не на новую сборку');
-  const bf = path.join(abs, 'BRIEF.md'); fs.writeFileSync(bf, resume ? brief.replace('## Шаги\n', resume + '## Шаги\n') : brief, 'utf8');
+  const bf = path.join(abs, 'BRIEF.md'); fs.writeFileSync(bf, applyExperimentToBrief(resume ? brief.replace('## Шаги\n', resume + '## Шаги\n') : brief, expName), 'utf8');
 
   await agent('captain_smm', 'working', `Монтаж: «${v.title}»${tag}`, 60, `Сценарий утверждён, передал ${ed.name}${tag}`);
   let videoStartedAt = Date.now() - 4 * 3600e3, code = 'finish', stopWatch = () => {};          // finishOnly: смотрим логи скиллов за последние 4 часа (когда монтажёр работал)
@@ -421,7 +425,8 @@ async function produce(id, comment, { finishOnly = false, sendAnyway = false } =
 
 /* ---------------- 4. Правки готового ролика (Кирилл, Opus 5.5, high; у ролика приоритет) ---------------- */
 const projectDir = (id) => (Number(id) === 1 ? path.join(ROOT, 'video', 'med_detective', 'dosie01') : path.join(ROOT, 'video', `dosie${String(id).padStart(2, '0')}`));   // ролик №1 собран вручную в проекте med_detective
-function reworkBrief({ id, n, ver, cur, title, comment, proj, editor = { name: 'Кирилл Кадров' }, fmt = 'A' }) {
+const reworkBrief = (o) => applyExperimentToBrief(reworkBriefRaw(o), getExperiment(o.proj));
+function reworkBriefRaw({ id, n, ver, cur, title, comment, proj, editor = { name: 'Кирилл Кадров' }, fmt = 'A' }) {
   const P = proj.replaceAll('\\', '/'), V = ROOT.replaceAll('\\', '/') + '/video', S = ROOT.replaceAll('\\', '/') + '/scripts';
   return `# Правки ролика №${id} → ${ver}: ${comment.replace(/\s+/g, ' ').slice(0, 70)}
 

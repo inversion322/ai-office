@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VERDICT_RE, stripLeadMagnet } from './script_style.mjs';
 import { projectLang } from './project_lang.mjs';
+import { getExperiment } from './experiment.mjs';
 
 export const VERDICT_LABEL = { after: 0.6 };
 // Английская версия: те же ярлыки (myth, fake, false, lie, debunked), слово true только не в вопросе («Is that true?» остаётся: это вопрос, а не метка)
@@ -29,6 +30,7 @@ const word = (raw, re = VERDICT_RE) => { const text = re === VERDICT_RE ? stripL
 /** Возвращает { ok, problems[], checked }. Проект без index.html или без сцен не проверяется (старые ролики, тесты). */
 export function checkVerdictLabels(proj, { after = VERDICT_LABEL.after } = {}) {
   if (process.env.VERDICT_GATE === 'off') return { ok: true, problems: [], checked: false };
+  if (getExperiment(proj) === 'verdict_first') return { ok: true, problems: [], checked: false, experiment: 'verdict_first' };      // эксперимент «ответ вперёд» (Ник, 2026-10-29): вердикт в начале намеренно
   const idx = path.join(proj, 'index.html'); if (!fs.existsSync(idx)) return { ok: true, problems: [], checked: false };
   const html = fs.readFileSync(idx, 'utf8'), scenes = sceneList(html); if (!scenes.length) return { ok: true, problems: [], checked: false };
   const total = Math.max(...scenes.map((s) => s.start + s.dur)), limit = after * total, problems = [];
