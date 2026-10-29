@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EXTRA_AGENTS, TRANSLATOR_PROMPT } from '../server/lib_extra_agents.mjs';
-import { skipInCopy, baseVersion, checkTranslation, bodyBudgetFromLog, translatorTask, EN_LIMITS } from '../scripts/smm_localize.mjs';
+import { skipInCopy, baseVersion, checkTranslation, bodyBudgetFromLog, translatorTask, EN_LIMITS, ctaEn } from '../scripts/smm_localize.mjs';
 
 test('в рабочую копию для английской версии не попадают итоги, кадры, журналы и русская озвучка; сборка, композиции и план библиотеки попадают', () => {
   for (const n of ['final', '_frames', '_frames_v2', '_snap_a', '_motion', '_render_rounds.json', 'narration.mp3', 'words.json', 'captions.srt', 'captions_v2.srt', 'RESULT.md', 'RESULT_v2.md', 'PROGRESS.md',
@@ -39,7 +39,7 @@ test('проверка перевода кодом: абзацы один к о�
   bad([OK[0], OK[1], 'Like and subscribe now.'], /призыв/);
   assert.equal(checkTranslation(RU, [OK[0], 'Is that true?', OK[2]]).ok, true, '«Is that true?» вопрос, а не ярлык');
   const long = [OK[0], 'word '.repeat(EN_LIMITS.hardBodyWords).trim() + '.', OK[2]];
-  bad(long, /слов \d+, максимум 106/);
+  bad(long, new RegExp(`слов \\d+, максимум ${EN_LIMITS.hardBodyWords}\\b`));
 });
 
 test('бюджет слов из сообщения narrate.py: вычитается призыв и запас; без сообщения null', () => {
@@ -62,4 +62,28 @@ test('сотрудница Лина (translator): в списке агентов
   const desks = EXTRA_AGENTS.map((x) => x.desk); assert.equal(new Set(desks).size, desks.length, 'номера столов не повторяются');
   const office = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web', 'office.js'), 'utf8');
   assert.match(office, /translator: \[\d+(\.\d+)?, \d+(\.\d+)?\]/, 'у Лины есть координаты стола'); assert.match(office, /translator: 'right'/, 'и комната');
+});
+
+test('обещание файла с мифами (английский вариант русской формулы) не считается вердиктом в первых абзацах, настоящий вердикт — по-прежнему', () => {
+  const promise = 'Why? Watch to the end. The word for a free file with the thirty most popular myths comes there too.';
+  assert.equal(checkTranslation(RU, [promise, OK[1], OK[2]]).ok, true, 'myths в обещании файла остаётся');
+  const bad = checkTranslation(RU, ['This is a myth.', OK[1], OK[2]]); assert.equal(bad.ok, false); assert.match(bad.problems.join(' '), /слово-вердикт «myth»/);
+  const stamp = checkTranslation(RU, ['A free file. Myth!', OK[1], OK[2]]); assert.equal(stamp.ok, false, '«Myth!» рядом со словом file без предлога with — это ярлык');
+});
+
+test('бюджет английского тела считается от длины призыва: тело + призыв ≈ 120 слов, жёсткий предел на 6 слов выше', () => {
+  const w = ctaEn().split(/\s+/).filter(Boolean).length;
+  assert.ok(w >= 28 && w <= 36, 'призыв с кодовым словом длиннее прежних двадцати слов: ' + w);
+  assert.equal(EN_LIMITS.bodyWords + w, 120); assert.equal(EN_LIMITS.hardBodyWords, EN_LIMITS.bodyWords + 6);
+  assert.match(ctaEn(), /dossier/); assert.match(ctaEn(), /bot/);
+});
+
+test('эксперимент «ответ вперёд»: перевод с ответом в первом абзаце проходит проверку и получает исключение в задании; без эксперимента отклоняется', () => {
+  const verdictFirst = ["It's a myth: sugar does not make kids wild.", OK[1], OK[2]];
+  assert.equal(checkTranslation(RU, verdictFirst).ok, false, 'обычный ролик: myth в первом абзаце нельзя');
+  assert.equal(checkTranslation(RU, verdictFirst, { allowVerdict: true }).ok, true, 'эксперимент: можно');
+  assert.equal(checkTranslation(RU, [OK[0], 'word '.repeat(EN_LIMITS.hardBodyWords + 5).trim() + '.', OK[2]], { allowVerdict: true }).ok, false, 'остальные проверки (длина) живы и в эксперименте');
+  const base = { title: 'T', ru: RU, facts: '', out: 'x.json', budget: 80, feedback: '', prev: null };
+  assert.match(translatorTask({ ...base, experiment: true }), /ЭКСПЕРИМЕНТ «ОТВЕТ ВПЕРЁД»/); assert.doesNotMatch(translatorTask({ ...base, experiment: true }), /только в последнем абзаце/);
+  assert.match(translatorTask(base), /только в последнем абзаце/); assert.doesNotMatch(translatorTask(base), /ЭКСПЕРИМЕНТ/);
 });

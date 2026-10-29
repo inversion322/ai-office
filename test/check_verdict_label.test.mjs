@@ -79,3 +79,18 @@ test('субтитры обещания файла («…слово для бе�
     assert.equal(checkVerdictLabels(ok).ok, true, checkVerdictLabels(ok).problems.join('; ')); assert.equal(checkVerdictLabels(bad).ok, false);
   } finally { fs.rmSync(ok, { recursive: true, force: true }); fs.rmSync(bad, { recursive: true, force: true }); }
 });
+
+test('английское обещание файла («a free file with the thirty most popular myths») в первых сценах не вердикт; штамп MYTH рядом — по-прежнему вердикт', () => {
+  const en = [
+    { name: 's01', start: 0, dur: 2, html: '<div><span>WHY? WATCH TO THE END</span></div>' },
+    { name: 's02', start: 1.5, dur: 3, html: '<div><span>THE WORD FOR A FREE FILE WITH THE 30 MOST POPULAR MYTHS</span></div>' },
+    { name: 's17', start: 33, dur: 4, html: '<div class="stamp"><span>MYTH</span></div>' },
+    { name: 's20', start: 37, dur: 3, html: '<div>CODE WORD</div>' },
+  ];
+  const dir = project(en); fs.writeFileSync(path.join(dir, 'lang.json'), JSON.stringify({ lang: 'en' }));
+  try {
+    const r = checkVerdictLabels(dir); assert.equal(r.ok, true, r.problems.join('; '));
+    fs.writeFileSync(path.join(dir, 'compositions', 's02.html'), '<div><span>A FREE FILE WITH 30 FACTS</span><span class="stamp">MYTH</span></div>');
+    assert.equal(checkVerdictLabels(dir).ok, false, 'штамп MYTH рядом с обещанием — вердикт');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

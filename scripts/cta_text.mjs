@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const loadCta = (file = path.join(ROOT, 'video', 'cta.json')) => JSON.parse(fs.readFileSync(file, 'utf8'));
+export const loadCtaEn = (file = path.join(ROOT, 'video', 'cta_en.json')) => JSON.parse(fs.readFileSync(file, 'utf8'));
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 
 /** Абзацы без призыва (нового или любого прежнего) в конце. */

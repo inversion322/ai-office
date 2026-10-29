@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { ROOT, hermesSpawn, sendVideoFile, sendAudioFile, notify, readJson, agent, scene, say, runAgent, promptOf, profileFor, getVideo } from './smm_lib.mjs';
 import { watchVoiceQa, checkVoiceQa } from './voice_qa.mjs';
 import { stripCta } from './cta_text.mjs';
-import { VERDICT_RE_EN } from './check_verdict_label.mjs';
+import { VERDICT_RE_EN, stripLeadMagnetEn } from './check_verdict_label.mjs';
+import { getExperiment } from './experiment.mjs';
 import { TRANSLATOR_PROMPT } from '../server/lib_extra_agents.mjs';
 import { gate } from './video_gate.mjs';
 import { renderRules } from './render_rules.mjs';
@@ -67,7 +68,9 @@ export function narrate(id, { maxSec = 53 } = {}) {
 
 export function briefFor(id, title) {
   const cta = readJson(path.join(VIDEO, 'cta_en.json')) || {}, on = cta.on_screen || {};
-  const ctaLines = [on.headline, on.channel_line1, on.channel_line2, on.handle].filter(Boolean).map((x) => `**${x}**`).join(' / ');
+  const expAnswer = getExperiment(runDir(id)) === 'verdict_first';
+  const cw = !!cta.codeword;                        // призыв с кодовым словом (решение Ника 2026-10-29): экран КОДОВОЕ СЛОВО / слово / бот / ссылка в профиле / подписка
+  const ctaLines = (cw ? [on.headline, on.word, on.bot_line, on.handle, on.profile_line, on.sub_line] : [on.headline, on.channel_line1, on.channel_line2, on.handle]).filter(Boolean).map((x) => `**${x}**`).join(' / ');
   const resumed = fs.existsSync(path.join(enDir(id), 'PROGRESS.md'));
   const n = norm(id), P = enDir(id).replaceAll('\\', '/'), SRC = srcDir(id).replaceAll('\\', '/'), V = VIDEO.replaceAll('\\', '/'), S = path.join(ROOT, 'scripts').replaceAll('\\', '/');
   const meta = readJson(path.join(enDir(id), 'lang.json')) || {}, ver = (meta.base_version || 'v1').replace(/^v/, '');
@@ -88,7 +91,7 @@ ${resumed ? `## ПРОДОЛЖЕНИЕ: проект уже собран час�
   - \`narration.mp3\`, \`words.json\` (тайминги английских слов), \`captions.srt\`: готовая английская озвучка (голос en_calm_f, речь до ${speechEnd} с). **Озвучку не генерируй заново и голос не меняй.** Не нравится озвучка (обрыв, склейка слов, пауза > 1,5 с): напиши в RESULT.md и сделай ролик с тем, что есть.
   - \`lang.json\` (\`{"lang":"en"}\`): по нему ворота ждут английский призыв и английские слова-вердикты. Не удаляй.
 - Факты и источники: \`${SRC}/FACTS.md\` (по-русски). На экране источники записываются по-английски латиницей: фамилия автора, журнал, год (как в оригинале на экране, где это уже латиница, оставь).
-- Призыв: \`${V}/cta_en.json\`. Голос уже в озвучке. На экране: ${ctaLines} (вместо @имени «${on.handle || ''}»; адреса нет). Строка с названием: решение Ника 2026-10-28, на экране именно «${on.channel_line2 || ''}» (не «MEDICAL DETECTIVE»); если в сборке есть проверка этой строки (assert), приведи её к значению из cta_en.json. Правила те же, что для русского: Manrope 800, ПРОПИСНЫЕ, каждая буква отдельно с шагом ≤ 0,06 с (\`.cta-ch\`), образец \`${V}/med_detective/CTA_REFERENCE.html\`, сцена длится, пока звучит призыв, затем мелкая рамка с источниками.
+- Призыв: \`${V}/cta_en.json\`. Голос уже в озвучке. На экране: ${ctaLines}. ${cw ? `Это тот же призыв, что в русском ролике (решение Ника 2026-10-29): кодовое слово **${on.word}** на экране ЛАТИНИЦЕЙ, ровно как в cta_en.json (в озвучке оно звучит «${cta.codeword_spoken || ''}»; кириллическое ДОСЬЕ на английском экране не ставь), имя бота точно **${on.handle}**, как в русском эталоне. Строк про название канала в сцене призыва нет.` : `(вместо @имени «${on.handle || ''}»; адреса нет). Строка с названием: решение Ника 2026-10-28, на экране именно «${on.channel_line2 || ''}» (не «MEDICAL DETECTIVE»); если в сборке есть проверка этой строки (assert), приведи её к значению из cta_en.json.`} Правила те же, что для русского: Manrope 800, ПРОПИСНЫЕ, каждая буква отдельно с шагом ≤ 0,06 с (\`.cta-ch\`), образец \`${V}/med_detective/CTA_REFERENCE.html\`, сцена длится, пока звучит призыв, затем мелкая рамка с источниками. Проверка кодом: \`node ${S}/check_cta.mjs ${P}\` ждёт на экране «${on.headline || ''}», ${cw ? `«${on.word}» и «${on.handle}»` : 'остальные строки по cta_en.json'}.
 - Оговорка на финальной рамке: «Not medical advice. If something about your health worries you, see a doctor.» (английский вариант русского «Не заменяет консультацию врача…»).
 
 ## Что менять
@@ -96,7 +99,7 @@ ${resumed ? `## ПРОДОЛЖЕНИЕ: проект уже собран час�
 2. **Тайминги пересчитать по английскому \`words.json\`.** В сборке всё привязано к индексам слов (\`EXPECTED\` по абзацам, \`ANCHOR_TEXT\`, \`STARTS\`, якоря шотов, появление слов, чисел, лупы, печати; проверки абзацев и слов остановят сборку, пока не сойдётся). Для каждого шота найди **английское слово, с которого по смыслу начинается та же мысль**, что в русском шоте. Ритм сохрани: новый шот каждые 1,5-3 с (допуск оригинала 1,2-3,3 с), граница шота = начало якорного слова минус 0,12 с. Если английская фраза длиннее или короче русской и шот выходит за допуск, подвинь границу соседних шотов внутри той же сцены или раздели/склей шоты, но смену картинки не реже, чем требует DYNAMICS.md.
 3. **Длина строк на экране.** Английские слова другой ширины: перепроверь, что ничего не вылезает за безопасную зону x 60-940, y 250-1440 и за карточки, подбери размеры шрифта (Manrope 800 латиница лежит в \`assets/fonts/manrope-latin-*.woff2\`, \`@font-face\` для обеих подгрупп в композициях уже есть). Русские подстановки в сборке («ё» → «е», склонения, русские сокращения) убери.
 4. **Субтитры:** те же стили (МАРКЕР / СЛЭМ) и поведение, слова из английского \`words.json\`; переносы по-английски; \`final/captions.srt\` из них.
-5. **Службные слова и вердикт.** На экране и в озвучке нет «evidence #», «plot twist», «verdict», «claim» как рубрик. Слова-ярлыки (**MYTH, TRUE, FALSE, FAKE, LIE, DEBUNKED**) и штамп MYTH появляются только в последних 40 % ролика, перед призывом. «Is that true?» как вопрос в хуке допустимо. Проверка: \`node ${S}/check_verdict_label.mjs ${P}\` (код 0).
+5. **Службные слова и вердикт.** На экране и в озвучке нет «evidence #», «plot twist», «verdict», «claim» как рубрик. ${expAnswer ? 'ЭКСПЕРИМЕНТ «ОТВЕТ ВПЕРЁД» (решение Ника 2026-10-29, как в русском оригинале): ответ звучит в первых секундах, на экране он стоит обычной крупной подписью из script_en.txt, без красного штампа MYTH/TRUE и без метки до сцены вердикта; вердикт-ворота для этого ролика выключены (рядом с проектом оригинала лежит experiment.json).' : 'Слова-ярлыки (**MYTH, TRUE, FALSE, FAKE, LIE, DEBUNKED**) и штамп MYTH появляются только в последних 40 % ролика, перед призывом. «Is that true?» как вопрос в хуке допустимо.'} Проверка: \`node ${S}/check_verdict_label.mjs ${P}\` (код 0).
 6. **Имена файлов.** Сборка \`build_dosie${n}_en.py\` (из \`_parts\`, если оригинал так устроен: правь копии в \`_parts\`, склейка как в \`build.sh\`), \`run_all.sh\` с путями на \`${P}\` и рабочей папкой рендера \`~/AppData/Local/hermes/cache/scratch/d${n}_en\` (в оригинале пути указывают на русский проект и его scratch: **поправь их, иначе перезапишешь русский ролик**). Итоговые файлы: \`final/dosie${n}_en_v1.mp4\`, \`final/dosie${n}_en_v1_nomusic.mp4\`, \`final/captions.srt\`, \`final/poster.png\`, \`final/contact_sheet.png\`, \`RESULT.md\` в корне проекта.
 7. Длина ролика ≤ 59,0 с (озвучка + хвост). Музыку и звуки оставь как в оригинале (палитра та же, звуков на смене кадра нет, музыка −24 дБ, два файла: с музыкой и без).
 
@@ -147,10 +150,13 @@ export async function finish(id, title, { sendAnyway = false } = {}) {
 
 /* ---------------- Путь по кнопке «Английская версия» ---------------- */
 // Бюджет слов: озвучка en_calm_f идёт ~2,4 слова/с вместе с паузами, лимит 53 с на весь ролик с призывом (20 слов ≈ 8 с). Замер 28.10: 125 слов = 52,6 с.
-export const EN_LIMITS = { bodyWords: 100, hardBodyWords: 106 };
 const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
 const wordCount = (arr) => arr.join(' ').split(/\s+/).filter(Boolean).length;
 export const ctaEn = () => clean((readJson(path.join(VIDEO, 'cta_en.json')) || {}).voice_en);
+// Бюджет тела по-английски зависит от длины призыва: всего ≈125 слов = 52,6 с (замер 2026-10-28), с прежним призывом в 20 слов тело было 100/106.
+// Призыв с кодовым словом (2026-10-29) длиннее, поэтому лимиты считаются от него: тело + призыв ≈ 120 слов, жёсткий предел на 6 слов выше.
+export const EN_TOTAL_WORDS = 120;
+export const EN_LIMITS = (() => { const w = ctaEn().split(/\s+/).filter(Boolean).length || 20; return { bodyWords: EN_TOTAL_WORDS - w, hardBodyWords: EN_TOTAL_WORDS - w + 6 }; })();
 
 /** Русские абзацы сценария без призыва: smm/runs/video_<id>/script_ru.txt, иначе копия в проекте ролика. */
 export function ruParagraphs(id) {
@@ -160,7 +166,7 @@ export function ruParagraphs(id) {
 }
 
 /** Проверка перевода кодом (до Веры): абзацы один к одному, без цифр и кириллицы, в бюджете слов, вердикт только в последнем абзаце, без призыва. */
-export function checkTranslation(ru, en, { maxWords = EN_LIMITS.hardBodyWords } = {}) {
+export function checkTranslation(ru, en, { maxWords = EN_LIMITS.hardBodyWords, allowVerdict = false } = {}) {      // allowVerdict: эксперимент «ответ вперёд» (Ник, 2026-10-29), ответ в первых абзацах намеренно
   const problems = [];
   if (en.length !== ru.length) problems.push(`абзацев ${en.length}, а в русском ${ru.length}: нужно один к одному (кадры монтажа привязаны к абзацам)`);
   en.forEach((p, i) => {
@@ -170,7 +176,7 @@ export function checkTranslation(ru, en, { maxWords = EN_LIMITS.hardBodyWords } 
   });
   const words = wordCount(en);
   if (words > maxWords) problems.push(`слов ${words}, максимум ${maxWords}: сожми формулировки (факты и числа остаются)`);
-  en.slice(0, -1).forEach((p, i) => { const m = VERDICT_RE_EN.exec(p); if (m) problems.push(`абзац ${i + 1}: слово-вердикт «${m[0]}» до последнего абзаца`); });
+  if (!allowVerdict) en.slice(0, -1).forEach((p, i) => { const m = VERDICT_RE_EN.exec(stripLeadMagnetEn(p)); if (m) problems.push(`абзац ${i + 1}: слово-вердикт «${m[0]}» до последнего абзаца`); });
   if (en.some((p) => /subscribe/i.test(p))) problems.push('призыв подписаться не включай: его добавляет код');
   return { ok: problems.length === 0, problems, words };
 }
@@ -181,7 +187,7 @@ export function bodyBudgetFromLog(text, ctaWords = ctaEn().split(/\s+/).length) 
   return Math.max(40, Number(m[1]) - ctaWords - 3);
 }
 
-export function translatorTask({ title, ru, facts, out, budget, feedback, prev }) {
+export function translatorTask({ title, ru, facts, out, budget, feedback, prev, experiment = false }) {
   const numbered = ru.map((p, i) => `Абзац ${i + 1} (${p.split(/\s+/).length} слов): ${p}`).join('\n');
   return `Переведи утверждённый Ником русский сценарий ролика «${title}» на английский для озвучки на английском канале Med Detective (Telegram, YouTube Shorts).
 
@@ -198,7 +204,7 @@ ${facts || '(нет)'}
 4. Числа в тексте пиши СЛОВАМИ (forty-three, five thousand), без цифр, без знака процента.
 5. Живая разговорная речь для уха: короткие предложения (до 15 слов), каждое законченное и понятное само по себе (диктор читает по предложению с паузой). Вопросы остаются вопросами. Без скобок, вставных тире, сокращений вроде vs., e.g., etc.
 6. Не калька, а идиома: «качать пресс» это do sit-ups, «ленивая рука» the resting arm и т. п. Хук сохраняет интригу русского.
-7. Слова-вердикты (myth, true, false, fake, lie, debunked) только в последнем абзаце. Вопрос «Is that true?» в хуке допустим.
+7. ${experiment ? 'ЭКСПЕРИМЕНТ «ОТВЕТ ВПЕРЁД» (решение Ника 2026-10-29, как в русском оригинале): ответ звучит в первых абзацах намеренно, переводи его как есть; слова-вердикты в начале не ошибка.' : 'Слова-вердикты (myth, true, false, fake, lie, debunked) только в последнем абзаце. Вопрос «Is that true?» в хуке допустим.'} Исключение: обещание файла («Watch to the end. The word for a free file with the thirty most popular myths comes there too») переводится как есть, «myths» там называет содержимое файла, а не вердикт.
 8. Никаких советов по лечению, дозировок, брендов.
 ${prev ? `\nПРОШЛАЯ ВЕРСИЯ ПЕРЕВОДА (исправь её):\n${prev.map((p, i) => `Абзац ${i + 1}: ${p}`).join('\n')}\n` : ''}${feedback ? `\nЗАМЕЧАНИЯ К ПРОШЛОЙ ВЕРСИИ (обязательно исправь): ${feedback}\n` : ''}
 Итог запиши в файл ${out} как JSON: {"paragraphs":["абзац 1","абзац 2",...],"notes":"одна фраза: что пришлось сжать или упростить"}. После записи файла больше ничего не делай.`;
@@ -229,18 +235,18 @@ const factsOf = (id) => { for (const f of [path.join(runDir(id), 'FACTS.md'), pa
 
 /** Лина переводит, код проверяет, Вера сверяет смысл (не больше двух раз), при замечаниях Лина правит. Пишет smm/runs/video_<id>/script_en.txt. */
 export async function translateStep(id, title, { budget = EN_LIMITS.bodyWords, feedback = '', prev = null } = {}) {
-  const ru = ruParagraphs(id), facts = factsOf(id), dir = runDir(id), out = path.join(dir, 'translate.json'), outCheck = path.join(dir, 'translate_check.json');
+  const ru = ruParagraphs(id), facts = factsOf(id), dir = runDir(id), out = path.join(dir, 'translate.json'), outCheck = path.join(dir, 'translate_check.json'), allowVerdict = !!getExperiment(dir);
   let persona; try { persona = await promptOf('translator'); } catch { persona = TRANSLATOR_PROMPT; }
   await scene('captain_smm', 'translator', `Лина, переведи «${title}» на английский.`).catch(() => {});
   await agent('translator', 'working', `Перевод: «${title}»`, 15, 'Начала перевод сценария на английский').catch(() => {});
   let veraRuns = 0, en = prev, warn = '', fb = feedback;
   for (let round = 1; round <= 3; round++) {
     fs.rmSync(out, { force: true });
-    await runAgent({ label: `translate${round}`, agentId: 'translator', profile: profileFor('translator'), outFile: out, persona, maxTurns: 30, budgetSec: 600, task: translatorTask({ title, ru, facts, out, budget, feedback: fb, prev: en }) });
+    await runAgent({ label: `translate${round}`, agentId: 'translator', profile: profileFor('translator'), outFile: out, persona, maxTurns: 30, budgetSec: 600, task: translatorTask({ title, ru, facts, out, budget, feedback: fb, prev: en, experiment: allowVerdict }) });
     const j = readJson(out), got = j && Array.isArray(j.paragraphs) ? j.paragraphs.map(clean) : null;
     if (!got) { fb = 'файл с JSON не создан или нет поля paragraphs'; continue; }
     en = got;
-    const ck = checkTranslation(ru, en, { maxWords: Math.max(budget + 6, EN_LIMITS.hardBodyWords) });
+    const ck = checkTranslation(ru, en, { maxWords: Math.max(budget + 6, EN_LIMITS.hardBodyWords), allowVerdict });
     if (!ck.ok) { fb = ck.problems.join('; '); warn = fb; continue; }
     warn = '';
     if (veraRuns >= 2) break;
@@ -253,7 +259,7 @@ export async function translateStep(id, title, { budget = EN_LIMITS.bodyWords, f
     if (!c || c.verdict === 'pass') break;
     fb = 'Вера: ' + (c.required_changes || []).join('; '); warn = fb;
   }
-  const final = en && checkTranslation(ru, en, { maxWords: Math.max(budget + 6, EN_LIMITS.hardBodyWords) });
+  const final = en && checkTranslation(ru, en, { maxWords: Math.max(budget + 6, EN_LIMITS.hardBodyWords), allowVerdict });
   if (!final || !final.ok) { await agent('translator', 'error', 'Перевод не получился', 0, (final ? final.problems.join('; ') : 'нет файла').slice(0, 200), 'error').catch(() => {}); throw new Error('перевод не прошёл проверку: ' + (final ? final.problems.join('; ') : 'нет файла')); }
   writeScript(id, en);
   await agent('translator', 'idle', 'Перевод готов', 100, `«${title}»: ${final.words} слов${warn ? '; замечания Веры остались: ' + warn.slice(0, 120) : ''}`).catch(() => {});

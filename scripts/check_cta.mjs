@@ -5,20 +5,27 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { projectLang } from './project_lang.mjs';
-import { loadCta } from './cta_text.mjs';
+import { loadCta, loadCtaEn } from './cta_text.mjs';
 
 export const CTA_RULES = { minLetters: 14, maxStep: 0.06, headline: 'ПОДПИСЫВАЙТЕСЬ' };
 export const CTA_RULES_EN = { ...CTA_RULES, headline: 'SUBSCRIBE' };                // английская версия ролика (lang.json): тот же набор по буквам, заголовок SUBSCRIBE
 // Русский призыв с 2026-10-28: «кодовое слово → бот → подписка» (video/cta.json: on_screen.headline, codeword, bot). Ролики, собранные с прежним призывом «Подписывайтесь»
 // (последний абзац их script_ru.txt это один из previous_voice_ru), принимаются по прежним правилам: правка старого ролика не должна ломаться о новый эталон.
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
-const lastParagraph = (proj) => { try { return norm(fs.readFileSync(path.join(proj, 'script_ru.txt'), 'utf8').trim().split(/\n\s*\n/).pop()); } catch { return null; } };
+const lastParagraph = (proj, file = 'script_ru.txt') => { try { return norm(fs.readFileSync(path.join(proj, file), 'utf8').trim().split(/\n\s*\n/).pop()); } catch { return null; } };
 const squash = (s) => String(s || '').replace(/\s+/g, '');
 const wordKey = (w) => String(w || '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/g, '');
 /** Правила сцены призыва проекта: { lang, R (headline, must[] — что ещё обязано стоять на экране), spoken (слово, которое обязано звучать в words.json) }. */
 export function ctaRulesFor(proj, cta = null) {
   const lang = projectLang(proj);
-  if (lang === 'en') return { lang, R: CTA_RULES_EN, spoken: null };
+  if (lang === 'en') {
+    // Английский призыв с кодовым словом (решение Ника 2026-10-29: тот же переход на бота, что у русских). Версии со старым призывом SUBSCRIBE (#152, #144, #109) проверяются по прежним правилам:
+    // выбор по последнему абзацу script_en.txt проекта.
+    let e = null; try { e = loadCtaEn(); } catch { e = null; }
+    const lastEn = lastParagraph(proj, 'script_en.txt');
+    if (e && e.codeword && e.on_screen && e.on_screen.headline && lastEn && lastEn === norm(e.voice_en)) return { lang, R: { ...CTA_RULES, headline: e.on_screen.headline, must: [e.codeword, e.bot].filter(Boolean) }, spoken: e.codeword_spoken || null };
+    return { lang, R: CTA_RULES_EN, spoken: null };
+  }
   let c = cta; try { c = c || loadCta(); } catch { c = null; }
   if (!c || !c.on_screen || !c.on_screen.headline || !c.codeword) return { lang, R: CTA_RULES, spoken: null };
   const last = lastParagraph(proj), word = String(c.codeword).toLowerCase().replace(/ё/g, 'е');

@@ -122,3 +122,29 @@ test('сценарий с прежней редакцией призыва С к
     assert.equal(ctaRulesFor(dir).spoken, 'ДОСЬЕ', 'слово обязано звучать и в прежней редакции призыва');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('английский призыв с кодовым словом (script_en.txt оканчивается призывом из cta_en.json): CODE WORD, DOSSIER и @med_detective_bot на экране, «dossier» в озвучке; версии со старым SUBSCRIBE проверяются по-прежнему', () => {
+  const cta = JSON.parse(fs.readFileSync(path.join(ROOT, 'video', 'cta_en.json'), 'utf8'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cta_en2_')); fs.mkdirSync(path.join(dir, 'compositions'));
+  const letters = (w) => w.split('').map((ch) => `<span class="cta-ch">${ch}</span>`).join('');
+  const scene = (parts) => `<html><body><div>${parts.map(letters).join('')}</div><style>.cta-ch{font-family:Manrope}</style><script>gsap.from('.cta-ch',{stagger:0.04})</script></body></html>`;
+  try {
+    fs.writeFileSync(path.join(dir, 'lang.json'), JSON.stringify({ lang: 'en' }));
+    fs.writeFileSync(path.join(dir, 'script_en.txt'), 'Body paragraph.\n\n' + cta.voice_en + '\n');
+    fs.writeFileSync(path.join(dir, 'words.json'), JSON.stringify(cta.voice_en.split(/\s+/).map((w, i) => ({ text: w, start: i, end: i + 0.5 }))));
+    const rules = ctaRulesFor(dir); assert.equal(rules.R.headline, 'CODE WORD'); assert.deepEqual(rules.R.must, ['DOSSIER', '@med_detective_bot']); assert.equal(rules.spoken, 'dossier');
+    fs.writeFileSync(path.join(dir, 'compositions', 'cta.html'), scene(['CODEWORD', 'DOSSIER', 'MESSAGETHEBOT', '@med_detective_bot', 'LINKINBIO']));
+    const ok = checkCta(dir); assert.equal(ok.ok, true, ok.problems.join('; '));
+    fs.writeFileSync(path.join(dir, 'compositions', 'cta.html'), scene(['CODEWORD', 'MESSAGETHEBOT', '@med_detective_bot', 'LINKINBIO']));
+    assert.match(checkCta(dir).problems.join(' '), /DOSSIER/, 'без кодового слова на экране не проходит');
+    fs.writeFileSync(path.join(dir, 'compositions', 'cta.html'), scene(['CODEWORD', 'DOSSIER', 'MESSAGETHEBOT', 'LINKINBIO']));
+    assert.match(checkCta(dir).problems.join(' '), /@med_detective_bot/, 'без имени бота не проходит');
+    fs.writeFileSync(path.join(dir, 'compositions', 'cta.html'), scene(['CODEWORD', 'DOSSIER', 'MESSAGETHEBOT', '@med_detective_bot', 'LINKINBIO']));
+    fs.writeFileSync(path.join(dir, 'words.json'), JSON.stringify([{ text: 'Like', start: 0, end: 1 }, { text: 'subscribe', start: 1, end: 2 }]));
+    assert.match(checkCta(dir).problems.join(' '), /dossier/, 'слово обязано звучать');
+    // прежняя английская версия (#152): последний абзац старый, сцена SUBSCRIBE
+    fs.writeFileSync(path.join(dir, 'script_en.txt'), 'Body paragraph.\n\n' + cta.previous_voice_en[0] + '\n');
+    fs.writeFileSync(path.join(dir, 'compositions', 'cta.html'), scene(['SUBSCRIBE', 'TELEGRAMCHANNEL', 'LINKINBIO']));
+    assert.equal(ctaRulesFor(dir).R.headline, 'SUBSCRIBE'); const legacy = checkCta(dir); assert.equal(legacy.ok, true, legacy.problems.join('; '));
+  } finally { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); }
+});

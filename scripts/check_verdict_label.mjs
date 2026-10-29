@@ -10,6 +10,9 @@ import { getExperiment } from './experiment.mjs';
 
 export const VERDICT_LABEL = { after: 0.6 };
 // Английская версия: те же ярлыки (myth, fake, false, lie, debunked), слово true только не в вопросе («Is that true?» остаётся: это вопрос, а не метка)
+// Английское обещание файла («a free file with the thirty most popular myths»): «myths» называет содержимое файла, а не вердикт (как русское «файл с … мифами»).
+export const LEADMAGNET_RE_EN = /\bfiles?\s+(?:with|of|on)\s+(?:[a-z0-9'’-]+\s+){0,6}?myths\b/gi;      // только множественное «myths»: штамп MYTH (единственное число) рядом с обещанием остаётся вердиктом
+export const stripLeadMagnetEn = (text) => String(text == null ? '' : text).replace(LEADMAGNET_RE_EN, ' ');
 export const VERDICT_RE_EN = /(?<![a-z])(?:myths?|debunk[a-z]*|fake|false|falsehood|lies|lie|untrue|busted|bunk)(?![a-z])|(?<![a-z])true(?![a-z])(?!\s*[?])/i;
 const strip = (html) => html.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<head[\s\S]*?<\/head>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 // Текст, который сцена собирает скриптом: строки в кавычках с ярлыком ЗАГЛАВНЫМИ (так набираются штампы), код вокруг не читаем: он даст ложные срабатывания.
@@ -25,7 +28,7 @@ export function sceneList(html) {
   }
   return out;
 }
-const word = (raw, re = VERDICT_RE) => { const text = re === VERDICT_RE ? stripLeadMagnet(raw) : raw, m = re.exec(text); return m ? text.slice(Math.max(0, m.index - 12), m.index + 28).trim() : null; };
+const word = (raw, re = VERDICT_RE) => { const text = re === VERDICT_RE ? stripLeadMagnet(raw) : stripLeadMagnetEn(raw), m = re.exec(text); return m ? text.slice(Math.max(0, m.index - 12), m.index + 28).trim() : null; };
 
 /** Возвращает { ok, problems[], checked }. Проект без index.html или без сцен не проверяется (старые ролики, тесты). */
 export function checkVerdictLabels(proj, { after = VERDICT_LABEL.after } = {}) {
