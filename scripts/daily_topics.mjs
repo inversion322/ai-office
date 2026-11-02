@@ -14,6 +14,9 @@ export const CHANNELS = {
   med_detective: {
     name: 'Медицинский детектив', office: 'smm', tg: 'med_detective_ru', active: true, count: 6,
     brief: 'Научно-популярный канал о повседневном здоровье и теле для широкой русскоязычной аудитории 18-45 лет: бытовые мифы и странные «советы из интернета» в формате лёгкого расследования, разбор по первоисточникам (PubMed, Cochrane, ВОЗ, Mayo Clinic). Рубрика «Миф»: популярное заблуждение о здоровье. НЕ про тяжёлые болезни, лечение и препараты (рак, инфаркт, диабет и т.п.) и не для пожилых пациентов. Без лечебных советов, дозировок, брендов и рецептурных препаратов.',
+    // Стиль обложек постов (решение Ника 2026-11-02): клауза идёт в каждый запрос генерации как идентичность канала (coverPrompt: «Match the channel's established cover identity…»)
+    coverStyle: 'everyday health myths investigated with a light, friendly detective mood: realistic editorial photography, one clear everyday subject, clean light background, soft daylight, calm muted colors, a subtle investigative detail (magnifying glass, dossier, map pin) only when it fits naturally — never cartoon, never dark noir',
+    palette: 'light background, calm muted tones, one restrained accent color',
   },
   // ai_blog: { name: 'Блог про ИИ и автоматизацию', active: false, … }   // подключается Ником через несколько дней (docs/IDEA_multi_channel_office.md)
 };

@@ -71,3 +71,16 @@ test('запрос картинки: правки владельца идут о
   assert.match(withEdits, /Art director's corrections[^\n]*override the scene above[^\n]*светлее \| a \| b \| c \| d\./); assert.doesNotMatch(withEdits, /без банки/, 'старее пяти правок отбрасывается');
   assert.match(P.coverPrompt({ scene: 's', text_on_image: 'Что внутри?' }, { edits: ['крупнее'] }), /Render exactly this short Russian text[^\n]*Что внутри\?[\s\S]*крупнее/);
 });
+
+test('идентичность обложек канала: в конфиге «Медицинского детектива» есть стиль и палитра, они попадают в запрос обложки и в обе ветки конвейера', async () => {
+  const { CHANNELS } = await import('../scripts/daily_topics.mjs');
+  assert.ok(CHANNELS.med_detective.coverStyle && /investigat/i.test(CHANNELS.med_detective.coverStyle), 'клауза стиля канала есть и про детективное расследование');
+  assert.ok(/never cartoon/i.test(CHANNELS.med_detective.coverStyle), 'мультяшность прямо запрещена (раньше детективный мотив рисовался мультяшкой)');
+  assert.ok(CHANNELS.med_detective.palette);
+  const pr = P.coverPrompt({ scene: 'a cup', mood: 'calm' }, { styleClause: CHANNELS.med_detective.coverStyle, palette: CHANNELS.med_detective.palette });
+  assert.match(pr, /Match the channel's established cover identity: everyday health myths investigated/);
+  assert.match(pr, /Palette: light background, calm muted tones/);
+  const { channelsConfig } = await import('../scripts/studio_pipeline.mjs');
+  const ch = channelsConfig().med_detective;
+  assert.equal(ch.coverStyle, CHANNELS.med_detective.coverStyle, 'конвейер отдаёт клаузу в coverPrompt'); assert.equal(ch.palette, CHANNELS.med_detective.palette);
+});

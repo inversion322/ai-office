@@ -15,9 +15,9 @@ test('Ксения и Вера идут на профиль writer (Opus 5.5 med
   assert.deepEqual(Object.keys(PROFILE_OF).sort(), ['factcheck', 'scriptwriter']);
 });
 
-test('профиль writer настроен: модель claude-opus-5-5, усилие medium, обязательные скиллы Ксении на месте', { skip: !process.env.LOCALAPPDATA || !fs.existsSync(process.env.LOCALAPPDATA + '/hermes/profiles/writer/config.yaml') }, () => {
+test('профиль writer настроен: модель deepseek-v4-pro (Anthropic запрещён, решение Ника 2026-11-02), обязательные скиллы Ксении на месте', { skip: !process.env.LOCALAPPDATA || !fs.existsSync(process.env.LOCALAPPDATA + '/hermes/profiles/writer/config.yaml') }, () => {
   const dir = process.env.LOCALAPPDATA + '/hermes/profiles/writer', cfg = fs.readFileSync(dir + '/config.yaml', 'utf8');
-  assert.match(cfg, /^\s{2}default: \"claude-opus-5-5\"/m); assert.match(cfg, /^\s{2}reasoning_effort: \"medium\"/m);
+  assert.match(cfg, /^\s{2}default: "deepseek-v4-pro"/m); assert.match(cfg, /^\s{2}provider: "deepseek"/m);
   for (const rel of ['creative/short-video-script-craft', 'creative/storytelling', 'creative/storytelling-hooks', 'creative/humanizer']) assert.ok(fs.existsSync(dir + '/skills/' + rel + '/SKILL.md'), 'нет у writer: ' + rel);
 });
 
