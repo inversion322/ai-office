@@ -55,12 +55,12 @@ test('запрос обложки: без лиц и логотипов, текс
   assert.match(a, /Do not write any text/); assert.match(a, /No real people faces/); assert.match(b, /«Плацебо\?»/); assert.match(b, /navy and orange/); assert.doesNotMatch(b, /Do not write any text/);
 });
 
-test('стиль обложки (перенос из WorkFlow AI): по умолчанию фотореализм, названный стиль подставляет свою клаузу, неизвестный стиль и регистр не ломают; хвост качества стоит всегда', () => {
+test('стиль обложки: по умолчанию мультяшный (решение Ника 2026-11-02), названный стиль подставляет свою клаузу, неизвестный стиль и регистр не ломают; хвост качества стоит всегда', () => {
   const d = P.coverPrompt({ scene: 'A glass of water and a vinegar bottle on a kitchen table, morning light', mood: 'calm' });
-  assert.match(d, /^A glass of water[^\n]*morning light\. Mood: calm\. Style: Professional photograph, photo-realistic rendering, sharp focus, editorial lighting, natural colors, high detail\./); assert.match(d, /Square 1:1 composition[^\n]*High quality, no artifacts\.$/);
-  assert.doesNotMatch(d, /Editorial cover illustration|cartoon/i, 'мультяшки и «иллюстрации» по умолчанию нет');
+  assert.match(d, /^A glass of water[^\n]*morning light\. Mood: calm\. Style: Friendly cartoon illustration/); assert.match(d, /Square 1:1 composition[^\n]*High quality, no artifacts\.$/);
+  assert.match(d, /Style: Friendly cartoon illustration/, 'мультяшный стиль по умолчанию (решение Ника 2026-11-02)'); assert.doesNotMatch(d, /Editorial cover illustration/);
   assert.match(P.coverPrompt({ scene: 's', style: 'Cartoon' }), /Style: Friendly cartoon illustration/); assert.match(P.coverPrompt({ scene: 's', style: 'minimalist' }), /Style: Minimalist geometric composition/);
-  assert.match(P.coverPrompt({ scene: 's', style: 'oil painting' }), /Style: Professional photograph/, 'неизвестный стиль = фото'); assert.equal(P.normalizeCoverStyle(undefined), 'photo'); assert.deepEqual(Object.keys(P.COVER_STYLES), ['photo', 'illustration', 'infographic', 'cartoon', 'minimalist', 'poster']);
+  assert.match(P.coverPrompt({ scene: 's', style: 'oil painting' }), /Style: Friendly cartoon illustration/, 'неизвестный стиль = мультяшный по умолчанию'); assert.equal(P.normalizeCoverStyle(undefined), 'cartoon'); assert.deepEqual(Object.keys(P.COVER_STYLES), ['photo', 'illustration', 'infographic', 'cartoon', 'minimalist', 'poster']);
   assert.match(P.coverPrompt({ scene: 's' }, { styleClause: 'warm paper textures' }), /Match the channel's established cover identity: warm paper textures Keep visual consistency/);
   assert.match(P.coverPrompt({}), /^A calm, concrete real-world still life/, 'пустой сценарий не даёт пустого запроса');
 });
@@ -75,12 +75,22 @@ test('запрос картинки: правки владельца идут о
 test('идентичность обложек канала: в конфиге «Медицинского детектива» есть стиль и палитра, они попадают в запрос обложки и в обе ветки конвейера', async () => {
   const { CHANNELS } = await import('../scripts/daily_topics.mjs');
   assert.ok(CHANNELS.med_detective.coverStyle && /investigat/i.test(CHANNELS.med_detective.coverStyle), 'клауза стиля канала есть и про детективное расследование');
-  assert.ok(/never cartoon/i.test(CHANNELS.med_detective.coverStyle), 'мультяшность прямо запрещена (раньше детективный мотив рисовался мультяшкой)');
+  assert.ok(/cartoon/i.test(CHANNELS.med_detective.coverStyle) && /at a glance/i.test(CHANNELS.med_detective.coverStyle), 'стиль канала мультяшный и тема поста узнаваема сразу (решение Ника 2026-11-02)');
   assert.ok(CHANNELS.med_detective.palette);
   const pr = P.coverPrompt({ scene: 'a cup', mood: 'calm' }, { styleClause: CHANNELS.med_detective.coverStyle, palette: CHANNELS.med_detective.palette });
-  assert.match(pr, /Match the channel's established cover identity: everyday health myths investigated/);
-  assert.match(pr, /Palette: light background, calm muted tones/);
+  assert.match(pr, /Match the channel's established cover identity: friendly cartoon cover for a light health-myth investigation/);
+  assert.match(pr, /Palette: warm cheerful palette/);
   const { channelsConfig } = await import('../scripts/studio_pipeline.mjs');
   const ch = channelsConfig().med_detective;
   assert.equal(ch.coverStyle, CHANNELS.med_detective.coverStyle, 'конвейер отдаёт клаузу в coverPrompt'); assert.equal(ch.palette, CHANNELS.med_detective.palette);
+});
+
+test('заголовок на обложке обязателен (решение Ника 2026-11-02): из названия темы делается краткий до 40 знаков без обрыва слова', () => {
+  assert.equal(P.headlineFrom('Правда ли, что полный запрет на сладкое только усиливает тягу к нему?'), 'Правда ли, что полный запрет на сладкое');
+  assert.equal(P.headlineFrom('Кофе и сон'), 'Кофе и сон');
+  assert.equal(P.headlineFrom('   '), '');
+  const pr = P.coverPrompt({ scene: 'a cup', style: 'cartoon', text_on_image: '' }, {});
+  assert.doesNotMatch(pr, /Render exactly/, 'без заголовка подсказка текста не появится сама');
+  const withFallback = P.coverPrompt({ scene: 'a cup', style: 'cartoon', text_on_image: P.headlineFrom('Правда ли, что полный запрет на сладкое только усиливает тягу к нему?') });
+  assert.match(withFallback, /Render exactly this short Russian text[^\n]*Правда ли, что полный запрет на сладкое/);
 });

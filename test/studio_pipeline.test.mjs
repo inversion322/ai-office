@@ -220,7 +220,7 @@ test('пост: автор → код → редактор → обложка �
   assert.match(log.lastPrompt, /magnifying glass/);
   // качество обложки (перенос из WorkFlow AI, 2026-10-28): арт-директорские правила в задании автора и клауза фотореализма в запросе к fal.ai
   assert.match(author1.task, /БРИФ ОБЛОЖКИ[\s\S]*КОНКРЕТНЫЙ предмет[\s\S]*photo \| illustration \| infographic \| cartoon \| minimalist \| poster/); assert.match(author1.task, /Не вставляй в каждую обложку «фирменную атрибутику»/);
-  assert.match(log.lastPrompt, /Style: Professional photograph, photo-realistic rendering/); assert.match(log.lastPrompt, /High quality, no artifacts\.$/); assert.doesNotMatch(log.lastPrompt, /Editorial cover illustration/);
+  assert.match(log.lastPrompt, /Style: Friendly cartoon illustration/); assert.match(log.lastPrompt, /High quality, no artifacts\.$/); assert.doesNotMatch(log.lastPrompt, /Editorial cover illustration/);
 });
 /* ---- только картинка: текст согласован и остаётся, меняется изображение по правкам Ника ---- */
 const artist = (brief) => async (o) => { if (o.label === 'cover_brief') fs.writeFileSync(o.outFile, JSON.stringify(brief)); };
@@ -237,8 +237,8 @@ test('картинка: текст поста остаётся байт в ба�
   assert.equal(after.text, before.text); assert.equal(after.html, before.html); assert.deepEqual(after.notes, before.notes, 'текст, разметка и замечания не тронуты');
   const run = log.runs.slice(runs0).find((x) => x.label === 'cover_brief'); assert.equal(run.agentId, 'tg_artist'); assert.equal(run.profile, 'studio_text');
   assert.match(run.task, /ТОЛЬКО картинку[\s\S]*текст поста менять нельзя/); assert.match(run.task, /убери банку, пусть будет лупа над чашкой кофе/); assert.match(run.task, /a magnifying glass over a pill/, 'прежний сценарий передан');
-  assert.deepEqual(after.brief, { scene: 'a magnifying glass over a coffee cup', style: 'photo', mood: 'calm', text_on_image: '' }, 'стиль не назван художником: остаётся фотореализм по умолчанию'); assert.deepEqual(after.cover_edits, ['убери банку, пусть будет лупа над чашкой кофе']);
-  assert.match(log.lastPrompt, /Art director's corrections[^\n]*убери банку, пусть будет лупа над чашкой кофе/); assert.match(log.lastPrompt, /a magnifying glass over a coffee cup/); assert.match(log.lastPrompt, /Do not write any text, letters or numbers/, 'без текста на картинке, пока Ник его не просил');
+  assert.deepEqual(after.brief, { scene: 'a magnifying glass over a coffee cup', style: 'cartoon', mood: 'calm', text_on_image: '' }, 'стиль, не названный художником, нормализуется в мультяшный по умолчанию (решение Ника 2026-11-02)'); assert.deepEqual(after.cover_edits, ['убери банку, пусть будет лупа над чашкой кофе']);
+  assert.match(log.lastPrompt, /Art director's corrections[^\n]*убери банку, пусть будет лупа над чашкой кофе/); assert.match(log.lastPrompt, /a magnifying glass over a coffee cup/); assert.match(log.lastPrompt, /Render exactly this short Russian text[^\n]*«Быстрая ходьба продлевает жизнь\?»/, 'заголовок из темы поста подставлен на обложку даже без просьбы (решение Ника 2026-11-02)');
   assert.ok(fs.existsSync(after.cover) && fs.existsSync(path.join(path.dirname(file), 'covers', 'v1.jpg')), 'прежняя картинка сохранена'); assert.equal(S.slotOf(S.loadPlan(date, 'med'), 'post1').status, 'preview'); assert.equal(S.slotOf(S.loadPlan(date, 'med'), 'post1').cover, after.cover);
   assert.equal(log.photos.length, n0 + 1, 'в чат ушла только новая картинка'); const card = log.notify.at(-1); assert.match(card.t, /Текст остался прежним, как вы его согласовали[\s\S]*убери банку/); assert.match(card.t, /версия 1/);
   const d = btnData(card.b); assert.deepEqual(d, [`spost:med:${date}:post1:ok`, `spost:med:${date}:post1:edit`, `spost:med:${date}:post1:pic`, `spost:med:${date}:post1:pic0`, `spost:med:${date}:post1:drop`]);

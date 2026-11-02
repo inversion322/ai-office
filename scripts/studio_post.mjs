@@ -67,7 +67,7 @@ export const COVER_STYLES = {
   minimalist: 'Minimalist geometric composition, flat colors, generous negative space, muted pastel palette, simple shapes, calm and refined',
   poster: 'Dramatic cinematic poster, bold composition, atmospheric lighting, strong color grading, magazine-cover style, sense of scale',
 };
-export const COVER_STYLE_DEFAULT = 'photo';
+export const COVER_STYLE_DEFAULT = 'cartoon';      // решение Ника 2026-11-02: стиль канала мультяшный (photo только по просьбе владельца)
 export const normalizeCoverStyle = (s) => { const k = String(s || '').toLowerCase().trim(); return Object.prototype.hasOwnProperty.call(COVER_STYLES, k) ? k : COVER_STYLE_DEFAULT; };
 
 /** Запрос обложки для fal.ai (Nano Banana Pro читает кириллицу). Без лиц реальных людей, без текста, если он не нужен. */
@@ -87,6 +87,14 @@ export function coverPrompt(brief = {}, { palette = '', styleClause = '', edits 
     'Square 1:1 composition, the key subject centered with safe margins. High quality, no artifacts.',
   ];
   return parts.filter(Boolean).join(' ');
+}
+
+/** Краткий заголовок для обложки из названия темы (запас, когда автор не дал свой): до 40 знаков, без обрыва на полуслове. */
+export function headlineFrom(title) {
+  let s = String(title || '').trim();
+  if (s.length <= 40) return s;
+  const cut = s.slice(0, 40); const sp = cut.lastIndexOf(' ');
+  return (sp > 8 ? cut.slice(0, sp) : cut).trim();
 }
 
 /** Всё, что нужно показать Нику в превью: проверяем форму перед карточкой. */
