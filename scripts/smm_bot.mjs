@@ -4,7 +4,8 @@
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, OWNER, tg, api, videos, sleep, topicsMessage, notify } from './smm_lib.mjs';
+import { ROOT, OWNER, tg, tgBase, api, videos, sleep, topicsMessage, notify } from './smm_lib.mjs';
+import { readBotToken } from './menu_button.mjs';
 
 const lock = net.createServer();
 lock.on('error', () => { console.log('smm_bot уже запущен'); process.exit(0); });
@@ -46,11 +47,18 @@ async function onMessage(m) {
   await api('/api/chat/incoming', { text, source: 'telegram' });
 }
 
+// getUpdates отдельным запросом с таймаутом: зависшее соединение (обрыв сети посреди long poll) раньше морозило цикл навсегда —
+// процесс оставался жив, кнопки переставали работать без единой ошибки в логе (так было 2026-11-02 после сбоя сети утром).
+const getUpdates = async (body) => {
+  const r = await fetch(`${tgBase()}/bot${readBotToken(path.join(ROOT, 'server', 'data'))}/getUpdates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(70000) });
+  return r.json();
+};
+
 async function main() {
   console.log('smm_bot: слушаю @NickG_smm_bot');
   for (;;) {
     try {
-      const r = await tg('getUpdates', { offset: state.offset, timeout: 50, allowed_updates: ['message', 'callback_query'] });
+      const r = await getUpdates({ offset: state.offset, timeout: 50, allowed_updates: ['message', 'callback_query'] });
       if (!r.ok) { console.error('getUpdates:', r.description); await sleep(15000); continue; }
       for (const u of r.result) {
         state.offset = u.update_id + 1; save();
